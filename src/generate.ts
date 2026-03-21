@@ -31,10 +31,10 @@ generateRoutes.post("/", async (c) => {
     }, 503);
   }
 
-  // mark as generating
+  // mark as generating (no HTML stored yet — r2_key null during generation)
   await c.env.DB.prepare(
-    `INSERT INTO dispatches (user_id, week_key, html, generated_at) VALUES (?, 'generating', '...generating...', unixepoch())
-     ON CONFLICT(user_id) DO UPDATE SET week_key='generating', html='...generating...', generated_at=unixepoch()`
+    `INSERT INTO dispatches (user_id, week_key, r2_key, generated_at) VALUES (?, 'generating', NULL, unixepoch())
+     ON CONFLICT(user_id) DO UPDATE SET week_key='generating', r2_key=NULL, generated_at=unixepoch()`
   ).bind(user.id).run();
 
   // delegate to callbot server (no CPU time limit there)
@@ -558,7 +558,7 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   const html = buildHtml(copy, reposData, user.username, from, to, wk);
 
   // save
-  await saveDispatch(env.DB, user.id, user.username, html, from, to);
+  await saveDispatch(env.DB, env.DISPATCHES, user.id, user.username, html, from, to);
 
   // rough cost estimate: ~3K tokens LLM + images
   const llmCost = 0.003;
@@ -566,12 +566,18 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   return llmCost + imageCost;
 }
 
-async function saveDispatch(db: D1Database, userId: string, _username: string, html: string, _from: Date, to: Date): Promise<void> {
+async function saveDispatch(db: D1Database, r2: R2Bucket, userId: string, username: string, html: string, _from: Date, to: Date): Promise<void> {
   const jan1 = new Date(to.getFullYear(), 0, 1);
   const week = Math.ceil(((to.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
   const wk = `${to.getFullYear()}-W${String(week).padStart(2, "0")}`;
+  const r2Key = `dispatches/${username}/${wk}.html`;
+
+  // store HTML in R2
+  await r2.put(r2Key, html, { httpMetadata: { contentType: "text/html; charset=utf-8" } });
+
+  // store only metadata in D1
   await db.prepare(
-    `INSERT INTO dispatches (user_id, week_key, html, generated_at) VALUES (?, ?, ?, unixepoch())
-     ON CONFLICT(user_id) DO UPDATE SET week_key=excluded.week_key, html=excluded.html, generated_at=excluded.generated_at`
-  ).bind(userId, wk, html).run();
+    `INSERT INTO dispatches (user_id, week_key, r2_key, generated_at) VALUES (?, ?, ?, unixepoch())
+     ON CONFLICT(user_id) DO UPDATE SET week_key=excluded.week_key, r2_key=excluded.r2_key, generated_at=excluded.generated_at`
+  ).bind(userId, wk, r2Key).run();
 }

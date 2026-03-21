@@ -16,24 +16,39 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
   const viewer = await getUser(c);
   const isOwner = viewer?.username === username;
 
-  // look up dispatch directly by username — no login required to view
-  const dispatch = await c.env.DB.prepare(
-    `SELECT d.html, d.week_key, d.generated_at
+  // look up dispatch metadata directly by username — no login required to view
+  const dispatchMeta = await c.env.DB.prepare(
+    `SELECT d.r2_key, d.week_key, d.generated_at
      FROM dispatches d
      JOIN users u ON u.id = d.user_id
      WHERE u.username = ?`
-  ).bind(username).first<{ html: string; week_key: string; generated_at: number }>();
+  ).bind(username).first<{ r2_key: string | null; week_key: string; generated_at: number }>();
 
-  if (!dispatch) {
-    // check if user exists at all (to distinguish "no dispatch yet" from "unknown user")
+  if (!dispatchMeta || !dispatchMeta.r2_key) {
+    // check if user exists at all (to distinguish "no dispatch yet" vs still generating vs unknown)
     const userExists = await c.env.DB.prepare(
       `SELECT 1 FROM users WHERE username = ?`
     ).bind(username).first();
     if (!userExists) {
       return c.html(notFoundPage(username), 404);
     }
+    // either generating or never generated
+    if (dispatchMeta?.week_key === "generating") {
+      return c.html(generatingPage(username));
+    }
     return c.html(noDispatchPage(username, isOwner));
   }
+
+  // fetch HTML from R2
+  const r2obj = await c.env.DISPATCHES.get(dispatchMeta.r2_key);
+  if (!r2obj) {
+    return c.html(noDispatchPage(username, isOwner));
+  }
+  const dispatch = {
+    html: await r2obj.text(),
+    week_key: dispatchMeta.week_key,
+    generated_at: dispatchMeta.generated_at,
+  };
 
   // if stored HTML is a full document, inject the owner bar and serve directly
   if (dispatch.html.startsWith("<!DOCTYPE") || dispatch.html.startsWith("<html")) {
@@ -226,6 +241,19 @@ function noDispatchPage(username: string, isOwner: boolean): string {
     },5000);
   }
   </script>` : ""}
+  <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+</body></html>`;
+}
+
+function generatingPage(username: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>@${username} — gitzette</title>
+<meta http-equiv="refresh" content="10">
+<style>body{font-family:monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;}</style>
+</head><body>
+  <div style="font-size:32px;font-weight:700;">@${username}</div>
+  <div style="color:#666;">Generating dispatch... refreshing automatically.</div>
   <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
 </body></html>`;
 }

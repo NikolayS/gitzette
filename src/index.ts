@@ -7,6 +7,7 @@ import { pageRoutes } from "./pages";
 
 export interface Env {
   DB: D1Database;
+  DISPATCHES: R2Bucket;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   GITHUB_TOKEN: string;

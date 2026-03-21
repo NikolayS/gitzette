@@ -9,6 +9,10 @@ binding = "DB"
 database_name = "gitzette-db"
 database_id = "4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
 
+[[r2_buckets]]
+binding = "DISPATCHES"
+bucket_name = "gitzette-dispatches"
+
 [vars]
 WEEKLY_REGEN_LIMIT = "3"
 MONTHLY_LLM_BUDGET_USD = "50"
