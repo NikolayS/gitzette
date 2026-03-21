@@ -118,11 +118,11 @@ function dispatchFooter(username: string, week_key: string, prevWeekKey?: string
       <a href="/${username}" style="color:#0f0f0f;text-decoration:underline;">@${username} on gitzette</a>
       <a href="https://github.com/${username}" target="_blank" rel="noopener" style="color:#0f0f0f;text-decoration:underline;">@${username} on GitHub</a>
     </div>
-    <!-- Row 2: Share links — muted, right-aligned -->
-    <div style="max-width:900px;margin:0 auto;padding:6px 24px 14px;font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;flex-wrap:wrap;gap:4px 20px;align-items:center;justify-content:flex-end;color:#888;">
+    <!-- Row 2: Share links — muted, right-aligned on desktop / left-aligned on mobile (#52) -->
+    <div style="max-width:900px;margin:0 auto;padding:6px 24px 14px;font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;flex-wrap:wrap;gap:4px 20px;align-items:center;color:#888;">
       <span>share:</span>
-      <a href="${xUrl}" target="_blank" rel="noopener" style="color:#888;text-decoration:none;">post on X</a>
-      <a href="${liUrl}" target="_blank" rel="noopener" style="color:#888;text-decoration:none;">share on LinkedIn</a>
+      <a href="${xUrl}" target="_blank" rel="noopener" style="color:#888;text-decoration:none;padding:8px 0;min-height:44px;display:inline-flex;align-items:center;">post on X</a>
+      <a href="${liUrl}" target="_blank" rel="noopener" style="color:#888;text-decoration:none;padding:8px 0;min-height:44px;display:inline-flex;align-items:center;">share on LinkedIn</a>
     </div>
   </div>
   ${ctaFooter()}
@@ -164,6 +164,24 @@ function extractDeck(html: string): string {
 function extractFirstImg(html: string): string {
   const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
   return m ? m[1] : "";
+}
+
+/**
+ * Fix unclosed <a class="headline-link"> tags inside headings in legacy dispatch HTML.
+ * Legacy dispatches have: <h1><a href="..." class="headline-link">text</h1>
+ * Should be:              <h1><a href="..." class="headline-link">text</a></h1>
+ * Fixes #49.
+ */
+function fixUnclosedHeadlineLinks(html: string): string {
+  // Match heading tags that contain an unclosed headline-link anchor
+  return html.replace(
+    /(<h[123][^>]*>)(<a[^>]+class="headline-link"[^>]*>)([\s\S]*?)(<\/h[123]>)/g,
+    (_match, open, anchor, text, close) => {
+      // If the text already contains </a>, don't double-close
+      if (text.includes("</a>")) return _match;
+      return `${open}${anchor}${text}</a>${close}`;
+    }
+  );
 }
 
 /** Build OG + Twitter Card meta tags for a dispatch page. */
@@ -218,9 +236,12 @@ async function fetchAndServeDispatch(
   const ogTags = buildDispatchOGTags(html, username, week_key);
 
   // Image overflow guard — injected into every served dispatch document
-  const IMG_FIX_STYLE = `${ogTags}\n${headTags()}<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}/* normalize old broadsheet layout (#24) */.broadsheet-wrap{display:block!important;}.broadsheet-left{display:none!important;}.broadsheet-right{width:100%!important;max-width:960px!important;margin:0 auto!important;}/* hide page-2 sidebar from old broadsheet HTML on all screen sizes */@media(min-width:1400px){.broadsheet-wrap{display:block!important;max-width:960px!important;margin:32px auto!important;}.broadsheet-wrap .paper.page-2{display:none!important;}.broadsheet-wrap .paper{flex:none!important;max-width:100%!important;margin:0!important;}}</style>`;
+  const IMG_FIX_STYLE = `${ogTags}\n${headTags()}<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}/* normalize old broadsheet layout (#24) */.broadsheet-wrap{display:block!important;}.broadsheet-left{display:none!important;}.broadsheet-right{width:100%!important;max-width:960px!important;margin:0 auto!important;}/* hide page-2 sidebar from old broadsheet HTML on all screen sizes */@media(min-width:1400px){.broadsheet-wrap{display:block!important;max-width:960px!important;margin:32px auto!important;}.broadsheet-wrap .paper.page-2{display:none!important;}.broadsheet-wrap .paper{flex:none!important;max-width:100%!important;margin:0!important;}}/* override legacy --link blue (#50) */body{--link:var(--ink,#0f0f0f)!important;}</style>`;
 
-  if (html.startsWith("<!DOCTYPE") || html.startsWith("<html")) {
+  // Fix unclosed <a class="headline-link"> tags in legacy dispatch HTML (#49)
+  const processedHtml = fixUnclosedHeadlineLinks(html);
+
+  if (processedHtml.startsWith("<!DOCTYPE") || processedHtml.startsWith("<html")) {
     const breadcrumb = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow:hidden;">
           <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;border:none;">gitzette</a>
           <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
@@ -268,14 +289,14 @@ async function fetchAndServeDispatch(
         </div>
         <div style="min-height:40px;"></div>`;
 
-    const out = html
+    const out = processedHtml
       .replace("</head>", `${IMG_FIX_STYLE}</head>`)
       .replace("<body>", `<body>${ownerBar}`)
       .replace("</body>", `${dispatchFooter(username, week_key, prevExists ? prevKey : null, nextExists ? nextKey : null)}</body>`);
     return c.html(out);
   }
 
-  return c.html(dispatchPage(username, { html, week_key, generated_at }, isOwner));
+  return c.html(dispatchPage(username, { html: processedHtml, week_key, generated_at }, isOwner));
 }
 
 function userProfilePage(
@@ -509,6 +530,7 @@ ${headTags()}
   body { font-family: 'IBM Plex Serif', Georgia, serif; background: var(--paper); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
   a { color: var(--ink); text-decoration: none; }
   .hero { width: 100%; max-width: 760px; margin: 64px auto 0; padding: 0 20px; box-sizing: border-box; }
+  @media (max-width: 640px) { .hero { margin-top: 28px; } }
   .masthead { font-family: 'Playfair Display', serif; font-weight: 900; font-style: italic; font-size: clamp(52px, 13vw, 100px); line-height: 1; }
   .tagline { font-size: clamp(15px, 2.5vw, 20px); color: var(--muted); margin: 16px 0 32px; font-style: italic; }
   .form-row { display: flex; gap: 0; max-width: 100%; }
