@@ -12,6 +12,7 @@ database_id = "4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
 [vars]
 WEEKLY_REGEN_LIMIT = "3"
 MONTHLY_LLM_BUDGET_USD = "50"
+NEWSPAPERIFY_URL = "https://test-callbot.samo.team/newspaperify"
 
 # secrets (set via: wrangler secret put GITHUB_CLIENT_SECRET etc.)
 # GITHUB_CLIENT_SECRET

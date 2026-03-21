@@ -15,6 +15,8 @@ export interface Env {
   SESSION_SECRET: string;
   WEEKLY_REGEN_LIMIT: string;
   MONTHLY_LLM_BUDGET_USD: string;
+  NEWSPAPERIFY_URL: string;
+  NEWSPAPERIFY_SECRET: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

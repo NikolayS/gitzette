@@ -5,7 +5,8 @@ import type { Env } from "./index";
 
 export const generateRoutes = new Hono<{ Bindings: Env }>();
 
-// POST /generate — trigger dispatch generation for the signed-in user
+// ── route handlers ────────────────────────────────────────────────────────────
+
 generateRoutes.post("/", async (c) => {
   const user = await getUser(c);
   if (!user) return c.json({ error: "not authenticated" }, 401);
@@ -13,158 +14,541 @@ generateRoutes.post("/", async (c) => {
   const weeklyLimit = parseInt(c.env.WEEKLY_REGEN_LIMIT ?? "3");
   const monthlyBudget = parseFloat(c.env.MONTHLY_LLM_BUDGET_USD ?? "50");
 
-  // check user quota
   const quota = await checkUserQuota(c.env.DB, user.id, weeklyLimit);
   if (!quota.allowed) {
     return c.json({
       error: "weekly_limit_reached",
       message: `You've used all ${quota.limit} generations this week. Resets Monday.`,
-      used: quota.used,
-      limit: quota.limit,
+      used: quota.used, limit: quota.limit,
     }, 429);
   }
 
-  // check global budget
   const budget = await checkGlobalBudget(c.env.DB, monthlyBudget);
   if (!budget.allowed) {
     return c.json({
       error: "global_budget_reached",
       message: "Monthly generation capacity is full. Try again next month.",
-      spentUsd: budget.spentUsd,
-      budgetUsd: budget.budgetUsd,
     }, 503);
   }
 
-  // kick off generation (async — respond immediately, poll for result)
-  // using waitUntil so the worker doesn't time out on the client
-  const ctx = c.executionCtx;
-  ctx.waitUntil(runGeneration(c.env, user));
-
-  return c.json({ status: "queued", message: "Generation started. Check back in ~60 seconds." });
+  try {
+    const costUsd = await runGeneration(c.env, user);
+    await recordGeneration(c.env.DB, user.id);
+    await recordSpend(c.env.DB, costUsd);
+    return c.json({ status: "done", message: "Generated! Reload the page." });
+  } catch (err: any) {
+    console.error("generation error:", err);
+    return c.json({ status: "error", message: err?.message ?? "Unknown error" }, 500);
+  }
 });
 
-// GET /generate/status — poll for latest dispatch
 generateRoutes.get("/status", async (c) => {
   const user = await getUser(c);
   if (!user) return c.json({ error: "not authenticated" }, 401);
-
   const row = await c.env.DB.prepare(
     `SELECT week_key, generated_at FROM dispatches WHERE user_id = ?`
   ).bind(user.id).first<{ week_key: string; generated_at: number }>();
-
   if (!row) return c.json({ status: "none" });
   return c.json({ status: "ready", week_key: row.week_key, generated_at: row.generated_at });
 });
 
-async function runGeneration(env: Env, user: { id: string; username: string }): Promise<void> {
+// ── types ─────────────────────────────────────────────────────────────────────
+
+interface Release { tag: string; name: string; date: string; body: string; url: string; }
+interface PR { number: number; title: string; state: "open" | "merged"; date: string; url: string; author: string; }
+interface RepoData {
+  name: string; description: string | null; url: string; stars: number;
+  releases: Release[]; mergedPRs: PR[]; openPRs: PR[];
+  commitCount: number; demoImages: string[];
+}
+
+// ── github api ────────────────────────────────────────────────────────────────
+
+async function ghGet(path: string, token: string): Promise<any> {
+  const res = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "gitzette.online",
+    },
+  });
+  if (!res.ok) throw new Error(`GitHub ${res.status}: ${path}`);
+  return res.json();
+}
+
+async function getReadmeImages(owner: string, repo: string, token: string, newspaperifyUrl: string, secret: string): Promise<string[]> {
   try {
-    // date range: last 7 days
-    const to = new Date();
-    const from = new Date(to.getTime() - 7 * 86400 * 1000);
-    const fromStr = from.toISOString().slice(0, 10);
-    const toStr = to.toISOString().slice(0, 10);
-
-    // scan public repos via server-side token
-    const scanRes = await fetch(
-      `https://api.github.com/users/${user.username}/repos?per_page=100&sort=pushed`,
-      { headers: { "Authorization": `Bearer ${env.GITHUB_TOKEN}`, "User-Agent": "gitzette.online" } }
-    );
-    const repos = await scanRes.json() as Array<{ name: string; private: boolean; fork: boolean }>;
-    const publicRepos = repos.filter(r => !r.private && !r.fork).map(r => r.name);
-
-    if (publicRepos.length === 0) {
-      await saveDispatch(env.DB, user.id, "<p>No public activity this week.</p>");
-      return;
+    const readme = await ghGet(`/repos/${owner}/${repo}/readme`, token);
+    const content = atob(readme.content.replace(/\n/g, ""));
+    const defaultBranch = "main";
+    const matches = [...content.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)];
+    const skipPatterns = [/shields\.io/, /badge/i, /codecov/, /actions/, /img\.shields/, /badgen/, /\.gif$/i];
+    const images: string[] = [];
+    for (const [, alt, url] of matches) {
+      if (skipPatterns.some(p => p.test(url) || p.test(alt))) continue;
+      let resolved = url;
+      if (!url.startsWith("http")) {
+        resolved = `https://raw.githubusercontent.com/${owner}/${repo}/${defaultBranch}/${url.replace(/^\.\//, "")}`;
+      }
+      try {
+        const npRes = await fetch(`${newspaperifyUrl}?url=${encodeURIComponent(resolved)}&secret=${secret}`);
+        if (npRes.ok) {
+          const data: any = await npRes.json();
+          if (data.image) { images.push(data.image); break; }
+        }
+      } catch { /* skip */ }
     }
-
-    // collect commits/PRs per repo for the week
-    const repoData = await collectActivity(env, user.username, publicRepos, fromStr, toStr);
-
-    // generate copy via LLM
-    const { html, costUsd } = await generateHtml(env, user.username, repoData, fromStr, toStr);
-
-    // record quota + spend
-    await recordGeneration(env.DB, user.id);
-    await recordSpend(env.DB, costUsd);
-
-    // save dispatch
-    await saveDispatch(env.DB, user.id, html);
-  } catch (err) {
-    console.error("generation failed for", user.username, err);
-  }
+    return images.slice(0, 1);
+  } catch { return []; }
 }
 
-async function collectActivity(
-  env: Env,
-  username: string,
-  repos: string[],
-  from: string,
-  to: string
-): Promise<Array<{ repo: string; commits: number; prs: number }>> {
-  const results = [];
-  for (const repo of repos.slice(0, 20)) { // cap at 20 repos
+async function getRepoData(owner: string, repo: string, from: Date, to: Date, token: string, newspaperifyUrl: string, secret: string): Promise<RepoData | null> {
+  try {
+    const info = await ghGet(`/repos/${owner}/${repo}`, token);
+    const allReleases = await ghGet(`/repos/${owner}/${repo}/releases?per_page=20`, token);
+    const releases: Release[] = allReleases
+      .filter((r: any) => { const d = new Date(r.published_at); return d >= from && d <= to; })
+      .map((r: any) => ({ tag: r.tag_name, name: r.name || r.tag_name, date: r.published_at, body: (r.body || "").slice(0, 2000), url: r.html_url }));
+
+    const allPRs = await ghGet(`/repos/${owner}/${repo}/pulls?state=closed&per_page=50&sort=updated&direction=desc`, token);
+    const mergedPRs: PR[] = allPRs
+      .filter((p: any) => { if (!p.merged_at) return false; const d = new Date(p.merged_at); return d >= from && d <= to; })
+      .map((p: any) => ({ number: p.number, title: p.title, state: "merged" as const, date: p.merged_at, url: p.html_url, author: p.user?.login || "unknown" }));
+
+    const openPRsRaw = await ghGet(`/repos/${owner}/${repo}/pulls?state=open&per_page=50&sort=created&direction=desc`, token);
+    const openPRs: PR[] = openPRsRaw
+      .filter((p: any) => { const d = new Date(p.created_at); return d >= from && d <= to; })
+      .map((p: any) => ({ number: p.number, title: p.title, state: "open" as const, date: p.created_at, url: p.html_url, author: p.user?.login || "unknown" }));
+
+    let commitCount = 0;
     try {
-      const commitsRes = await fetch(
-        `https://api.github.com/repos/${username}/${repo}/commits?author=${username}&since=${from}T00:00:00Z&until=${to}T23:59:59Z&per_page=1`,
-        { headers: { "Authorization": `Bearer ${env.GITHUB_TOKEN}`, "User-Agent": "gitzette.online", "Accept": "application/vnd.github.v3+json" } }
-      );
-      // GitHub returns Link header with total; parse last page or count items
-      const commits = await commitsRes.json() as unknown[];
-      if (!Array.isArray(commits) || commits.length === 0) continue;
+      const commits = await ghGet(`/repos/${owner}/${repo}/commits?since=${from.toISOString()}&until=${to.toISOString()}&per_page=100`, token);
+      commitCount = Array.isArray(commits) ? commits.length : 0;
+    } catch { /* empty repo */ }
 
-      results.push({ repo, commits: commits.length, prs: 0 });
-    } catch { /* skip repo */ }
+    if (releases.length === 0 && mergedPRs.length === 0 && commitCount === 0) return null;
+
+    const demoImages = await getReadmeImages(owner, repo, token, newspaperifyUrl, secret);
+
+    return { name: repo, description: info.description, url: info.html_url, stars: info.stargazers_count ?? 0, releases, mergedPRs, openPRs, commitCount, demoImages };
+  } catch (err) {
+    console.error(`skipping ${repo}:`, err);
+    return null;
   }
-  return results;
 }
 
-async function generateHtml(
-  env: Env,
-  username: string,
-  repoData: Array<{ repo: string; commits: number; prs: number }>,
-  from: string,
-  to: string
-): Promise<{ html: string; costUsd: number }> {
-  const summary = repoData.map(r => `- ${r.repo}: ${r.commits} commits`).join("\n");
+// ── image generation ──────────────────────────────────────────────────────────
 
-  const prompt = `You are writing a weekly open-source digest for @${username} in newspaper style.
-Active repos this week (${from} to ${to}):
-${summary}
+async function generateIllustration(subject: string, googleKey: string, newspaperifyUrl: string, secret: string): Promise<string | null> {
+  const style = "Black and white editorial newspaper illustration, woodcut style, high contrast ink on paper. Subject: ";
+  const prompt = style + subject;
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict?key=${googleKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1, aspectRatio: "16:9" } }),
+      }
+    );
+    const data: any = await res.json();
+    if (data.predictions?.[0]?.bytesBase64Encoded) {
+      // run through newspaperify on callbot
+      const b64raw = data.predictions[0].bytesBase64Encoded;
+      const imgUrl = `data:image/png;base64,${b64raw}`;
+      // For base64 data URIs we post directly — pass as-is since callbot accepts URLs
+      // Instead, pass the raw bytes through the proxy via a special param
+      const npRes = await fetch(`${newspaperifyUrl}?secret=${secret}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ b64: b64raw }),
+      });
+      if (npRes.ok) {
+        const d: any = await npRes.json();
+        if (d.image) return d.image;
+      }
+      // fallback: return as-is
+      return imgUrl;
+    }
+  } catch (e) { console.warn("Imagen error:", e); }
+  return null;
+}
 
-Write a short, punchy HTML dispatch. Use dry wit. Short sentences. Active voice. No emoji.
-Return only the inner HTML content (no <html>/<body> wrapper) — articles as <article> tags with <h2> headlines.`;
+// ── llm copy ──────────────────────────────────────────────────────────────────
+
+async function generateCopy(reposData: RepoData[], from: Date, to: Date, owner: string, orKey: string): Promise<any> {
+  const dataJson = JSON.stringify(
+    reposData.map(r => ({
+      repo: r.name, description: r.description,
+      releases: r.releases.map(rel => ({ tag: rel.tag, date: rel.date, highlights: rel.body.slice(0, 2000) })),
+      mergedPRs: r.mergedPRs.slice(0, 10).map(p => ({ title: p.title, url: p.url, number: p.number })),
+      openPRs: r.openPRs.slice(0, 5).map(p => ({ title: p.title, url: p.url, number: p.number })),
+      commitCount: r.commitCount,
+    })), null, 2
+  );
+  const fromLabel = from.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  const toLabel = to.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+  const prompt = `You are writing the editorial copy for a weekly engineering newspaper called "the dispatch" — a digest of GitHub activity by @${owner}.
+
+Week of ${fromLabel} – ${toLabel}.
+
+STYLE RULES:
+- Punchy headlines, dry wit, newspaper voice
+- Strict with facts: never invent numbers, dates, or features not in the data
+- Headlines: specific, not generic. "rpg teaches EXPLAIN to read its own X-rays" not "rpg gets new features"
+- Short sentences. Active voice. No emoji. No markdown (no **bold**, no backticks).
+- Always call the author "@${owner}" — never full name or "the developer"
+- Project names always lowercase: "rpg" not "RPG", "sqlever" not "Sqlever"
+- When mentioning PRs, use inline HTML links: <a href="URL">#NUMBER</a>
+
+DATA:
+${dataJson}
+
+Return ONLY a JSON object (no markdown fences):
+{
+  "masthead": "the dispatch",
+  "tagline": "witty one-line tagline specific to this week",
+  "editionNote": "one sentence: e.g. 'Four releases, one leaked key, and a migration tool that arrived fully armed.'",
+  "articles": [
+    {
+      "repo": "repo name",
+      "headline": "punchy newspaper headline",
+      "deck": "one-sentence italic subheading",
+      "body": "2-4 sentence article body with specific features/PRs. Inline HTML links ok.",
+      "tag": "RELEASE | FEATURE | SECURITY | PENDING | COMMUNITY",
+      "illustrationPrompt": "10-15 word subject for editorial illustration (only if repo has no screenshots)"
+    }
+  ],
+  "closingNote": "dry one-liner sign-off"
+}`;
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Authorization": `Bearer ${orKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "anthropic/claude-haiku-4",
+      model: "anthropic/claude-sonnet-4-5",
+      max_tokens: 3000,
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 2000,
     }),
   });
-
-  const data = await res.json() as {
-    choices?: Array<{ message: { content: string } }>;
-    usage?: { prompt_tokens: number; completion_tokens: number };
-  };
-
-  const content = data.choices?.[0]?.message?.content ?? "<p>Generation failed.</p>";
-  // haiku ~$0.00025/1K input, $0.00125/1K output — rough estimate
-  const tokens = (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
-  const costUsd = (tokens / 1000) * 0.001;
-
-  return { html: content, costUsd };
+  if (!res.ok) throw new Error(`OpenRouter error: ${await res.text()}`);
+  const data: any = await res.json();
+  const raw = (data.choices[0].message.content ?? "").trim().replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
+  try { return JSON.parse(raw); } catch {
+    const m = raw.match(/\{[\s\S]+\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error(`LLM non-JSON: ${raw.slice(0, 200)}`);
+  }
 }
 
-async function saveDispatch(db: D1Database, userId: string, html: string): Promise<void> {
-  const { currentWeekKey } = await import("./quota");
-  const week = currentWeekKey();
+// ── data graphics ─────────────────────────────────────────────────────────────
+
+function buildDataGraphics(reposData: RepoData[], from: Date, to: Date): string {
+  const totalMerged = reposData.reduce((s, r) => s + r.mergedPRs.length, 0);
+  const totalOpen = reposData.reduce((s, r) => s + r.openPRs.length, 0);
+  const totalCommits = reposData.reduce((s, r) => s + r.commitCount, 0);
+  const totalReleases = reposData.reduce((s, r) => s + r.releases.length, 0);
+  const activeRepos = reposData.filter(r => r.commitCount > 0);
+  const maxCommits = Math.max(...activeRepos.map(r => r.commitCount), 1);
+
+  const ticker = `<div style="display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--rule);margin-bottom:20px;">
+    ${[[String(totalCommits),"commits"],[String(totalMerged+totalOpen),"pull requests"],[String(totalReleases),"releases"]]
+      .map(([val,label],i) => `<div style="padding:14px 10px 12px;${i<2?"border-right:1px solid var(--rule);":""}text-align:center;">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:clamp(28px,8vw,52px);font-weight:700;line-height:1;color:#333;">${val}</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:4px;">${label}</div>
+      </div>`).join("")}
+  </div>`;
+
+  const sorted = [...activeRepos].sort((a,b) => b.commitCount - a.commitCount);
+  const barH=18,barGap=7,labelW=110,chartW=240,numW=32;
+  const svgW=labelW+chartW+numW, svgH=sorted.length*(barH+barGap)+22;
+  const greys=["#555","#888","#999","#aaa","#bbb","#ccc","#ddd"];
+  const bars = sorted.map((r,i) => {
+    const bw = Math.max(3, Math.round((r.commitCount/maxCommits)*chartW));
+    const y = i*(barH+barGap)+18;
+    const fill = greys[Math.min(i,greys.length-1)];
+    return `<text x="${labelW-6}" y="${y+barH-4}" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="10" fill="${i===0?"#333":"#666"}" font-weight="${i===0?"600":"400"}">${r.name}</text>
+    <rect x="${labelW}" y="${y}" width="${bw}" height="${barH}" fill="${fill}" rx="1"/>
+    <text x="${labelW+bw+5}" y="${y+barH-4}" font-family="IBM Plex Mono,monospace" font-size="10" fill="#888">${r.commitCount}</text>`;
+  }).join("");
+
+  const commitChart = `<div style="margin-bottom:20px;">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">commits by repo</div>
+    <svg width="100%" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg">
+      <text x="0" y="11" font-family="IBM Plex Mono,monospace" font-size="8" fill="#ccc" letter-spacing="1">REPO</text>
+      <text x="${svgW}" y="11" font-family="IBM Plex Mono,monospace" font-size="8" fill="#ccc" text-anchor="end" letter-spacing="1">COMMITS</text>
+      <line x1="0" y1="14" x2="${svgW}" y2="14" stroke="#e8e4dc" stroke-width="0.5"/>
+      ${bars}
+    </svg>
+  </div>`;
+
+  const starredRepos = [...reposData].filter(r=>r.stars>0).sort((a,b)=>b.stars-a.stars);
+  const maxStars = Math.max(...starredRepos.map(r=>r.stars),1);
+  const STAR_COLS=10;
+  const starRows = starredRepos.map(r => {
+    const filled = Math.max(1,Math.round((r.stars/maxStars)*STAR_COLS));
+    const empty = STAR_COLS-filled;
+    return `<tr style="border-bottom:1px solid var(--rule);">
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:10px 12px 10px 0;white-space:nowrap;vertical-align:middle;"><a href="${r.url}" style="color:var(--ink);text-decoration:none;">${r.name}</a></td>
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:36px;letter-spacing:4px;line-height:1;vertical-align:middle;padding:12px 14px 12px 0;">${"★".repeat(filled)}<span style="color:#ddd;">${"☆".repeat(empty)}</span></td>
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:28px;font-weight:700;color:var(--ink);white-space:nowrap;vertical-align:middle;text-align:right;padding:12px 0;">${r.stars.toLocaleString()}</td>
+    </tr>`;
+  }).join("");
+  const starLeaderboard = starredRepos.length > 0 ? `<div style="margin-bottom:20px;">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">github stars</div>
+    <table style="width:100%;border-collapse:collapse;">${starRows}</table>
+  </div>` : "";
+
+  return `<div style="font-family:'IBM Plex Mono',monospace;">${ticker}${commitChart}${starLeaderboard}</div>`;
+}
+
+// ── html builder ──────────────────────────────────────────────────────────────
+
+function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, to: Date, weekKey: string): string {
+  const fromLabel = from.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const toLabel = to.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const totalCommits = reposData.reduce((s,r)=>s+r.commitCount,0);
+  const totalMerged = reposData.reduce((s,r)=>s+r.mergedPRs.length,0);
+  const totalReleases = reposData.reduce((s,r)=>s+r.releases.length,0);
+
+  const articleHtml = (copy.articles ?? []).map((a: any, i: number) => {
+    const repo = reposData.find(r => r.name === a.repo);
+    const img = repo?.demoImages?.[0];
+    const releaseLinks = repo?.releases.slice(0,4).map((r: Release) =>
+      `<a href="${r.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--ink);border-bottom:none;margin-right:8px;">${r.tag}</a><span style="color:var(--muted);font-size:11px;margin-right:12px;">${new Date(r.date).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>`
+    ).join("") ?? "";
+    const prLinks = repo?.mergedPRs.slice(0,6).map((p: PR) =>
+      `<a href="${p.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink);margin-right:6px;border-bottom:1px solid var(--rule);">#${p.number}</a>`
+    ).join("") ?? "";
+
+    return `<div style="margin-bottom:32px;padding-bottom:32px;border-bottom:1px solid var(--rule);">
+      <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
+      <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
+      <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
+      ${img ? `<img src="${img}" style="width:100%;max-height:200px;object-fit:cover;margin-bottom:10px;display:block;" alt="${a.repo}">` : ""}
+      <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
+      ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
+      ${prLinks ? `<div style="margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);">merged: ${prLinks}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  const splitAt = Math.ceil((copy.articles??[]).length / 2);
+  const articles1 = (copy.articles??[]).slice(0, splitAt).map((_: any, i: number) => {
+    const repo = reposData.find(r => r.name === copy.articles[i].repo);
+    const a = copy.articles[i];
+    const img = repo?.demoImages?.[0];
+    const releaseLinks = repo?.releases.slice(0,4).map((r: Release) =>
+      `<a href="${r.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--ink);border-bottom:none;margin-right:8px;">${r.tag}</a><span style="color:var(--muted);font-size:11px;margin-right:12px;">${new Date(r.date).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>`
+    ).join("") ?? "";
+    const prLinks = repo?.mergedPRs.slice(0,6).map((p: PR) =>
+      `<a href="${p.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink);margin-right:6px;border-bottom:1px solid var(--rule);">#${p.number}</a>`
+    ).join("") ?? "";
+    return `<div style="margin-bottom:32px;padding-bottom:32px;border-bottom:1px solid var(--rule);">
+      <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
+      <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
+      <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
+      ${img ? `<img src="${img}" style="width:100%;max-height:200px;object-fit:cover;margin-bottom:10px;display:block;" alt="${a.repo}">` : ""}
+      <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
+      ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
+      ${prLinks ? `<div style="margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);">merged: ${prLinks}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  const articles2 = (copy.articles??[]).slice(splitAt).map((_: any, ii: number) => {
+    const i = splitAt + ii;
+    const a = copy.articles[i];
+    const repo = reposData.find(r => r.name === a.repo);
+    const img = repo?.demoImages?.[0];
+    const releaseLinks = repo?.releases.slice(0,4).map((r: Release) =>
+      `<a href="${r.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--ink);border-bottom:none;margin-right:8px;">${r.tag}</a><span style="color:var(--muted);font-size:11px;margin-right:12px;">${new Date(r.date).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>`
+    ).join("") ?? "";
+    const prLinks = repo?.mergedPRs.slice(0,6).map((p: PR) =>
+      `<a href="${p.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink);margin-right:6px;border-bottom:1px solid var(--rule);">#${p.number}</a>`
+    ).join("") ?? "";
+    return `<div style="margin-bottom:32px;padding-bottom:32px;border-bottom:1px solid var(--rule);">
+      <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
+      <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
+      <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
+      ${img ? `<img src="${img}" style="width:100%;max-height:200px;object-fit:cover;margin-bottom:10px;display:block;" alt="${a.repo}">` : ""}
+      <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
+      ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
+      ${prLinks ? `<div style="margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);">merged: ${prLinks}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  const dataGraphics = buildDataGraphics(reposData, from, to);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>${owner} — gitzette ${weekKey}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
+  body { background: #e8e4dc; font-family: 'IBM Plex Sans', sans-serif; color: var(--ink); font-size: 15px; line-height: 1.6; }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .paper { max-width: 960px; margin: 24px auto; background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+  .header { padding: 20px 24px 14px; border-bottom: 3px solid var(--ink); }
+  .kicker { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; border-bottom: 1px solid var(--rule); padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
+  .kicker a { color: var(--ink); border-bottom: 1px solid var(--ink); }
+  .masthead { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: clamp(32px,7vw,64px); letter-spacing: -.03em; line-height: 1; }
+  .masthead span { color: var(--muted); font-weight: 400; }
+  .username { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 700; margin-top: 4px; }
+  .tagline { font-family: 'IBM Plex Serif', serif; font-style: italic; font-size: 14px; color: var(--muted); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .edition-bar { display: flex; gap: 16px; padding: 8px 24px; border-bottom: 1px solid var(--rule); background: var(--ink); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .edition-bar::-webkit-scrollbar { display: none; }
+  .edition-stat { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--paper); white-space: nowrap; }
+  .body { padding: 0 24px 32px; }
+  .grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 32px; padding-top: 24px; }
+  @media (max-width: 700px) { .grid-2-1 { grid-template-columns: 1fr; } .grid-2-1 .col:last-child { display: none; } }
+  .articles-p2 { display: block; }
+  @media (min-width: 1400px) {
+    body { background: #d8d4cc; }
+    .broadsheet-wrap { display: flex; align-items: flex-start; max-width: 1900px; margin: 32px auto; }
+    .broadsheet-wrap .paper { max-width: none; flex: 1; margin: 0; }
+    .broadsheet-wrap .paper.page-2 { display: block; border-left: 3px double var(--rule); margin-left: -1px; }
+    .broadsheet-wrap .paper:first-child .articles-p2 { display: none; }
+    .broadsheet-wrap .paper:first-child .grid-2-1 { grid-template-columns: 1fr; }
+    .broadsheet-wrap .paper:first-child .grid-2-1 .col:last-child { display: none; }
+  }
+  .page-2 { display: none; }
+  .footer { padding: 12px 24px; border-top: 1px solid var(--rule); font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="broadsheet-wrap">
+<div class="paper">
+  <div class="header">
+    <div class="kicker">
+      <span><a href="https://gitzette.online">gitzette.online</a> — open-source digest</span>
+      <span style="color:var(--muted);font-weight:400;">${fromLabel} – ${toLabel}</span>
+    </div>
+    <div class="masthead">the <span>dispatch</span></div>
+    <div class="username">@${owner}</div>
+    <div class="tagline">${copy.tagline ?? ""}</div>
+  </div>
+  <div class="edition-bar">
+    <span class="edition-stat">${totalCommits} commits</span>
+    <span class="edition-stat">${totalMerged} PRs merged</span>
+    <span class="edition-stat">${totalReleases} releases</span>
+    <span class="edition-stat">${reposData.length} repos</span>
+    <span class="edition-stat">${copy.editionNote ?? ""}</span>
+  </div>
+  <div class="body">
+    <div class="grid-2-1">
+      <div class="col">
+        ${articles1}
+        <div class="articles-p2">${articles2}</div>
+      </div>
+      <div class="col">${dataGraphics}</div>
+    </div>
+  </div>
+  <div class="footer">
+    <span>gitzette.online/${owner}</span>
+    <span>${copy.closingNote ?? "generated from public github activity"}</span>
+    <span>${weekKey}</span>
+  </div>
+</div>
+<div class="paper page-2">
+  <div class="header">
+    <div class="kicker"><span>continued</span><span style="color:var(--muted);">${weekKey}</span></div>
+    <div class="masthead" style="font-size:32px;">the <span>dispatch</span></div>
+  </div>
+  <div class="body" style="padding-top:24px;">
+    <div class="articles-p2">${articles2}</div>
+    <div style="margin-top:32px;">${dataGraphics}</div>
+  </div>
+</div>
+</div>
+</body>
+</html>`;
+}
+
+// ── week key helper ───────────────────────────────────────────────────────────
+
+function weekKey(d: Date): string {
+  const jan1 = new Date(d.getFullYear(), 0, 1);
+  const week = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
+  return `${d.getFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+// ── main generation pipeline ──────────────────────────────────────────────────
+
+async function runGeneration(env: Env, user: { id: string; username: string }): Promise<number> {
+  const to = new Date();
+  const from = new Date(to.getTime() - 7 * 86400 * 1000);
+
+  const npUrl = (env as any).NEWSPAPERIFY_URL ?? "https://test-callbot.samo.team/newspaperify";
+  const npSecret = (env as any).NEWSPAPERIFY_SECRET ?? "";
+
+  // list public repos
+  const allRepos = await ghGet(`/users/${user.username}/repos?per_page=100&sort=pushed`, env.GITHUB_TOKEN);
+  const repoNames: string[] = allRepos
+    .filter((r: any) => !r.private && !r.fork)
+    .map((r: any) => r.name)
+    .slice(0, 30);
+
+  if (repoNames.length === 0) {
+    await saveDispatch(env.DB, user.id, user.username, "<p>No public repos found.</p>", from, to);
+    return 0;
+  }
+
+  // fetch repo data in parallel (batches of 5 to avoid rate limits)
+  const reposData: RepoData[] = [];
+  for (let i = 0; i < repoNames.length; i += 5) {
+    const batch = repoNames.slice(i, i + 5);
+    const results = await Promise.all(
+      batch.map(repo => getRepoData(user.username, repo, from, to, env.GITHUB_TOKEN, npUrl, npSecret))
+    );
+    reposData.push(...results.filter((r): r is RepoData => r !== null));
+  }
+
+  if (reposData.length === 0) {
+    await saveDispatch(env.DB, user.id, user.username, "<p>No activity this week.</p>", from, to);
+    return 0;
+  }
+
+  // generate LLM copy
+  const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
+
+  // generate AI illustrations for articles without screenshots
+  if (env.GOOGLE_AI_KEY) {
+    for (const article of (copy.articles ?? [])) {
+      const repo = reposData.find((r: RepoData) => r.name === article.repo);
+      if (repo && repo.demoImages.length === 0 && article.illustrationPrompt) {
+        const img = await generateIllustration(article.illustrationPrompt, env.GOOGLE_AI_KEY, npUrl, npSecret);
+        if (img) repo.demoImages.push(img);
+      }
+    }
+  }
+
+  // build HTML
+  const wk = weekKey(to);
+  const html = buildHtml(copy, reposData, user.username, from, to, wk);
+
+  // save
+  await saveDispatch(env.DB, user.id, user.username, html, from, to);
+
+  // rough cost estimate: ~3K tokens LLM + images
+  const llmCost = 0.003;
+  const imageCost = reposData.length * 0.03;
+  return llmCost + imageCost;
+}
+
+async function saveDispatch(db: D1Database, userId: string, _username: string, html: string, _from: Date, to: Date): Promise<void> {
+  const jan1 = new Date(to.getFullYear(), 0, 1);
+  const week = Math.ceil(((to.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
+  const wk = `${to.getFullYear()}-W${String(week).padStart(2, "0")}`;
   await db.prepare(
     `INSERT INTO dispatches (user_id, week_key, html, generated_at) VALUES (?, ?, ?, unixepoch())
      ON CONFLICT(user_id) DO UPDATE SET week_key=excluded.week_key, html=excluded.html, generated_at=excluded.generated_at`
-  ).bind(userId, week, html).run();
+  ).bind(userId, wk, html).run();
 }
