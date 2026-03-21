@@ -145,8 +145,12 @@ pageRoutes.get("/", async (c) => {
   return c.html(homePage(recent.results ?? []));
 });
 
-// /status — public quota dashboard
+// /status — private quota dashboard (token-gated)
 pageRoutes.get("/status", async (c) => {
+  const token = c.req.query("token");
+  if (!token || token !== c.env.SESSION_SECRET) {
+    return c.text("403 Forbidden", 403);
+  }
   const [spendRow, genRow, userRow] = await Promise.all([
     c.env.DB.prepare(`SELECT COALESCE(SUM(cost_usd),0) as total FROM spend_log WHERE strftime('%Y-%m', datetime(ts, 'unixepoch')) = strftime('%Y-%m', 'now')`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE week_key != 'generating' AND r2_key IS NOT NULL`).first<{ total: number }>(),
