@@ -131,7 +131,6 @@ async function fetchAndServeDispatch(
 // home page
 pageRoutes.get("/", async (c) => {
   const user = await getUser(c);
-  if (user) return c.redirect(`/${user.username}`);
 
   // fetch recent dispatches for the landing page
   const recent = await c.env.DB.prepare(
