@@ -18,8 +18,9 @@ generateRoutes.post("/", async (c) => {
   if (!quota.allowed) {
     return c.json({
       error: "weekly_limit_reached",
-      message: `You've used all ${quota.limit} generations this week. Resets Monday.`,
+      message: `You've used all ${quota.limit} generations this week. Resets Monday. Community-supported — sponsor the project at https://github.com/sponsors/NikolayS to get more generations per week.`,
       used: quota.used, limit: quota.limit,
+      sponsor_url: "https://github.com/sponsors/NikolayS",
     }, 429);
   }
 
@@ -27,7 +28,8 @@ generateRoutes.post("/", async (c) => {
   if (!budget.allowed) {
     return c.json({
       error: "global_budget_reached",
-      message: "Monthly generation capacity is full. Try again next month.",
+      message: "Monthly generation capacity is full. Try again next month. Community-supported — sponsor the project at https://github.com/sponsors/NikolayS to help expand capacity.",
+      sponsor_url: "https://github.com/sponsors/NikolayS",
     }, 503);
   }
 

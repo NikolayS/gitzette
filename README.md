@@ -13,7 +13,8 @@ Your dispatch lives at `gitzette.online/@yourusername`.
 ## Quotas
 
 - 3 manual regenerations per week per user (resets Monday)
-- Global $50/month LLM budget — generation pauses if hit
+
+Community-supported. [Sponsor the project](https://github.com/sponsors/NikolayS) to get more generations per week.
 
 ## Stack
 
