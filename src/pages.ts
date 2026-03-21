@@ -58,11 +58,13 @@ function weekNavBar(username: string, week_key: string): string {
   </span>`;
 }
 
+const VERSION = "0.1.0";
+
 function creatorFooter(): string {
   return `<div style="background:#0f0f0f;padding:10px 24px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">
     built by <a href="https://github.com/NikolayS" style="color:#ccc;text-decoration:none;border:none;">@NikolayS</a>
     &nbsp;·&nbsp;
-    <a href="https://gitzette.online" style="color:#ccc;text-decoration:none;border:none;">gitzette.online</a>
+    <a href="https://gitzette.online" style="color:#ccc;text-decoration:none;border:none;">gitzette v${VERSION}</a>
   </div>`;
 }
 
