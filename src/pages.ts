@@ -112,7 +112,7 @@ function ctaFooter(): string {
   // Solid CTA block — dark background so the white/paper button pops.
   // Uses width:min(100%,420px) for full-width on mobile without a media query.
   return `<div style="background:#0f0f0f;padding:40px 24px 44px;text-align:center;font-family:'IBM Plex Mono',monospace;">
-    <p style="color:#666;font-size:12px;letter-spacing:.04em;margin:0 0 20px;">Your open-source activity, turned into a weekly newspaper.</p>
+    <p style="color:#666;font-size:12px;letter-spacing:.04em;margin:0 0 20px;">Show your work, without writing about it.</p>
     <a href="/auth/github"
        style="display:inline-block;background:#f7f4ee;color:#0f0f0f;font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;letter-spacing:.02em;text-decoration:none;padding:16px 40px;border:none;cursor:pointer;width:min(100%,420px);box-sizing:border-box;"
        onmouseover="this.style.background='#ffffff'"
@@ -389,7 +389,8 @@ ${headTags()}
 <body>
   <div class="hero">
     <div class="masthead">gitzette</div>
-    <div class="tagline">Your open-source activity, turned into a weekly newspaper.</div>
+    <div class="tagline">Show your work, without writing about it.</div>
+    <div style="font-family:'IBM Plex Serif',serif;font-size:14px;font-style:italic;color:#888;margin:-20px 0 24px;">For open-source maintainers and builders. Your GitHub week, turned into a shareable newspaper — automatically.</div>
     <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#888;margin-bottom:10px;">No account needed — explore anyone's open-source week</div>
     <form id="read-form" class="form-row" action="" method="get" onsubmit="go(event)">
       <input id="username-input" type="text" placeholder="try: torvalds, sindresorhus, antirez" autocomplete="off" autocorrect="off" spellcheck="false">
@@ -415,6 +416,16 @@ ${headTags()}
     </script>
     <div class="auth-note">To generate your own dispatch, <a href="/auth/github">sign in with GitHub</a>.
       <p style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;margin-top:6px;">We only read public activity — commits, PRs, releases. No private repo access, ever.</p>
+    </div>
+  </div>
+  <div style="max-width:760px;margin:0 auto;padding:0 20px;box-sizing:border-box;">
+    <div style="margin:40px 0;">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#888;margin-bottom:12px;">▸ example dispatch</div>
+      <div style="position:relative;overflow:hidden;border:1px solid #c8c2b4;height:320px;background:#f7f4ee;cursor:pointer;" onclick="window.location='/NikolayS/2026-W13'">
+        <iframe src="/NikolayS/2026-W13" style="width:200%;height:640px;transform:scale(0.5);transform-origin:top left;pointer-events:none;border:none;" loading="lazy" title="Example dispatch"></iframe>
+        <div style="position:absolute;inset:0;"></div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;margin-top:8px;">@NikolayS · <a href="/NikolayS/2026-W13" style="color:var(--ink);">view full dispatch →</a></div>
     </div>
   </div>
   ${recent.length > 0 ? `
