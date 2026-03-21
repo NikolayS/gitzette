@@ -1,0 +1,17 @@
+{
+  "name": "gitzette",
+  "version": "0.1.0",
+  "description": "Turn your GitHub activity into a weekly newspaper",
+  "type": "module",
+  "bin": {
+    "gitzette": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/index.ts",
+    "build": "bun build src/index.ts --outfile dist/gitzette --target bun"
+  },
+  "dependencies": {
+    "@octokit/graphql": "^7.0.0",
+    "@octokit/rest": "^20.0.0"
+  }
+}
