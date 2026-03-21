@@ -3,8 +3,7 @@ import { loadConfig } from "./config.ts";
 import { fetchGitHubActivity } from "./github.ts";
 import { generateContent } from "./llm.ts";
 import { renderHTML } from "./render.ts";
-import { scrapeLinkedIn, type LinkedInActivity } from "./scrape-linkedin.ts";
-import { scrapeTwitter, type TwitterActivity } from "./scrape-twitter.ts";
+import { loadSocialNotes } from "./social.ts";
 import { writeFileSync } from "fs";
 
 async function main() {
@@ -56,31 +55,12 @@ EXAMPLES:
   );
 
   console.log(`   ${data.totalCommits} commits, ${data.pullRequests.length} PRs, ${data.newRepos.length} new repos`);
-  let linkedin: LinkedInActivity | undefined;
-  if (config.linkedInEmail && config.linkedInPassword) {
-    try {
-      console.log("🔗 Scraping LinkedIn...");
-      linkedin = await scrapeLinkedIn(config.linkedInEmail, config.linkedInPassword, config.weekStart, config.weekEnd, config.headless);
-      console.log(`   ${linkedin.posts.length} posts, ${linkedin.comments.length} comments`);
-    } catch (e: any) {
-      console.warn("   LinkedIn scrape failed:", e.message);
-    }
-  }
-
-  let twitter: TwitterActivity | undefined;
-  if (config.twitterUser) {
-    try {
-      console.log("🐦 Scraping Twitter/X...");
-      twitter = await scrapeTwitter(config.twitterUser, config.weekStart, config.weekEnd, config.headless, config.twitterCookies);
-      console.log(`   ${twitter.tweets.length} tweets, ${twitter.replies.length} replies`);
-    } catch (e: any) {
-      console.warn("   Twitter scrape failed:", e.message);
-    }
-  }
+  const socialNotes = loadSocialNotes(config.socialFile);
+  if (socialNotes) console.log("   Social notes loaded from", config.socialFile);
 
   console.log(`✍️  Generating content with ${config.llmProvider}/${config.llmModel}...`);
 
-  const content = await generateContent(config, data, linkedin, twitter);
+  const content = await generateContent(config, data, socialNotes);
 
   console.log(`🖨️  Rendering HTML...`);
   const html = renderHTML(config, data, content);
