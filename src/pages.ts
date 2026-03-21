@@ -122,12 +122,16 @@ async function fetchAndServeDispatch(
   const html: string = await r2obj.text();
 
   // Image overflow guard — injected into every served dispatch document
-  const IMG_FIX_STYLE = `<style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
+  const IMG_FIX_STYLE = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
 
   if (html.startsWith("<!DOCTYPE") || html.startsWith("<html")) {
     const ownerBar = isOwner
       ? `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
-          <span style="color:#f7f4ee;">@${username} · ${week_key} · generated ${new Date(generated_at * 1000).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;">gitzette</a>
+            <span style="color:#444;">/</span>
+            <span style="color:#aaa;">@${username} · ${week_key} · generated ${new Date(generated_at * 1000).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>
+          </div>
           <div style="display:flex;gap:12px;align-items:center;">
             ${weekNavBar(username, week_key)}
             <button style="background:none;border:1px solid #f7f4ee;color:#f7f4ee;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 10px;cursor:pointer;" onclick="regenerate()">regenerate</button>
@@ -149,7 +153,11 @@ async function fetchAndServeDispatch(
         }
         </script>`
       : `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
-          <span style="color:#f7f4ee;">@${username}</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;">gitzette</a>
+            <span style="color:#444;">/</span>
+            <span style="color:#aaa;">@${username}</span>
+          </div>
           ${weekNavBar(username, week_key)}
         </div>
         <div style="min-height:40px;"></div>`;
@@ -462,9 +470,12 @@ function dispatchPage(
 function noDispatchPage(username: string, isOwner: boolean, week_key: string | null): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
 </head><body>
-  <div style="font-size:32px;font-weight:700;">@${username}</div>
+  <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+  <div style="font-size:18px;font-weight:700;">@${username}</div>
   <div style="color:#666;">No dispatch generated yet${week_key ? ` for ${week_key}` : ""}.</div>
   ${isOwner ? `<button id="genbtn" onclick="startGen()" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>
   <script>
@@ -478,9 +489,12 @@ function noDispatchPage(username: string, isOwner: boolean, week_key: string | n
 function weekNotFoundPage(username: string, week_key: string): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} ${week_key} — gitzette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
 </head><body>
-  <div style="font-size:24px;font-weight:700;">@${username} · ${week_key}</div>
+  <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+  <div style="font-size:18px;font-weight:700;">@${username} · ${week_key}</div>
   <div style="color:#666;">No dispatch for this week.</div>
   <a href="/${username}" style="color:#0f0f0f;font-size:13px;font-family:monospace;">← view latest dispatch</a>
   ${creatorFooter()}
@@ -491,9 +505,12 @@ function generatingPage(username: string): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
 <meta http-equiv="refresh" content="10">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
 </head><body>
-  <div style="font-size:32px;font-weight:700;">@${username}</div>
+  <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+  <div style="font-size:18px;font-weight:700;">@${username}</div>
   <div style="color:#666;">Generating dispatch... refreshing automatically.</div>
   <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
   ${creatorFooter()}
@@ -503,9 +520,12 @@ function generatingPage(username: string): string {
 function notFoundPage(username: string): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>not found — gitzette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
 </head><body>
-  <div style="font-size:32px;font-weight:700;">@${username}</div>
+  <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+  <div style="font-size:18px;font-weight:700;">@${username}</div>
   <div style="color:#666;">User not found. Have they signed in?</div>
   <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
   ${creatorFooter()}
