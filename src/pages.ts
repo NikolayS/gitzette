@@ -14,22 +14,24 @@ pageRoutes.get("/", async (c) => {
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
   const { username } = c.req.param();
   const viewer = await getUser(c);
-
-  const userRow = await c.env.DB.prepare(
-    `SELECT id FROM users WHERE username = ?`
-  ).bind(username).first<{ id: string }>();
-
-  if (!userRow) {
-    return c.html(notFoundPage(username), 404);
-  }
-
-  const dispatch = await c.env.DB.prepare(
-    `SELECT html, week_key, generated_at FROM dispatches WHERE user_id = ?`
-  ).bind(userRow.id).first<{ html: string; week_key: string; generated_at: number }>();
-
   const isOwner = viewer?.username === username;
 
+  // look up dispatch directly by username — no login required to view
+  const dispatch = await c.env.DB.prepare(
+    `SELECT d.html, d.week_key, d.generated_at
+     FROM dispatches d
+     JOIN users u ON u.id = d.user_id
+     WHERE u.username = ?`
+  ).bind(username).first<{ html: string; week_key: string; generated_at: number }>();
+
   if (!dispatch) {
+    // check if user exists at all (to distinguish "no dispatch yet" from "unknown user")
+    const userExists = await c.env.DB.prepare(
+      `SELECT 1 FROM users WHERE username = ?`
+    ).bind(username).first();
+    if (!userExists) {
+      return c.html(notFoundPage(username), 404);
+    }
     return c.html(noDispatchPage(username, isOwner));
   }
 
