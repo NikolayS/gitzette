@@ -315,15 +315,27 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
   <div class="hero">
     <div class="masthead">gitzette</div>
     <div class="tagline">Your open-source activity, turned into a weekly newspaper.</div>
-    <form class="form-row" action="" method="get" onsubmit="go(event)">
-      <input id="uname" type="text" placeholder="github username" autocomplete="off" autocorrect="off" spellcheck="false">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#888;margin-bottom:10px;">No account needed — explore anyone's open-source week</div>
+    <form id="read-form" class="form-row" action="" method="get" onsubmit="go(event)">
+      <input id="username-input" type="text" placeholder="try: torvalds, sindresorhus, antirez" autocomplete="off" autocorrect="off" spellcheck="false">
       <button type="submit">Read →</button>
     </form>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">explore:</span>
+      <button onclick="document.getElementById('username-input').value='torvalds';go2('torvalds');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">torvalds</button>
+      <button onclick="document.getElementById('username-input').value='antirez';go2('antirez');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">antirez</button>
+      <button onclick="document.getElementById('username-input').value='sindresorhus';go2('sindresorhus');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">sindresorhus</button>
+      <button onclick="document.getElementById('username-input').value='gaearon';go2('gaearon');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">gaearon</button>
+      <button onclick="document.getElementById('username-input').value='Rich-Harris';go2('Rich-Harris');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">Rich-Harris</button>
+    </div>
     <script>
     function go(e) {
       e.preventDefault();
-      const u = document.getElementById('uname').value.trim().replace(/^@/,'');
+      const u = document.getElementById('username-input').value.trim().replace(/^@/,'');
       if (u) window.location.href = '/' + u;
+    }
+    function go2(u) {
+      window.location.href = '/' + u;
     }
     </script>
     <div class="auth-note">To generate your own dispatch, <a href="/auth/github">sign in with GitHub</a>.</div>
