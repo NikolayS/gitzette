@@ -12,6 +12,19 @@ function parseWeekKey(wk: string): { year: number; week: number } | null {
   return { year: parseInt(m[1]), week: parseInt(m[2]) };
 }
 
+function weekKeyToRange(weekKey: string): string {
+  const [year, w] = weekKey.split('-W').map(Number);
+  // ISO week: Jan 4 is always in week 1
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dayOfWeek = jan4.getUTCDay() || 7; // Mon=1
+  const monday = new Date(jan4);
+  monday.setUTCDate(jan4.getUTCDate() - (dayOfWeek - 1) + (w - 1) * 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return `${fmt(monday)} – ${fmt(sunday)}`;
+}
+
 function adjacentWeekKey(wk: string, delta: number): string {
   const p = parseWeekKey(wk);
   if (!p) return "";
@@ -58,13 +71,11 @@ function weekNavBar(username: string, week_key: string): string {
   </span>`;
 }
 
-const VERSION = "0.1.0";
-
 function creatorFooter(): string {
   return `<div style="background:#0f0f0f;padding:10px 24px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">
     built by <a href="https://github.com/NikolayS" style="color:#ccc;text-decoration:none;border:none;">@NikolayS</a>
     &nbsp;·&nbsp;
-    <a href="https://gitzette.online" style="color:#ccc;text-decoration:none;border:none;">gitzette v${VERSION}</a>
+    <a href="https://gitzette.online" style="color:#ccc;text-decoration:none;border:none;">gitzette.online</a>
   </div>`;
 }
 
@@ -126,7 +137,8 @@ async function fetchAndServeDispatch(
           <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
           <a href="/${username}" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#aaa;text-decoration:none;border:none;">@${username}</a>
           <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#f7f4ee;font-weight:600;">${week_key}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#f7f4ee;font-weight:600;">${weekKeyToRange(week_key)}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#666;">${week_key.replace(/^\d{4}-/, "")}</span>
         </div>`;
     const ownerBar = isOwner
       ? `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
@@ -267,11 +279,10 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}/:week_key{\\d{4}-W\\d{1,2}}", async (
 function homePage(recent: { username: string; week_key: string; generated_at: number }[]): string {
   const rows = recent.map(d => {
     const short = d.week_key.replace(/^\d{4}-/, "");
-    const date = new Date(d.generated_at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const range = weekKeyToRange(d.week_key);
     return `<a href="/${d.username}/${d.week_key}" class="dispatch-row">
       <span class="row-user">@${d.username}</span>
-      <span class="row-week">${short}</span>
-      <span class="row-date">${date}</span>
+      <span class="row-date">${range}<span class="row-week-secondary">${short}</span></span>
       <span class="row-cta">Read →</span>
     </a>`;
   }).join("");
@@ -303,8 +314,8 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
   .dispatch-row { display: flex; align-items: baseline; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--rule); text-decoration: none; color: var(--ink); transition: background .1s; }
   .dispatch-row:hover { background: #edeae2; margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
   .row-user { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; min-width: 120px; }
-  .row-week { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); min-width: 40px; }
-  .row-date { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); flex: 1; }
+  .row-date { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--ink); flex: 1; display: flex; align-items: baseline; gap: 8px; }
+  .row-week-secondary { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); }
   .row-cta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); flex-shrink: 0; }
   .auth-note { width: 100%; max-width: 760px; margin: 28px auto 0; padding: 0 20px; box-sizing: border-box; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); }
   .auth-note a { color: var(--ink); border-bottom: 1px solid var(--rule); }
@@ -338,7 +349,9 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
       window.location.href = '/' + u;
     }
     </script>
-    <div class="auth-note">To generate your own dispatch, <a href="/auth/github">sign in with GitHub</a>.</div>
+    <div class="auth-note">To generate your own dispatch, <a href="/auth/github">sign in with GitHub</a>.
+      <p style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;margin-top:6px;">We only read public activity — commits, PRs, releases. No private repo access, ever.</p>
+    </div>
   </div>
   ${recent.length > 0 ? `
   <div class="divider">
@@ -444,7 +457,8 @@ function dispatchPage(
       <span class="sep">/</span>
       <a href="/${username}">@${username}</a>
       <span class="sep">/</span>
-      <span class="current">${dispatch.week_key}</span>
+      <span class="current">${weekKeyToRange(dispatch.week_key)}</span>
+      <span style="font-size:10px;color:#666;">${dispatch.week_key.replace(/^\d{4}-/, "")}</span>
     </div>
     <div style="display:flex;gap:12px;align-items:center;">
       ${weekNavBar(username, dispatch.week_key)}
