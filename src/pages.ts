@@ -410,7 +410,17 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
     `SELECT id, avatar_url FROM users WHERE username = ?`
   ).bind(username).first<{ id: number; avatar_url: string | null }>();
 
-  if (!userRow) return c.html(notFoundPage(username), 404);
+  if (!userRow) {
+    // Check if this is a real GitHub user — if so, offer to generate
+    let ghUser: { login: string; avatar_url: string; name: string | null } | null = null;
+    try {
+      const ghRes = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}`, {
+        headers: { "User-Agent": "gitzette/1.0", "Accept": "application/vnd.github+json" },
+      });
+      if (ghRes.ok) ghUser = await ghRes.json() as any;
+    } catch { /* ignore */ }
+    return c.html(notFoundPage(username, ghUser), 404);
+  }
 
   // Check if generating sentinel exists
   const generating = await c.env.DB.prepare(
@@ -783,23 +793,38 @@ ${headTags()}
 </body></html>`;
 }
 
-function notFoundPage(username: string): string {
+function notFoundPage(username: string, ghUser?: { login: string; avatar_url: string; name: string | null } | null): string {
+  const isRealGitHubUser = !!ghUser;
+  const displayName = ghUser?.name || `@${username}`;
+
+  const content = isRealGitHubUser ? `
+    <img src="${ghUser!.avatar_url}" alt="@${username}" style="width:72px;height:72px;border-radius:50%;border:2px solid #0f0f0f;margin-bottom:4px;">
+    <div style="font-size:18px;font-weight:700;">${displayName}</div>
+    <div style="font-size:13px;color:#666;margin-bottom:8px;">@${username}</div>
+    <div style="color:#444;max-width:280px;line-height:1.5;">No dispatch generated yet for <strong>@${username}</strong>.</div>
+    <div style="color:#666;font-size:12px;max-width:280px;line-height:1.5;">Is this your account? Sign in with GitHub to generate your first dispatch.</div>
+    <a href="/auth/github" style="display:inline-block;margin-top:8px;padding:12px 28px;background:#0f0f0f;color:#f7f4ee;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;text-decoration:none;border-radius:2px;letter-spacing:0.05em;">Generate my dispatch</a>
+    <a href="/" style="color:#888;font-size:12px;margin-top:8px;">← gitzette.online</a>
+  ` : `
+    <div style="font-size:18px;font-weight:700;">@${username}</div>
+    <div style="color:#666;">GitHub user not found.</div>
+    <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+  `;
+
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>not found — gitzette</title>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
 ${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
-  .center{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:40px 24px;text-align:center;}
+  .center{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:40px 24px;text-align:center;}
 </style>
 </head><body>
   <div class="center">
-    <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
-    <div style="font-size:18px;font-weight:700;">@${username}</div>
-    <div style="color:#666;">User not found. Have they signed in?</div>
-    <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+    <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;margin-bottom:8px;">gitzette</a>
+    ${content}
   </div>
   ${ctaFooter()}
   ${creatorFooter()}
