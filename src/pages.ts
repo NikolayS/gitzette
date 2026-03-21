@@ -68,31 +68,22 @@ function creatorFooter(): string {
   </div>`;
 }
 
-function shareBar(username: string, week_key: string): string {
-  const url = `https://gitzette.online/${username}/${week_key}`;
-  const text = encodeURIComponent(`This week in open source: @${username}'s dispatch — ${url}`);
-  const xUrl = `https://twitter.com/intent/tweet?text=${text}`;
-  const liUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
-  return `<div style="max-width:900px;margin:0 auto;padding:14px 24px;border-top:1px solid #c8c2b4;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#666;display:flex;gap:20px;align-items:center;flex-wrap:wrap;">
-    <span>Share:</span>
-    <a href="${xUrl}" target="_blank" rel="noopener" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">post on X</a>
-    <a href="${liUrl}" target="_blank" rel="noopener" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">share on LinkedIn</a>
-  </div>`;
-}
-
 function dispatchFooter(username: string, week_key: string): string {
   const url = `https://gitzette.online/${username}/${week_key}`;
-  const text = encodeURIComponent(`This week in open source: @${username}'s dispatch — ${url}`);
-  const xUrl = `https://twitter.com/intent/tweet?text=${text}`;
+  const tweetText = encodeURIComponent(`This week in open source: @${username}'s dispatch — ${url}`);
+  const xUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
   const liUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
   return `
-  <div style="max-width:900px;margin:0 auto;padding:14px 24px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#666;border-top:1px solid #c8c2b4;display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;background:#f7f4ee;">
-    <div style="display:flex;gap:16px;flex-wrap:wrap;">
-      <a href="/" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">gitzette</a>
-      <a href="/${username}" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">@${username} on gitzette</a>
-      <a href="https://github.com/${username}" target="_blank" rel="noopener" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">@${username} on GitHub</a>
+  <div style="background:#f7f4ee;border-top:1px solid #c8c2b4;">
+    <!-- Row 1: Navigation links — left-aligned, ink, underlined -->
+    <div style="max-width:900px;margin:0 auto;padding:14px 24px 6px;font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;flex-wrap:wrap;gap:4px 20px;align-items:center;">
+      <a href="/" style="color:#0f0f0f;text-decoration:underline;">gitzette</a>
+      <a href="/${username}" style="color:#0f0f0f;text-decoration:underline;">@${username} on gitzette</a>
+      <a href="https://github.com/${username}" target="_blank" rel="noopener" style="color:#0f0f0f;text-decoration:underline;">@${username} on GitHub</a>
     </div>
-    <div style="display:flex;gap:16px;">
+    <!-- Row 2: Share links — muted, right-aligned -->
+    <div style="max-width:900px;margin:0 auto;padding:6px 24px 14px;font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;flex-wrap:wrap;gap:4px 20px;align-items:center;justify-content:flex-end;color:#888;">
+      <span>share:</span>
       <a href="${xUrl}" target="_blank" rel="noopener" style="color:#888;text-decoration:none;">post on X</a>
       <a href="${liUrl}" target="_blank" rel="noopener" style="color:#888;text-decoration:none;">share on LinkedIn</a>
     </div>
@@ -167,7 +158,7 @@ async function fetchAndServeDispatch(
     const out = html
       .replace("</head>", `${IMG_FIX_STYLE}</head>`)
       .replace("<body>", `<body>${ownerBar}`)
-      .replace("</body>", `${ctaFooter()}${creatorFooter()}</body>`);
+      .replace("</body>", `${dispatchFooter(username, week_key)}</body>`);
     return c.html(out);
   }
 
