@@ -3,3 +3,4 @@ node_modules/
 dist/
 *.html
 !example-output/
+.twitter-cookies.json

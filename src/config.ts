@@ -10,6 +10,11 @@ export interface Config {
   outputFile: string;
   title: string;
   forkRepos: string[];
+  linkedInEmail?: string;
+  linkedInPassword?: string;
+  twitterUser?: string;
+  twitterCookies?: string;
+  headless: boolean;
 }
 
 export function getWeekRange(weekStr?: string): { start: Date; end: Date } {
@@ -76,5 +81,11 @@ export function loadConfig(args: string[]): Config {
   const forksRaw = get("--forks") || process.env.GITZETTE_FORKS || "";
   const forkRepos = forksRaw ? forksRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
 
-  return { githubUser: user, githubToken: token, llmProvider: provider, llmModel: model, llmApiKey: apiKey, llmBaseUrl: baseUrl, weekStart: start, weekEnd: end, outputFile, title, forkRepos };
+  const linkedInEmail = get("--linkedin-email") || process.env.LINKEDIN_EMAIL;
+  const linkedInPassword = get("--linkedin-password") || process.env.LINKEDIN_PASSWORD;
+  const twitterUser = get("--twitter") || process.env.TWITTER_USER;
+  const twitterCookies = get("--twitter-cookies") || process.env.TWITTER_COOKIES_FILE;
+  const headless = !args.includes("--no-headless");
+
+  return { githubUser: user, githubToken: token, llmProvider: provider, llmModel: model, llmApiKey: apiKey, llmBaseUrl: baseUrl, weekStart: start, weekEnd: end, outputFile, title, forkRepos, linkedInEmail, linkedInPassword, twitterUser, twitterCookies, headless };
 }

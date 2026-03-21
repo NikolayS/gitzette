@@ -1,5 +1,7 @@
 import type { Config } from "./config.ts";
 import type { GitHubData } from "./github.ts";
+import type { LinkedInActivity } from "./scrape-linkedin.ts";
+import type { TwitterActivity } from "./scrape-twitter.ts";
 
 export interface GeneratedContent {
   heroHeadline: string;
@@ -14,7 +16,7 @@ export interface GeneratedContent {
   editionBarItems: string[];
 }
 
-function buildPrompt(user: string, data: GitHubData, from: Date, to: Date): string {
+function buildPrompt(user: string, data: GitHubData, from: Date, to: Date, linkedin?: LinkedInActivity, twitter?: TwitterActivity): string {
   const fmt = (d: string) => new Date(d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   const weekStr = `${from.toLocaleDateString("en-US", { month: "long", day: "numeric" })} – ${to.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`;
 
@@ -45,6 +47,18 @@ function buildPrompt(user: string, data: GitHubData, from: Date, to: Date): stri
     .map(i => `  [CLOSED ${fmt(i.closedAt!)}] ${i.title} — ${i.repo}`)
     .join("\n");
 
+  const linkedInSection = linkedin?.posts.length
+    ? `\nLINKEDIN POSTS:\n${linkedin.posts.map(p => `  [${p.date}] ${p.text} (${p.likes} likes, ${p.comments} comments)`).join("\n")}`
+    : "";
+
+  const twitterSection = twitter?.tweets.length
+    ? `\nTWITTER/X TWEETS:\n${twitter.tweets.map(t => `  [${t.date}] ${t.text} (${t.likes} likes, ${t.retweets} RTs) ${t.url}`).join("\n")}`
+    : "";
+
+  const twitterReplies = twitter?.replies.length
+    ? `\nTWITTER/X REPLIES:\n${twitter.replies.map(t => `  [${t.date}] ${t.text} ${t.url}`).join("\n")}`
+    : "";
+
   return `You are writing a weekly developer newspaper called "the changelog" for GitHub user ${user}.
 Week: ${weekStr}
 
@@ -61,6 +75,7 @@ ${newRepoSummary || "  (none)"}
 
 ISSUES CLOSED:
 ${issueSummary || "  (none)"}
+${linkedInSection}${twitterSection}${twitterReplies}
 
 Write punchy, creative newspaper-style content. Headlines should be dramatic and unexpected — not generic tech blog titles.
 Think: The Economist meets Hacker News. Short, sharp, sometimes witty.
@@ -84,8 +99,8 @@ Pick the 3 most interesting repos/stories for sectionStories.
 editionBarItems: 4 short stats or highlights (e.g. "sqlever: 20 PRs merged").`;
 }
 
-export async function generateContent(config: Config, data: GitHubData): Promise<GeneratedContent> {
-  const prompt = buildPrompt(config.githubUser, data, config.weekStart, config.weekEnd);
+export async function generateContent(config: Config, data: GitHubData, linkedin?: LinkedInActivity, twitter?: TwitterActivity): Promise<GeneratedContent> {
+  const prompt = buildPrompt(config.githubUser, data, config.weekStart, config.weekEnd, linkedin, twitter);
 
   let responseText: string;
 
