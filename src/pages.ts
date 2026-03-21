@@ -225,7 +225,7 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
   const cards = recent.map(d => {
     const short = d.week_key.replace(/^\d{4}-/, "");
     const date = new Date(d.generated_at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    return `<a href="/${d.username}" class="card">
+    return `<a href="/${d.username}/${d.week_key}" class="card">
       <span class="card-user">@${d.username}</span>
       <span class="card-week">${short} · ${date}</span>
       <span class="card-cta">Read →</span>
@@ -243,25 +243,25 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
 <style>
   :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'IBM Plex Serif', Georgia, serif; background: var(--paper); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; }
+  body { font-family: 'IBM Plex Serif', Georgia, serif; background: var(--paper); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
   a { color: var(--ink); text-decoration: none; }
-  .hero { max-width: 760px; margin: 80px auto 0; padding: 0 24px; }
-  .masthead { font-family: 'IBM Plex Mono', monospace; font-size: clamp(48px, 10vw, 88px); font-weight: 700; letter-spacing: -.04em; line-height: 1; }
-  .tagline { font-size: clamp(16px, 2.5vw, 20px); color: var(--muted); margin: 16px 0 40px; font-style: italic; }
-  .form-row { display: flex; gap: 0; max-width: 480px; }
-  .form-row input { flex: 1; padding: 12px 16px; border: 2px solid var(--ink); background: var(--paper); font-family: 'IBM Plex Mono', monospace; font-size: 15px; color: var(--ink); outline: none; }
+  .hero { width: 100%; max-width: 760px; margin: 64px auto 0; padding: 0 20px; box-sizing: border-box; }
+  .masthead { font-family: 'IBM Plex Mono', monospace; font-size: clamp(40px, 10vw, 88px); font-weight: 700; letter-spacing: -.04em; line-height: 1; }
+  .tagline { font-size: clamp(15px, 2.5vw, 20px); color: var(--muted); margin: 16px 0 32px; font-style: italic; }
+  .form-row { display: flex; gap: 0; max-width: 100%; }
+  .form-row input { flex: 1; min-width: 0; padding: 12px 14px; border: 2px solid var(--ink); background: var(--paper); font-family: 'IBM Plex Mono', monospace; font-size: 15px; color: var(--ink); outline: none; }
   .form-row input::placeholder { color: var(--muted); }
-  .form-row button { padding: 12px 24px; background: var(--ink); color: var(--paper); font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; border: none; cursor: pointer; letter-spacing: .04em; }
+  .form-row button { flex-shrink: 0; padding: 12px 20px; background: var(--ink); color: var(--paper); font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; border: none; cursor: pointer; letter-spacing: .04em; white-space: nowrap; }
   .form-row button:hover { background: #333; }
-  .divider { max-width: 760px; margin: 64px auto 0; padding: 0 24px; border-top: 3px double var(--ink); }
+  .divider { width: 100%; max-width: 760px; margin: 56px auto 0; padding: 0 20px; box-sizing: border-box; border-top: 3px double var(--ink); }
   .recent-head { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 12px 0 20px; color: var(--muted); }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1px; background: var(--rule); max-width: 760px; margin: 0 auto; padding: 0 24px; }
-  .card { display: flex; flex-direction: column; gap: 4px; padding: 16px; background: var(--paper); transition: background .1s; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1px; background: var(--rule); width: 100%; max-width: 760px; margin: 0 auto; padding: 0 20px; box-sizing: border-box; }
+  .card { display: flex; flex-direction: column; gap: 4px; padding: 14px; background: var(--paper); transition: background .1s; min-width: 0; }
   .card:hover { background: #edeae2; }
-  .card-user { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; }
+  .card-user { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card-week { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); }
   .card-cta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; margin-top: 4px; }
-  .auth-note { max-width: 760px; margin: 32px auto 0; padding: 0 24px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); }
+  .auth-note { width: 100%; max-width: 760px; margin: 28px auto 0; padding: 0 20px; box-sizing: border-box; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); }
   .auth-note a { color: var(--ink); border-bottom: 1px solid var(--rule); }
   footer { margin-top: auto; }
 </style>
