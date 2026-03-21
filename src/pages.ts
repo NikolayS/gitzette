@@ -120,6 +120,53 @@ function ctaFooter(): string {
   </div>`;
 }
 
+// ── OG tag helpers ────────────────────────────────────────────────────────────
+
+/** Extract text content of the first <h1> tag. */
+function extractH1(html: string): string {
+  const m = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  if (!m) return "";
+  // strip inner HTML tags
+  return m[1].replace(/<[^>]+>/g, "").trim();
+}
+
+/** Extract text content of the first element with class "deck". */
+function extractDeck(html: string): string {
+  // match class="deck" or class="... deck ..."
+  const m = html.match(/<[^>]+class="[^"]*\bdeck\b[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
+  if (!m) return "";
+  const text = m[1].replace(/<[^>]+>/g, "").trim();
+  return text.length > 200 ? text.slice(0, 197) + "…" : text;
+}
+
+/** Extract the first <img src="..."> URL. */
+function extractFirstImg(html: string): string {
+  const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return m ? m[1] : "";
+}
+
+/** Build OG + Twitter Card meta tags for a dispatch page. */
+function buildDispatchOGTags(html: string, username: string, week_key: string): string {
+  const title = extractH1(html) || `@${username}'s dispatch · ${week_key}`;
+  const description = extractDeck(html) || `Open-source activity for @${username}, week ${week_key}.`;
+  const image = extractFirstImg(html);
+  const url = `https://gitzette.online/${username}/${week_key}`;
+
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+
+  return [
+    `<meta property="og:title" content="${esc(title)}">`,
+    `<meta property="og:description" content="${esc(description)}">`,
+    image ? `<meta property="og:image" content="${esc(image)}">` : "",
+    `<meta property="og:url" content="${esc(url)}">`,
+    `<meta property="og:type" content="article">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
+    `<meta name="twitter:title" content="${esc(title)}">`,
+    `<meta name="twitter:description" content="${esc(description)}">`,
+    image ? `<meta name="twitter:image" content="${esc(image)}">` : "",
+  ].filter(Boolean).join("\n");
+}
+
 async function fetchAndServeDispatch(
   c: any,
   username: string,
@@ -133,8 +180,10 @@ async function fetchAndServeDispatch(
 
   const html: string = await r2obj.text();
 
+  const ogTags = buildDispatchOGTags(html, username, week_key);
+
   // Image overflow guard — injected into every served dispatch document
-  const IMG_FIX_STYLE = `${headTags()}<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
+  const IMG_FIX_STYLE = `${ogTags}\n${headTags()}<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
 
   if (html.startsWith("<!DOCTYPE") || html.startsWith("<html")) {
     const breadcrumb = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow:hidden;">
@@ -292,12 +341,21 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
     </a>`;
   }).join("");
 
+  const homeOG = `<meta property="og:title" content="gitzette — your open-source week as a newspaper">
+<meta property="og:description" content="Turn your GitHub activity into a shareable weekly dispatch. No writing required.">
+<meta property="og:url" content="https://gitzette.online/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="gitzette — your open-source week as a newspaper">
+<meta name="twitter:description" content="Turn your GitHub activity into a shareable weekly dispatch. No writing required.">`;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>gitzette — your weekly open-source dispatch</title>
+${homeOG}
 ${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
