@@ -1,57 +1,53 @@
 # gitzette
 
-Turn your GitHub activity into a weekly newspaper — AI-generated headlines, styled HTML output.
+Weekly open-source digest — auto-generated from GitHub activity, rendered as a newspaper.
 
-Fetches your commits, PRs, issues, and new repos for any week, sends the data to an LLM, and renders a styled HTML newspaper.
+Live at [gitzette.online](https://gitzette.online)
 
-## Quick start
+## How it works
 
-```bash
-git clone https://github.com/NikolayS/gitzette
-cd gitzette
-cp .env.example .env  # fill in your tokens
-bun src/index.ts
-```
+Sign in with GitHub (`read:user` scope only — no repo access requested). gitzette scans your public repos using a server-side token and generates a weekly dispatch: commits, PRs, releases, written up in newspaper style by an LLM.
 
-## Options
+Your dispatch lives at `gitzette.online/@yourusername`.
 
-```
---user      GitHub username (or GITHUB_USER env)
---token     GitHub token with repo read scope (or GITHUB_TOKEN env)
---week      Week: YYYY-WNN or YYYY-MM-DD start date (default: last week)
---llm       Provider: anthropic | openai | ollama (default: anthropic)
---model     Model name (default: claude-sonnet-4-5 / gpt-4o / llama3)
---api-key   LLM API key
---llm-url   Custom LLM base URL (for Ollama or compatible APIs)
---title     Newspaper title (default: "the changelog")
---output    Output HTML file (default: gitzette-YYYY-MM-DD.html)
-```
+## Quotas
 
-## Examples
+- 3 manual regenerations per week per user (resets Monday)
+- Global $50/month LLM budget — generation pauses if hit
+
+## Stack
+
+- Cloudflare Workers (runtime)
+- Cloudflare D1 (SQLite — users, sessions, quota, spend)
+- Hono (routing)
+- GitHub OAuth (`read:user`)
+- OpenRouter (LLM copy generation)
+- Google Imagen 4 (illustrations)
+
+## Deploy
 
 ```bash
-# Anthropic (default)
-bun src/index.ts --user NikolayS --token ghp_xxx --api-key sk-ant-xxx
+# create D1 database
+wrangler d1 create gitzette-db
 
-# OpenAI
-bun src/index.ts --user NikolayS --token ghp_xxx --llm openai --api-key sk-xxx
+# update wrangler.toml with the returned database_id
+# run schema
+wrangler d1 execute gitzette-db --remote --file=schema.sql
 
-# Ollama (local, no API key needed)
-bun src/index.ts --user NikolayS --token ghp_xxx --llm ollama --model llama3
+# set secrets
+wrangler secret put GITHUB_CLIENT_SECRET
+wrangler secret put GITHUB_TOKEN
+wrangler secret put OPENROUTER_API_KEY
+wrangler secret put GOOGLE_AI_KEY
+wrangler secret put SESSION_SECRET
 
-# Specific week
-bun src/index.ts --user NikolayS --week 2026-W12
-
-# Custom title
-bun src/index.ts --user NikolayS --title "samo.log"
+# deploy
+wrangler deploy
 ```
 
-## Requirements
+## Development
 
-- [Bun](https://bun.sh) runtime
-- GitHub personal access token (read:user, repo scopes)
-- API key for your chosen LLM provider (or Ollama running locally)
-
-## License
-
-Apache 2.0
+```bash
+bun install
+wrangler dev
+```

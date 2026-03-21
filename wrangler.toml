@@ -1,0 +1,21 @@
+name = "gitzette"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gitzette-db"
+database_id = "REPLACE_WITH_D1_ID"
+
+[vars]
+GITHUB_CLIENT_ID = "REPLACE_WITH_CLIENT_ID"
+WEEKLY_REGEN_LIMIT = "3"
+MONTHLY_LLM_BUDGET_USD = "50"
+
+# secrets (set via: wrangler secret put GITHUB_CLIENT_SECRET etc.)
+# GITHUB_CLIENT_SECRET
+# GITHUB_TOKEN        (server-side token for scanning public repos)
+# OPENROUTER_API_KEY
+# GOOGLE_AI_KEY
+# SESSION_SECRET

@@ -1,17 +1,17 @@
 {
   "name": "gitzette",
   "version": "0.1.0",
-  "description": "Turn your GitHub activity into a weekly newspaper",
-  "type": "module",
-  "bin": {
-    "gitzette": "./src/index.ts"
-  },
+  "private": true,
   "scripts": {
-    "start": "bun src/index.ts",
-    "build": "bun build src/index.ts --outfile dist/gitzette --target bun"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute gitzette-db --remote --file=schema.sql"
   },
   "dependencies": {
-    "@octokit/graphql": "^7.0.0",
-    "@octokit/rest": "^20.0.0"
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241106.0",
+    "wrangler": "^3.91.0"
   }
 }

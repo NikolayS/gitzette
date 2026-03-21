@@ -1,6 +1,6 @@
-.env
 node_modules/
+.wrangler/
+.dev.vars
+*.env
+.env*
 dist/
-*.html
-!example-output/
-.twitter-cookies.json
