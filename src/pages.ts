@@ -66,7 +66,41 @@ function creatorFooter(): string {
   </div>`;
 }
 
+function shareBar(username: string, week_key: string): string {
+  const url = `https://gitzette.online/${username}/${week_key}`;
+  const text = encodeURIComponent(`This week in open source: @${username}'s dispatch — ${url}`);
+  const xUrl = `https://twitter.com/intent/tweet?text=${text}`;
+  const liUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
+  return `<div style="max-width:900px;margin:0 auto;padding:14px 24px;border-top:1px solid #c8c2b4;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#666;display:flex;gap:20px;align-items:center;flex-wrap:wrap;">
+    <span>Share:</span>
+    <a href="${xUrl}" target="_blank" rel="noopener" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">post on X</a>
+    <a href="${liUrl}" target="_blank" rel="noopener" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">share on LinkedIn</a>
+  </div>`;
+}
+
+function dispatchFooter(username: string, week_key: string): string {
+  const url = `https://gitzette.online/${username}/${week_key}`;
+  const text = encodeURIComponent(`This week in open source: @${username}'s dispatch — ${url}`);
+  const xUrl = `https://twitter.com/intent/tweet?text=${text}`;
+  const liUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
+  return `
+  <div style="max-width:900px;margin:0 auto;padding:14px 24px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#666;border-top:1px solid #c8c2b4;display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;background:#f7f4ee;">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <a href="/" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">gitzette</a>
+      <a href="/${username}" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">@${username} on gitzette</a>
+      <a href="https://github.com/${username}" target="_blank" rel="noopener" style="color:#0f0f0f;text-decoration:none;border-bottom:1px solid #c8c2b4;">@${username} on GitHub</a>
+    </div>
+    <div style="display:flex;gap:16px;">
+      <a href="${xUrl}" target="_blank" rel="noopener" style="color:#888;text-decoration:none;">post on X</a>
+      <a href="${liUrl}" target="_blank" rel="noopener" style="color:#888;text-decoration:none;">share on LinkedIn</a>
+    </div>
+  </div>
+  ${ctaFooter()}
+  ${creatorFooter()}`;
+}
+
 function ctaFooter(): string {
+  // standalone CTA — only used on non-dispatch pages
   return `<div style="background:#0f0f0f;padding:14px 24px;text-align:center;font-family:monospace;font-size:13px;">
     <span style="color:#888;">Your open-source activity, turned into a weekly dispatch.</span>
     &nbsp;&nbsp;
@@ -244,14 +278,14 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>gitzette — your weekly open-source dispatch</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>
   :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'IBM Plex Serif', Georgia, serif; background: var(--paper); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
   a { color: var(--ink); text-decoration: none; }
   .hero { width: 100%; max-width: 760px; margin: 64px auto 0; padding: 0 20px; box-sizing: border-box; }
-  .masthead { font-family: 'IBM Plex Mono', monospace; font-size: clamp(40px, 10vw, 88px); font-weight: 700; letter-spacing: -.04em; line-height: 1; }
+  .masthead { font-family: 'UnifrakturMaguntia', serif; font-size: clamp(52px, 13vw, 100px); line-height: 1; }
   .tagline { font-size: clamp(15px, 2.5vw, 20px); color: var(--muted); margin: 16px 0 32px; font-style: italic; }
   .form-row { display: flex; gap: 0; max-width: 100%; }
   .form-row input { flex: 1; min-width: 0; padding: 12px 14px; border: 2px solid var(--ink); background: var(--paper); font-family: 'IBM Plex Mono', monospace; font-size: 15px; color: var(--ink); outline: none; }
@@ -362,7 +396,7 @@ function dispatchPage(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>@${username} — gitzette ${dispatch.week_key}</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>
   :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -375,33 +409,35 @@ function dispatchPage(
   .meta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); text-align: right; }
   .content { line-height: 1.7; }
   .content img { max-width: 100%; height: auto; display: block; }
-  .regen-bar { background: #0f0f0f; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; max-width: 900px; margin: 0 auto; gap: 12px; flex-wrap: wrap; }
-  .regen-bar span { color: #f7f4ee; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
-  .regen-btn { background: none; border: 1px solid #f7f4ee; color: #f7f4ee; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 4px 12px; cursor: pointer; }
+  .top-bar { background: #0f0f0f; padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .breadcrumb { font-family: 'IBM Plex Mono', monospace; font-size: 12px; display: flex; align-items: center; gap: 6px; color: #888; }
+  .breadcrumb a { color: #aaa; text-decoration: none; border: none; }
+  .breadcrumb a:hover { color: #f7f4ee; }
+  .breadcrumb .sep { color: #555; }
+  .breadcrumb .current { color: #f7f4ee; }
+  .breadcrumb-logo { font-family: 'UnifrakturMaguntia', serif; font-size: 22px; color: #f7f4ee; line-height: 1; }
+  .regen-btn { background: none; border: 1px solid #555; color: #aaa; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 4px 12px; cursor: pointer; }
+  .regen-btn:hover { border-color: #f7f4ee; color: #f7f4ee; }
 </style>
 </head>
 <body>
-  ${isOwner ? `
-  <div class="regen-bar">
-    <span>@${username} · ${dispatch.week_key} · generated ${generatedDate}</span>
+  <div class="top-bar">
+    <div class="breadcrumb">
+      <a href="/" class="breadcrumb-logo">gitzette</a>
+      <span class="sep">/</span>
+      <a href="/${username}">@${username}</a>
+      <span class="sep">/</span>
+      <span class="current">${dispatch.week_key}</span>
+    </div>
     <div style="display:flex;gap:12px;align-items:center;">
       ${weekNavBar(username, dispatch.week_key)}
-      <button class="regen-btn" onclick="regenerate()">regenerate</button>
+      ${isOwner ? `<button class="regen-btn" onclick="regenerate()">regenerate</button>` : ""}
     </div>
-  </div>` : `
-  <div style="background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
-    <a href="/${username}" style="color:#f7f4ee;border:none;">@${username}</a>
-    ${weekNavBar(username, dispatch.week_key)}
-  </div>`}
+  </div>
   <div class="paper">
-    <div class="header">
-      <div class="masthead"><a href="/" style="border:none;color:var(--ink);">gitzette</a></div>
-      <div class="meta">@${username}<br>${dispatch.week_key}</div>
-    </div>
     <div class="content">${dispatch.html}</div>
   </div>
-  ${ctaFooter()}
-  ${creatorFooter()}
+  ${dispatchFooter(username, dispatch.week_key)}
   ${isOwner ? `<script>
   async function regenerate() {
     const btn = document.querySelector('.regen-btn');
