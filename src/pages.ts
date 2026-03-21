@@ -145,6 +145,20 @@ pageRoutes.get("/", async (c) => {
 });
 
 // /status — private quota dashboard (token-gated)
+// serve illustration images from R2
+pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.jpg}", async (c) => {
+  const { slug } = c.req.param();
+  const obj = await c.env.DISPATCHES.get(`illustrations/${slug}`);
+  if (!obj) return c.text("not found", 404);
+  const buf = await obj.arrayBuffer();
+  return new Response(buf, {
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
+  });
+});
+
 pageRoutes.get("/status", async (c) => {
   const token = c.req.query("token");
   if (!token || token !== c.env.SESSION_SECRET) {
