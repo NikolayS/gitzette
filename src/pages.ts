@@ -33,6 +33,39 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
     return c.html(noDispatchPage(username, isOwner));
   }
 
+  // if stored HTML is a full document, inject the owner bar and serve directly
+  if (dispatch.html.startsWith("<!DOCTYPE") || dispatch.html.startsWith("<html")) {
+    const ownerBar = isOwner ? `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:monospace;font-size:12px;">
+      <span style="color:#f7f4ee;">@${username} · ${dispatch.week_key} · generated ${new Date(dispatch.generated_at * 1000).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>
+      <button style="background:none;border:1px solid #f7f4ee;color:#f7f4ee;font-family:monospace;font-size:12px;padding:3px 10px;cursor:pointer;" onclick="regenerate()">regenerate</button>
+    </div>
+    <div style="height:36px;"></div>
+    <script>
+    async function regenerate() {
+      const btn = document.querySelector('button');
+      btn.disabled=true; btn.textContent='generating...';
+      await fetch('/generate',{method:'POST'});
+      let n=0;
+      const iv=setInterval(async()=>{
+        n++; btn.textContent='generating... ('+(n*5)+'s)';
+        const s=await fetch('/generate/status').then(r=>r.json());
+        if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(iv);location.reload();}
+        if(n>24){clearInterval(iv);btn.textContent='reload manually';}
+      },5000);
+    }
+    </script>` : "";
+    const ctaBar = `<div style="background:#0f0f0f;padding:14px 24px;text-align:center;font-family:monospace;font-size:13px;">
+      <span style="color:#888;">Your open-source activity, turned into a weekly dispatch.</span>
+      &nbsp;&nbsp;
+      <a href="https://gitzette.online" style="color:#f7f4ee;text-decoration:none;border-bottom:1px solid #555;">Generate yours at gitzette.online →</a>
+    </div>`;
+    // inject owner bar right after <body>, CTA before </body>
+    const html = dispatch.html
+      .replace("<body>", `<body>${ownerBar}`)
+      .replace("</body>", `${ctaBar}</body>`);
+    return c.html(html);
+  }
+
   return c.html(dispatchPage(username, dispatch, isOwner));
 });
 
@@ -132,7 +165,7 @@ function dispatchPage(
     </div>
     <div class="footer">
       <span>gitzette.online/${username}</span>
-      <span>generated from public GitHub activity</span>
+      <a href="/" style="font-family:monospace;font-size:11px;color:#888;border-bottom:none;">generate yours at gitzette.online →</a>
     </div>
   </div>
   ${isOwner ? `<script>
@@ -143,11 +176,25 @@ function dispatchPage(
     const data = await res.json();
     if (data.error) {
       btn.textContent = data.message || data.error;
-      setTimeout(() => { btn.disabled = false; btn.textContent = 'regenerate'; }, 4000);
-    } else {
-      btn.textContent = 'queued — check back in ~60s';
-      setTimeout(() => location.reload(), 65000);
+      setTimeout(() => { btn.disabled = false; btn.textContent = 'regenerate'; }, 5000);
+      return;
     }
+    // poll until done
+    btn.textContent = 'scanning repos...';
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      const s = await fetch('/generate/status').then(r => r.json());
+      if (s.status === 'ready' && s.week_key !== 'generating') {
+        clearInterval(poll);
+        location.reload();
+      } else if (attempts > 24) { // 2 min timeout
+        clearInterval(poll);
+        btn.textContent = 'taking long — reload manually';
+      } else {
+        btn.textContent = "generating... (" + (attempts * 5) + "s)";
+      }
+    }, 5000);
   }
   </script>` : ""}
 </body>
@@ -162,7 +209,21 @@ function noDispatchPage(username: string, isOwner: boolean): string {
 </head><body>
   <div style="font-size:32px;font-weight:700;">@${username}</div>
   <div style="color:#666;">No dispatch generated yet.</div>
-  ${isOwner ? `<button onclick="fetch('/generate',{method:'POST'}).then(()=>location.reload())" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>` : ""}
+  ${isOwner ? `<button id="genbtn" onclick="startGen()" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>
+  <script>
+  async function startGen() {
+    const btn = document.getElementById('genbtn');
+    btn.disabled=true; btn.textContent='generating...';
+    await fetch('/generate',{method:'POST'});
+    let n=0;
+    const iv=setInterval(async()=>{
+      n++; btn.textContent='generating... ('+n*5+'s)';
+      const s=await fetch('/generate/status').then(r=>r.json());
+      if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(iv);location.reload();}
+      if(n>24){clearInterval(iv);btn.textContent='reload manually';}
+    },5000);
+  }
+  </script>` : ""}
   <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
 </body></html>`;
 }
