@@ -31,10 +31,10 @@ generateRoutes.post("/", async (c) => {
     }, 503);
   }
 
-  // mark as generating (no HTML stored yet — r2_key null during generation)
+  // mark as generating (sentinel row — deleted on completion)
   await c.env.DB.prepare(
     `INSERT INTO dispatches (user_id, week_key, r2_key, generated_at) VALUES (?, 'generating', NULL, unixepoch())
-     ON CONFLICT(user_id) DO UPDATE SET week_key='generating', r2_key=NULL, generated_at=unixepoch()`
+     ON CONFLICT(user_id, week_key) DO UPDATE SET r2_key=NULL, generated_at=unixepoch()`
   ).bind(user.id).run();
 
   // delegate to callbot server (no CPU time limit there)
@@ -575,9 +575,10 @@ async function saveDispatch(db: D1Database, r2: R2Bucket, userId: string, userna
   // store HTML in R2
   await r2.put(r2Key, html, { httpMetadata: { contentType: "text/html; charset=utf-8" } });
 
-  // store only metadata in D1
+  // store metadata in D1 — delete generating sentinel, insert real row
+  await db.prepare(`DELETE FROM dispatches WHERE user_id=? AND week_key='generating'`).bind(userId).run();
   await db.prepare(
     `INSERT INTO dispatches (user_id, week_key, r2_key, generated_at) VALUES (?, ?, ?, unixepoch())
-     ON CONFLICT(user_id) DO UPDATE SET week_key=excluded.week_key, r2_key=excluded.r2_key, generated_at=excluded.generated_at`
+     ON CONFLICT(user_id, week_key) DO UPDATE SET r2_key=excluded.r2_key, generated_at=excluded.generated_at`
   ).bind(userId, wk, r2Key).run();
 }
