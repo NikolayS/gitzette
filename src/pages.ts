@@ -127,16 +127,19 @@ async function fetchAndServeDispatch(
   const IMG_FIX_STYLE = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
 
   if (html.startsWith("<!DOCTYPE") || html.startsWith("<html")) {
+    const breadcrumb = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow:hidden;">
+          <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;border:none;">gitzette</a>
+          <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
+          <a href="/${username}" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#aaa;text-decoration:none;border:none;">@${username}</a>
+          <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#f7f4ee;font-weight:600;">${week_key}</span>
+        </div>`;
     const ownerBar = isOwner
       ? `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;">gitzette</a>
-            <span style="color:#444;">/</span>
-            <span style="color:#aaa;">@${username} · ${week_key} · generated ${new Date(generated_at * 1000).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>
-          </div>
-          <div style="display:flex;gap:12px;align-items:center;">
+          ${breadcrumb}
+          <div style="display:flex;gap:12px;align-items:center;flex-shrink:0;">
             ${weekNavBar(username, week_key)}
-            <button style="background:none;border:1px solid #f7f4ee;color:#f7f4ee;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 10px;cursor:pointer;" onclick="regenerate()">regenerate</button>
+            <button style="background:none;border:1px solid #555;color:#aaa;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 10px;cursor:pointer;" onmouseover="this.style.borderColor='#f7f4ee';this.style.color='#f7f4ee'" onmouseout="this.style.borderColor='#555';this.style.color='#aaa'" onclick="regenerate()">regenerate</button>
           </div>
         </div>
         <div style="min-height:48px;"></div>
@@ -155,12 +158,10 @@ async function fetchAndServeDispatch(
         }
         </script>`
       : `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;">gitzette</a>
-            <span style="color:#444;">/</span>
-            <span style="color:#aaa;">@${username}</span>
+          ${breadcrumb}
+          <div style="flex-shrink:0;">
+            ${weekNavBar(username, week_key)}
           </div>
-          ${weekNavBar(username, week_key)}
         </div>
         <div style="min-height:40px;"></div>`;
 
