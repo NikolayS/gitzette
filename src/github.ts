@@ -40,11 +40,58 @@ export interface GitHubData {
   totalCommits: number;
 }
 
+export async function fetchForkPRs(
+  repos: string[],
+  token: string,
+): Promise<PullRequest[]> {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+
+  const prs: PullRequest[] = [];
+  for (const repo of repos) {
+    const [owner, name] = repo.split("/");
+    const query = `
+      query($owner: String!, $name: String!) {
+        repository(owner: $owner, name: $name) {
+          pullRequests(first: 20, states: [OPEN], orderBy: {field: UPDATED_AT, direction: DESC}) {
+            nodes {
+              title url number state createdAt updatedAt
+              bodyText
+              repository { nameWithOwner }
+            }
+          }
+        }
+      }`;
+    const resp = await fetch("https://api.github.com/graphql", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ query, variables: { owner, name } }),
+    });
+    const json = await resp.json() as any;
+    if (json.errors || !json.data?.repository) continue;
+    for (const pr of json.data.repository.pullRequests.nodes) {
+      prs.push({
+        title: pr.title,
+        url: pr.url,
+        state: pr.state,
+        createdAt: pr.createdAt,
+        repo: pr.repository.nameWithOwner,
+        number: pr.number,
+        body: pr.bodyText?.slice(0, 200),
+      });
+    }
+  }
+  return prs;
+}
+
 export async function fetchGitHubActivity(
   user: string,
   token: string,
   from: Date,
-  to: Date
+  to: Date,
+  forkRepos: string[] = [],
 ): Promise<GitHubData> {
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -136,6 +183,12 @@ export async function fetchGitHubActivity(
       description: r.description,
       createdAt: r.createdAt,
     }));
+
+  // Add fork WIP PRs
+  if (forkRepos.length > 0) {
+    const forkPRs = await fetchForkPRs(forkRepos, token);
+    pullRequests.push(...forkPRs);
+  }
 
   return { repos, pullRequests, issues, newRepos, totalCommits };
 }

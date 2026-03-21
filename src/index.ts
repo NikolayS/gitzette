@@ -49,7 +49,8 @@ EXAMPLES:
     config.githubUser,
     config.githubToken,
     config.weekStart,
-    config.weekEnd
+    config.weekEnd,
+    config.forkRepos,
   );
 
   console.log(`   ${data.totalCommits} commits, ${data.pullRequests.length} PRs, ${data.newRepos.length} new repos`);

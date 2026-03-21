@@ -9,6 +9,7 @@ export interface Config {
   weekEnd: Date;
   outputFile: string;
   title: string;
+  forkRepos: string[];
 }
 
 export function getWeekRange(weekStr?: string): { start: Date; end: Date } {
@@ -71,5 +72,9 @@ export function loadConfig(args: string[]): Config {
   const outputFile = get("--output") || `gitzette-${start.toISOString().slice(0, 10)}.html`;
   const title = get("--title") || process.env.GITZETTE_TITLE || "the changelog";
 
-  return { githubUser: user, githubToken: token, llmProvider: provider, llmModel: model, llmApiKey: apiKey, llmBaseUrl: baseUrl, weekStart: start, weekEnd: end, outputFile, title };
+  // --forks owner/repo,owner/repo or GITZETTE_FORKS env
+  const forksRaw = get("--forks") || process.env.GITZETTE_FORKS || "";
+  const forkRepos = forksRaw ? forksRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
+
+  return { githubUser: user, githubToken: token, llmProvider: provider, llmModel: model, llmApiKey: apiKey, llmBaseUrl: baseUrl, weekStart: start, weekEnd: end, outputFile, title, forkRepos };
 }
