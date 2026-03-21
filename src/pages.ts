@@ -10,8 +10,8 @@ pageRoutes.get("/", async (c) => {
   return c.html(homePage(user));
 });
 
-// public dispatch page for any user
-pageRoutes.get("/@:username", async (c) => {
+// public dispatch page for any user — gitzette.online/username
+pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
   const { username } = c.req.param();
   const viewer = await getUser(c);
 
@@ -67,14 +67,14 @@ function homePage(user: { username: string; avatar_url: string } | null): string
         <img src="${user.avatar_url}" class="avatar" alt="">
         <span>@${user.username}</span>
         &nbsp;·&nbsp;
-        <a href="/@${user.username}" style="font-family:monospace;color:#0f0f0f;">view my dispatch →</a>
+        <a href="/${user.username}" style="font-family:monospace;color:#0f0f0f;">view my dispatch →</a>
         &nbsp;·&nbsp;
         <a href="/auth/logout" style="font-family:monospace;color:#888;font-size:11px;">sign out</a>
        </div>`
     : `<a href="/auth/github" class="btn">Sign in with GitHub</a>`
   }
   <hr class="rule">
-  <div class="example">example: <a href="/@NikolayS">gitzette.online/@NikolayS</a></div>
+  <div class="example">example: <a href="/NikolayS">gitzette.online/NikolayS</a></div>
 </body>
 </html>`;
 }
@@ -131,7 +131,7 @@ function dispatchPage(
       ${dispatch.html}
     </div>
     <div class="footer">
-      <span>gitzette.online/@${username}</span>
+      <span>gitzette.online/${username}</span>
       <span>generated from public GitHub activity</span>
     </div>
   </div>

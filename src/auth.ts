@@ -7,7 +7,7 @@ export const authRoutes = new Hono<{ Bindings: Env }>();
 // redirect to GitHub OAuth
 authRoutes.get("/github", (c) => {
   const state = crypto.randomUUID();
-  setCookie(c, "oauth_state", state, { httpOnly: true, secure: true, maxAge: 600, path: "/" });
+  setCookie(c, "oauth_state", state, { httpOnly: true, secure: true, maxAge: 600, path: "/", sameSite: "None" });
   const url = new URL("https://github.com/login/oauth/authorize");
   url.searchParams.set("client_id", c.env.GITHUB_CLIENT_ID);
   url.searchParams.set("scope", "read:user");
@@ -69,7 +69,7 @@ authRoutes.get("/callback", async (c) => {
     maxAge: 7 * 86400, path: "/", sameSite: "Lax",
   });
 
-  return c.redirect(`/@${ghUser.login}`);
+  return c.redirect(`/${ghUser.login}`);
 });
 
 // sign out
