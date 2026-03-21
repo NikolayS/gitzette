@@ -138,7 +138,7 @@ pageRoutes.get("/", async (c) => {
      FROM dispatches d
      JOIN users u ON u.id = d.user_id
      WHERE d.r2_key IS NOT NULL AND d.week_key != 'generating'
-     ORDER BY d.generated_at DESC LIMIT 12`
+     ORDER BY d.generated_at DESC LIMIT 100`
   ).all<{ username: string; week_key: string; generated_at: number }>();
 
   return c.html(homePage(recent.results ?? []));
@@ -222,13 +222,14 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}/:week_key{\\d{4}-W\\d{1,2}}", async (
 // ── templates ─────────────────────────────────────────────────────────────────
 
 function homePage(recent: { username: string; week_key: string; generated_at: number }[]): string {
-  const cards = recent.map(d => {
+  const rows = recent.map(d => {
     const short = d.week_key.replace(/^\d{4}-/, "");
     const date = new Date(d.generated_at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    return `<a href="/${d.username}/${d.week_key}" class="card">
-      <span class="card-user">@${d.username}</span>
-      <span class="card-week">${short} · ${date}</span>
-      <span class="card-cta">Read →</span>
+    return `<a href="/${d.username}/${d.week_key}" class="dispatch-row">
+      <span class="row-user">@${d.username}</span>
+      <span class="row-week">${short}</span>
+      <span class="row-date">${date}</span>
+      <span class="row-cta">Read →</span>
     </a>`;
   }).join("");
 
@@ -254,13 +255,14 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
   .form-row button { flex-shrink: 0; padding: 12px 20px; background: var(--ink); color: var(--paper); font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; border: none; cursor: pointer; letter-spacing: .04em; white-space: nowrap; }
   .form-row button:hover { background: #333; }
   .divider { width: 100%; max-width: 760px; margin: 56px auto 0; padding: 0 20px; box-sizing: border-box; border-top: 3px double var(--ink); }
-  .recent-head { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 12px 0 20px; color: var(--muted); }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1px; background: var(--rule); width: 100%; max-width: 760px; margin: 0 auto; padding: 0 20px; box-sizing: border-box; }
-  .card { display: flex; flex-direction: column; gap: 4px; padding: 14px; background: var(--paper); transition: background .1s; min-width: 0; }
-  .card:hover { background: #edeae2; }
-  .card-user { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .card-week { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); }
-  .card-cta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; margin-top: 4px; }
+  .recent-head { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 12px 0 16px; color: var(--muted); }
+  .dispatch-list { width: 100%; max-width: 760px; margin: 0 auto; padding: 0 20px; box-sizing: border-box; }
+  .dispatch-row { display: flex; align-items: baseline; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--rule); text-decoration: none; color: var(--ink); transition: background .1s; }
+  .dispatch-row:hover { background: #edeae2; margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
+  .row-user { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; min-width: 120px; }
+  .row-week { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); min-width: 40px; }
+  .row-date { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); flex: 1; }
+  .row-cta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); flex-shrink: 0; }
   .auth-note { width: 100%; max-width: 760px; margin: 28px auto 0; padding: 0 20px; box-sizing: border-box; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); }
   .auth-note a { color: var(--ink); border-bottom: 1px solid var(--rule); }
   footer { margin-top: auto; }
@@ -287,7 +289,7 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
   <div class="divider">
     <div class="recent-head">Recent dispatches</div>
   </div>
-  <div class="cards">${cards}</div>` : ""}
+  <div class="dispatch-list">${rows}</div>` : ""}
   <footer>
     ${ctaFooter()}
     ${creatorFooter()}
