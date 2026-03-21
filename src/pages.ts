@@ -46,23 +46,23 @@ function weekNavBar(username: string, week_key: string): string {
   const next = adjacentWeekKey(week_key, 1);
   const isFuture = next >= currentWeekKey();
   const short = (wk: string) => wk.replace(/^\d{4}-/, ""); // "W13"
-  return `<span style="font-family:monospace;font-size:11px;letter-spacing:.04em;display:flex;align-items:center;gap:8px;">
-    <a href="/${username}/${prev}" style="color:var(--ink,#0f0f0f);border:none;text-decoration:none;">← ${short(prev)}</a>
-    <span style="color:var(--rule,#c8c2b4);">|</span>
-    <span style="font-weight:600;">${short(week_key)}</span>
-    <span style="color:var(--rule,#c8c2b4);">|</span>
+  return `<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.04em;display:flex;align-items:center;gap:8px;white-space:nowrap;">
+    <a href="/${username}/${prev}" style="color:#f7f4ee;border:none;text-decoration:none;opacity:.75;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.75'">← ${short(prev)}</a>
+    <span style="color:#444;">|</span>
+    <span style="font-weight:600;color:#f7f4ee;">${short(week_key)}</span>
+    <span style="color:#444;">|</span>
     ${isFuture
-      ? `<span style="color:#bbb;">${short(next)} →</span>`
-      : `<a href="/${username}/${next}" style="color:var(--ink,#0f0f0f);border:none;text-decoration:none;">${short(next)} →</a>`
+      ? `<span style="color:#444;">${short(next)} →</span>`
+      : `<a href="/${username}/${next}" style="color:#f7f4ee;border:none;text-decoration:none;opacity:.75;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.75'">${short(next)} →</a>`
     }
   </span>`;
 }
 
 function creatorFooter(): string {
-  return `<div style="background:#0f0f0f;padding:10px 24px;text-align:center;font-family:monospace;font-size:11px;color:#666;">
-    built by <a href="https://github.com/NikolayS" style="color:#aaa;text-decoration:none;border:none;">@NikolayS</a>
+  return `<div style="background:#0f0f0f;padding:10px 24px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">
+    built by <a href="https://github.com/NikolayS" style="color:#ccc;text-decoration:none;border:none;">@NikolayS</a>
     &nbsp;·&nbsp;
-    <a href="https://gitzette.online" style="color:#aaa;text-decoration:none;border:none;">gitzette.online</a>
+    <a href="https://gitzette.online" style="color:#ccc;text-decoration:none;border:none;">gitzette.online</a>
   </div>`;
 }
 
@@ -87,16 +87,19 @@ async function fetchAndServeDispatch(
 
   const html: string = await r2obj.text();
 
+  // Image overflow guard — injected into every served dispatch document
+  const IMG_FIX_STYLE = `<style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
+
   if (html.startsWith("<!DOCTYPE") || html.startsWith("<html")) {
     const ownerBar = isOwner
-      ? `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
+      ? `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
           <span style="color:#f7f4ee;">@${username} · ${week_key} · generated ${new Date(generated_at * 1000).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>
           <div style="display:flex;gap:12px;align-items:center;">
             ${weekNavBar(username, week_key)}
-            <button style="background:none;border:1px solid #f7f4ee;color:#f7f4ee;font-family:monospace;font-size:12px;padding:3px 10px;cursor:pointer;" onclick="regenerate()">regenerate</button>
+            <button style="background:none;border:1px solid #f7f4ee;color:#f7f4ee;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 10px;cursor:pointer;" onclick="regenerate()">regenerate</button>
           </div>
         </div>
-        <div style="height:40px;"></div>
+        <div style="min-height:48px;"></div>
         <script>
         async function regenerate() {
           const btn = document.querySelector('button');
@@ -111,13 +114,14 @@ async function fetchAndServeDispatch(
           },5000);
         }
         </script>`
-      : `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:monospace;font-size:12px;">
+      : `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
           <span style="color:#f7f4ee;">@${username}</span>
           ${weekNavBar(username, week_key)}
         </div>
-        <div style="height:36px;"></div>`;
+        <div style="min-height:40px;"></div>`;
 
     const out = html
+      .replace("</head>", `${IMG_FIX_STYLE}</head>`)
       .replace("<body>", `<body>${ownerBar}`)
       .replace("</body>", `${ctaFooter()}${creatorFooter()}</body>`);
     return c.html(out);
@@ -364,11 +368,13 @@ function dispatchPage(
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #e8e4dc; font-family: 'IBM Plex Serif', Georgia, serif; color: var(--ink); }
   a { color: var(--ink); }
-  .paper { max-width: 900px; margin: 24px auto; background: var(--paper); border: 1px solid var(--rule); padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,.12); }
+  .paper { max-width: 900px; margin: 24px auto; background: var(--paper); border: 1px solid var(--rule); padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,.12); overflow-x: hidden; }
+  @media (max-width: 640px) { .paper { margin: 0; padding: 16px; border-left: none; border-right: none; } }
   .header { border-bottom: 3px solid var(--ink); padding-bottom: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: baseline; }
   .masthead { font-family: 'IBM Plex Mono', monospace; font-size: 32px; font-weight: 700; letter-spacing: -.03em; }
   .meta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); text-align: right; }
   .content { line-height: 1.7; }
+  .content img { max-width: 100%; height: auto; display: block; }
   .regen-bar { background: #0f0f0f; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; max-width: 900px; margin: 0 auto; gap: 12px; flex-wrap: wrap; }
   .regen-bar span { color: #f7f4ee; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
   .regen-btn { background: none; border: 1px solid #f7f4ee; color: #f7f4ee; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 4px 12px; cursor: pointer; }
@@ -383,7 +389,7 @@ function dispatchPage(
       <button class="regen-btn" onclick="regenerate()">regenerate</button>
     </div>
   </div>` : `
-  <div style="background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;max-width:900px;margin:0 auto;font-family:monospace;font-size:12px;">
+  <div style="background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
     <a href="/${username}" style="color:#f7f4ee;border:none;">@${username}</a>
     ${weekNavBar(username, dispatch.week_key)}
   </div>`}
@@ -419,8 +425,8 @@ function dispatchPage(
 
 function noDispatchPage(username: string, isOwner: boolean, week_key: string | null): string {
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>@${username} — gitzette</title>
-<style>body{font-family:monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;}</style>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
+<style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
 </head><body>
   <div style="font-size:32px;font-weight:700;">@${username}</div>
   <div style="color:#666;">No dispatch generated yet${week_key ? ` for ${week_key}` : ""}.</div>
@@ -435,8 +441,8 @@ function noDispatchPage(username: string, isOwner: boolean, week_key: string | n
 
 function weekNotFoundPage(username: string, week_key: string): string {
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>@${username} ${week_key} — gitzette</title>
-<style>body{font-family:monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;}</style>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} ${week_key} — gitzette</title>
+<style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
 </head><body>
   <div style="font-size:24px;font-weight:700;">@${username} · ${week_key}</div>
   <div style="color:#666;">No dispatch for this week.</div>
@@ -447,9 +453,9 @@ function weekNotFoundPage(username: string, week_key: string): string {
 
 function generatingPage(username: string): string {
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>@${username} — gitzette</title>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
 <meta http-equiv="refresh" content="10">
-<style>body{font-family:monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;}</style>
+<style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
 </head><body>
   <div style="font-size:32px;font-weight:700;">@${username}</div>
   <div style="color:#666;">Generating dispatch... refreshing automatically.</div>
@@ -460,8 +466,8 @@ function generatingPage(username: string): string {
 
 function notFoundPage(username: string): string {
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>not found — gitzette</title>
-<style>body{font-family:monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;}</style>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>not found — gitzette</title>
+<style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
 </head><body>
   <div style="font-size:32px;font-weight:700;">@${username}</div>
   <div style="color:#666;">User not found. Have they signed in?</div>
