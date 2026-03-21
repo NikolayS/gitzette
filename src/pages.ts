@@ -54,19 +54,25 @@ function currentWeekKey(): string {
   return `${now.getFullYear()}-W${String(diff + 1).padStart(2, "0")}`;
 }
 
-function weekNavBar(username: string, week_key: string): string {
+function weekNavBar(username: string, week_key: string, prevExists?: boolean, nextExists?: boolean): string {
   const prev = adjacentWeekKey(week_key, -1);
   const next = adjacentWeekKey(week_key, 1);
   const isFuture = next >= currentWeekKey();
   const short = (wk: string) => wk.replace(/^\d{4}-/, ""); // "W13"
-  return `<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.04em;display:flex;align-items:center;gap:8px;white-space:nowrap;">
-    <a href="/${username}/${prev}" style="color:#f7f4ee;border:none;text-decoration:none;opacity:.75;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.75'">← ${short(prev)}</a>
-    <span style="color:#444;">|</span>
-    <span style="font-weight:600;color:#f7f4ee;">${short(week_key)}</span>
-    <span style="color:#444;">|</span>
-    ${isFuture
-      ? `<span style="color:#444;">${short(next)} →</span>`
-      : `<a href="/${username}/${next}" style="color:#f7f4ee;border:none;text-decoration:none;opacity:.75;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.75'">${short(next)} →</a>`
+  // prevExists/nextExists: if provided, only show nav for known weeks; default to showing both
+  const showPrev = prevExists !== false;
+  const showNext = nextExists !== false && !isFuture;
+  const navLinkStyle = "color:#f7f4ee;text-decoration:none;border:1px solid #555;padding:3px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.04em;";
+  const navLinkHover = "onmouseover=\"this.style.borderColor='#aaa';this.style.color='#fff'\" onmouseout=\"this.style.borderColor='#555';this.style.color='#f7f4ee'\"";
+  return `<span style="display:flex;align-items:center;gap:6px;white-space:nowrap;">
+    ${showPrev
+      ? `<a href="/${username}/${prev}" style="${navLinkStyle}" ${navLinkHover}>← ${short(prev)}</a>`
+      : `<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#444;border:1px solid #333;padding:3px 8px;">← ${short(prev)}</span>`
+    }
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:#f7f4ee;padding:3px 6px;">${short(week_key)}</span>
+    ${showNext
+      ? `<a href="/${username}/${next}" style="${navLinkStyle}" ${navLinkHover}>${short(next)} →</a>`
+      : `<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#444;border:1px solid #333;padding:3px 8px;">${short(next)} →</span>`
     }
   </span>`;
 }
@@ -84,13 +90,28 @@ function creatorFooter(): string {
   </div>`;
 }
 
-function dispatchFooter(username: string, week_key: string): string {
+function dispatchFooter(username: string, week_key: string, prevWeekKey?: string | null, nextWeekKey?: string | null): string {
   const url = `https://gitzette.online/${username}/${week_key}`;
   const tweetText = encodeURIComponent(`This week in open source: @${username}'s dispatch — ${url}`);
   const xUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
   const liUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
+  const isFuture = nextWeekKey && nextWeekKey >= currentWeekKey();
+  // Footer week nav — only show links for weeks that exist (passed as params)
+  const prevLink = prevWeekKey
+    ? `<a href="/${username}/${prevWeekKey}" style="color:#0f0f0f;text-decoration:none;border:1px solid #c8c2b4;padding:5px 12px;font-family:'IBM Plex Mono',monospace;font-size:12px;" onmouseover="this.style.borderColor='#0f0f0f'" onmouseout="this.style.borderColor='#c8c2b4'">← ${weekKeyToRange(prevWeekKey)}</a>`
+    : "";
+  const nextLink = (nextWeekKey && !isFuture)
+    ? `<a href="/${username}/${nextWeekKey}" style="color:#0f0f0f;text-decoration:none;border:1px solid #c8c2b4;padding:5px 12px;font-family:'IBM Plex Mono',monospace;font-size:12px;" onmouseover="this.style.borderColor='#0f0f0f'" onmouseout="this.style.borderColor='#c8c2b4'">${weekKeyToRange(nextWeekKey)} →</a>`
+    : "";
+  const weekNavRow = (prevLink || nextLink) ? `
+    <!-- Week nav row -->
+    <div style="max-width:900px;margin:0 auto;padding:16px 24px 8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;">
+      ${prevLink}
+      ${nextLink}
+    </div>` : "";
   return `
   <div style="background:#f7f4ee;border-top:1px solid #c8c2b4;">
+    ${weekNavRow}
     <!-- Row 1: Navigation links — left-aligned, ink, underlined -->
     <div style="max-width:900px;margin:0 auto;padding:14px 24px 6px;font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;flex-wrap:wrap;gap:4px 20px;align-items:center;">
       <a href="/" style="color:#0f0f0f;text-decoration:underline;">gitzette</a>
@@ -180,6 +201,20 @@ async function fetchAndServeDispatch(
 
   const html: string = await r2obj.text();
 
+  // Query adjacent weeks to show proper nav (only for existing weeks)
+  const prevKey = adjacentWeekKey(week_key, -1);
+  const nextKey = adjacentWeekKey(week_key, 1);
+  const [prevRow, nextRow] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT 1 FROM dispatches d JOIN users u ON u.id = d.user_id WHERE u.username = ? AND d.week_key = ? AND d.r2_key IS NOT NULL`
+    ).bind(username, prevKey).first(),
+    c.env.DB.prepare(
+      `SELECT 1 FROM dispatches d JOIN users u ON u.id = d.user_id WHERE u.username = ? AND d.week_key = ? AND d.r2_key IS NOT NULL`
+    ).bind(username, nextKey).first(),
+  ]);
+  const prevExists = !!prevRow;
+  const nextExists = !!nextRow;
+
   const ogTags = buildDispatchOGTags(html, username, week_key);
 
   // Image overflow guard — injected into every served dispatch document
@@ -198,14 +233,22 @@ async function fetchAndServeDispatch(
       ? `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
           ${breadcrumb}
           <div style="display:flex;gap:12px;align-items:center;flex-shrink:0;">
-            ${weekNavBar(username, week_key)}
+            ${weekNavBar(username, week_key, prevExists, nextExists)}
             <button style="background:none;border:1px solid #555;color:#aaa;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 10px;cursor:pointer;" onmouseover="this.style.borderColor='#f7f4ee';this.style.color='#f7f4ee'" onmouseout="this.style.borderColor='#555';this.style.color='#aaa'" onclick="regenerate()">regenerate</button>
           </div>
         </div>
         <div style="min-height:48px;"></div>
         <script>
+        var _regenPending=false,_regenTimer=null;
         async function regenerate() {
-          const btn = document.querySelector('button');
+          const btn = document.querySelector('button[onclick="regenerate()"]');
+          if (!_regenPending) {
+            _regenPending=true;
+            btn.textContent='Sure? Click again to confirm';
+            _regenTimer=setTimeout(()=>{_regenPending=false;btn.textContent='regenerate';},5000);
+            return;
+          }
+          clearTimeout(_regenTimer);_regenPending=false;
           btn.disabled=true; btn.textContent='generating...';
           await fetch('/generate',{method:'POST'});
           let n=0;
@@ -220,7 +263,7 @@ async function fetchAndServeDispatch(
       : `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
           ${breadcrumb}
           <div style="flex-shrink:0;">
-            ${weekNavBar(username, week_key)}
+            ${weekNavBar(username, week_key, prevExists, nextExists)}
           </div>
         </div>
         <div style="min-height:40px;"></div>`;
@@ -228,11 +271,83 @@ async function fetchAndServeDispatch(
     const out = html
       .replace("</head>", `${IMG_FIX_STYLE}</head>`)
       .replace("<body>", `<body>${ownerBar}`)
-      .replace("</body>", `${dispatchFooter(username, week_key)}</body>`);
+      .replace("</body>", `${dispatchFooter(username, week_key, prevExists ? prevKey : null, nextExists ? nextKey : null)}</body>`);
     return c.html(out);
   }
 
   return c.html(dispatchPage(username, { html, week_key, generated_at }, isOwner));
+}
+
+function userProfilePage(
+  username: string,
+  avatar_url: string | null,
+  dispatches: { week_key: string; generated_at: number }[]
+): string {
+  const rows = dispatches.map(d => {
+    const short = d.week_key.replace(/^\d{4}-/, "");
+    const range = weekKeyToRange(d.week_key);
+    return `<a href="/${username}/${d.week_key}" style="display:flex;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid #c8c2b4;text-decoration:none;color:#0f0f0f;font-family:'IBM Plex Mono',monospace;" onmouseover="this.style.background='#edeae2';this.style.marginLeft='-8px';this.style.paddingLeft='8px';this.style.marginRight='-8px';this.style.paddingRight='8px';" onmouseout="this.style.background='';this.style.marginLeft='';this.style.paddingLeft='0';this.style.marginRight='';this.style.paddingRight='0';">
+      <span style="font-size:13px;flex:1;">${range}</span>
+      <span style="font-size:10px;color:#888;">${short}</span>
+      <span style="font-size:11px;color:#888;flex-shrink:0;">Read →</span>
+    </a>`;
+  }).join("");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>@${username} — gitzette</title>
+<meta property="og:title" content="@${username} on gitzette">
+<meta property="og:description" content="Weekly open-source dispatches by @${username}.">
+<meta property="og:url" content="https://gitzette.online/${username}">
+<meta property="og:type" content="profile">
+${headTags()}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'IBM Plex Mono', monospace; background: var(--paper); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; }
+  a { color: var(--ink); text-decoration: none; }
+  .top-bar { background: #0f0f0f; padding: 8px 16px; display: flex; align-items: center; gap: 10px; }
+  .top-bar a { font-family: 'Playfair Display', serif; font-weight: 900; font-style: italic; font-size: 22px; color: #f7f4ee; line-height: 1; }
+  .top-bar .sep { color: #555; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  .top-bar .current { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #aaa; }
+  .content { flex: 1; max-width: 760px; margin: 0 auto; padding: 40px 24px; width: 100%; }
+  .profile-header { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; border-bottom: 3px double var(--ink); padding-bottom: 20px; }
+  .avatar { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--rule); }
+  .username { font-size: 20px; font-weight: 700; }
+  .github-link { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .github-link a { color: var(--muted); text-decoration: underline; }
+  .dispatch-count { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
+  footer { margin-top: auto; }
+</style>
+</head>
+<body>
+  <div class="top-bar">
+    <a href="/">gitzette</a>
+    <span class="sep">/</span>
+    <span class="current">@${username}</span>
+  </div>
+  <div class="content">
+    <div class="profile-header">
+      ${avatar_url ? `<img src="${avatar_url}" class="avatar" alt="@${username}" loading="lazy">` : ""}
+      <div>
+        <div class="username">@${username}</div>
+        <div class="github-link"><a href="https://github.com/${username}" target="_blank" rel="noopener">github.com/${username}</a></div>
+      </div>
+    </div>
+    <div class="dispatch-count">${dispatches.length} dispatch${dispatches.length !== 1 ? "es" : ""}</div>
+    <div>${rows}</div>
+  </div>
+  <footer>
+    ${ctaFooter()}
+    ${creatorFooter()}
+  </footer>
+</body>
+</html>`;
 }
 
 // ── routes ────────────────────────────────────────────────────────────────────
@@ -284,28 +399,47 @@ pageRoutes.get("/status", async (c) => {
   return c.html(statusPage({ spent, monthlyBudget, pct, dispatches: genRow?.total ?? 0, users: userRow?.total ?? 0 }));
 });
 
-// public dispatch page — latest week
+// public profile page — lists all dispatches (or latest if only one)
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
   const { username } = c.req.param();
   const viewer = await getUser(c);
   const isOwner = viewer?.username === username;
 
-  const dispatchMeta = await c.env.DB.prepare(
-    `SELECT d.r2_key, d.week_key, d.generated_at
-     FROM dispatches d
-     JOIN users u ON u.id = d.user_id
-     WHERE u.username = ?
-     ORDER BY d.generated_at DESC LIMIT 1`
-  ).bind(username).first<{ r2_key: string | null; week_key: string; generated_at: number }>();
+  // Check if user exists + fetch avatar
+  const userRow = await c.env.DB.prepare(
+    `SELECT id, avatar_url FROM users WHERE username = ?`
+  ).bind(username).first<{ id: number; avatar_url: string | null }>();
 
-  if (!dispatchMeta || !dispatchMeta.r2_key) {
-    const userExists = await c.env.DB.prepare(`SELECT 1 FROM users WHERE username = ?`).bind(username).first();
-    if (!userExists) return c.html(notFoundPage(username), 404);
-    if (dispatchMeta?.week_key === "generating") return c.html(generatingPage(username));
+  if (!userRow) return c.html(notFoundPage(username), 404);
+
+  // Check if generating sentinel exists
+  const generating = await c.env.DB.prepare(
+    `SELECT 1 FROM dispatches WHERE user_id = ? AND week_key = 'generating'`
+  ).bind(userRow.id).first();
+  if (generating) return c.html(generatingPage(username));
+
+  // Query ALL real dispatches
+  const allDispatches = await c.env.DB.prepare(
+    `SELECT d.week_key, d.r2_key, d.generated_at
+     FROM dispatches d
+     WHERE d.user_id = ? AND d.week_key != 'generating' AND d.r2_key IS NOT NULL
+     ORDER BY d.week_key DESC`
+  ).bind(userRow.id).all<{ week_key: string; r2_key: string; generated_at: number }>();
+
+  const dispatches = allDispatches.results ?? [];
+
+  if (dispatches.length === 0) {
     return c.html(noDispatchPage(username, isOwner, null));
   }
 
-  return fetchAndServeDispatch(c, username, dispatchMeta.week_key, dispatchMeta.r2_key, dispatchMeta.generated_at, isOwner);
+  // If exactly one dispatch, serve it directly (backwards compat)
+  if (dispatches.length === 1) {
+    const d = dispatches[0];
+    return fetchAndServeDispatch(c, username, d.week_key, d.r2_key, d.generated_at, isOwner);
+  }
+
+  // Multiple dispatches: show profile listing page
+  return c.html(userProfilePage(username, userRow.avatar_url, dispatches));
 });
 
 // specific week: /username/2026-W13
@@ -547,8 +681,16 @@ ${headTags()}
   </div>
   ${dispatchFooter(username, dispatch.week_key)}
   ${isOwner ? `<script>
+  var _regenPending=false,_regenTimer=null;
   async function regenerate() {
     const btn = document.querySelector('.regen-btn');
+    if (!_regenPending) {
+      _regenPending=true;
+      btn.textContent='Sure? Click again to confirm';
+      _regenTimer=setTimeout(()=>{_regenPending=false;btn.textContent='regenerate';},5000);
+      return;
+    }
+    clearTimeout(_regenTimer);_regenPending=false;
     btn.disabled=true; btn.textContent='generating...';
     const res = await fetch('/generate',{method:'POST'});
     const data = await res.json();
