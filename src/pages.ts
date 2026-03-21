@@ -93,11 +93,14 @@ function dispatchFooter(username: string, week_key: string): string {
 }
 
 function ctaFooter(): string {
-  // standalone CTA — only used on non-dispatch pages
-  return `<div style="background:#0f0f0f;padding:14px 24px;text-align:center;font-family:monospace;font-size:13px;">
-    <span style="color:#888;">Your open-source activity, turned into a weekly dispatch.</span>
-    &nbsp;&nbsp;
-    <a href="https://gitzette.online" style="color:#f7f4ee;text-decoration:none;border-bottom:1px solid #555;">Generate yours at gitzette.online →</a>
+  // Solid CTA block — dark background so the white/paper button pops.
+  // Uses width:min(100%,420px) for full-width on mobile without a media query.
+  return `<div style="background:#0f0f0f;padding:40px 24px 44px;text-align:center;font-family:'IBM Plex Mono',monospace;">
+    <p style="color:#666;font-size:12px;letter-spacing:.04em;margin:0 0 20px;">Your open-source activity, turned into a weekly newspaper.</p>
+    <a href="/auth/github"
+       style="display:inline-block;background:#f7f4ee;color:#0f0f0f;font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;letter-spacing:.02em;text-decoration:none;padding:16px 40px;border:none;cursor:pointer;width:min(100%,420px);box-sizing:border-box;"
+       onmouseover="this.style.background='#ffffff'"
+       onmouseout="this.style.background='#f7f4ee'">Generate your dispatch &rarr;</a>
   </div>`;
 }
 
@@ -465,16 +468,23 @@ function noDispatchPage(username: string, isOwner: boolean, week_key: string | n
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
-<style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
+  .center{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:40px 24px;text-align:center;}
+</style>
 </head><body>
-  <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
-  <div style="font-size:18px;font-weight:700;">@${username}</div>
-  <div style="color:#666;">No dispatch generated yet${week_key ? ` for ${week_key}` : ""}.</div>
-  ${isOwner ? `<button id="genbtn" onclick="startGen()" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>
-  <script>
-  async function startGen(){const btn=document.getElementById('genbtn');btn.disabled=true;btn.textContent='generating...';await fetch('/generate',{method:'POST'});let n=0;const iv=setInterval(async()=>{n++;btn.textContent='generating... ('+n*5+'s)';const s=await fetch('/generate/status').then(r=>r.json());if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(iv);location.reload();}if(n>24){clearInterval(iv);btn.textContent='reload manually';}},5000);}
-  </script>` : ""}
-  <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+  <div class="center">
+    <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+    <div style="font-size:18px;font-weight:700;">@${username}</div>
+    <div style="color:#666;">No dispatch generated yet${week_key ? ` for ${week_key}` : ""}.</div>
+    ${isOwner ? `<button id="genbtn" onclick="startGen()" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>
+    <script>
+    async function startGen(){const btn=document.getElementById('genbtn');btn.disabled=true;btn.textContent='generating...';await fetch('/generate',{method:'POST'});let n=0;const iv=setInterval(async()=>{n++;btn.textContent='generating... ('+n*5+'s)';const s=await fetch('/generate/status').then(r=>r.json());if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(iv);location.reload();}if(n>24){clearInterval(iv);btn.textContent='reload manually';}},5000);}
+    </script>` : ""}
+    <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+  </div>
+  ${ctaFooter()}
   ${creatorFooter()}
 </body></html>`;
 }
@@ -484,12 +494,19 @@ function weekNotFoundPage(username: string, week_key: string): string {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} ${week_key} — gitzette</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
-<style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
+  .center{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:40px 24px;text-align:center;}
+</style>
 </head><body>
-  <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
-  <div style="font-size:18px;font-weight:700;">@${username} · ${week_key}</div>
-  <div style="color:#666;">No dispatch for this week.</div>
-  <a href="/${username}" style="color:#0f0f0f;font-size:13px;font-family:monospace;">← view latest dispatch</a>
+  <div class="center">
+    <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+    <div style="font-size:18px;font-weight:700;">@${username} · ${week_key}</div>
+    <div style="color:#666;">No dispatch for this week.</div>
+    <a href="/${username}" style="color:#0f0f0f;font-size:13px;font-family:monospace;">← view latest dispatch</a>
+  </div>
+  ${ctaFooter()}
   ${creatorFooter()}
 </body></html>`;
 }
@@ -500,12 +517,19 @@ function generatingPage(username: string): string {
 <meta http-equiv="refresh" content="10">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
-<style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
+  .center{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:40px 24px;text-align:center;}
+</style>
 </head><body>
-  <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
-  <div style="font-size:18px;font-weight:700;">@${username}</div>
-  <div style="color:#666;">Generating dispatch... refreshing automatically.</div>
-  <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+  <div class="center">
+    <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+    <div style="font-size:18px;font-weight:700;">@${username}</div>
+    <div style="color:#666;">Generating dispatch... refreshing automatically.</div>
+    <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+  </div>
+  ${ctaFooter()}
   ${creatorFooter()}
 </body></html>`;
 }
@@ -515,12 +539,19 @@ function notFoundPage(username: string): string {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>not found — gitzette</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
-<style>body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;}</style>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
+  .center{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:40px 24px;text-align:center;}
+</style>
 </head><body>
-  <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
-  <div style="font-size:18px;font-weight:700;">@${username}</div>
-  <div style="color:#666;">User not found. Have they signed in?</div>
-  <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+  <div class="center">
+    <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+    <div style="font-size:18px;font-weight:700;">@${username}</div>
+    <div style="color:#666;">User not found. Have they signed in?</div>
+    <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
+  </div>
+  ${ctaFooter()}
   ${creatorFooter()}
 </body></html>`;
 }
