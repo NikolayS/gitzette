@@ -31,15 +31,35 @@ generateRoutes.post("/", async (c) => {
     }, 503);
   }
 
-  try {
-    const costUsd = await runGeneration(c.env, user);
-    await recordGeneration(c.env.DB, user.id);
-    await recordSpend(c.env.DB, costUsd);
-    return c.json({ status: "done", message: "Generated! Reload the page." });
-  } catch (err: any) {
-    console.error("generation error:", err);
-    return c.json({ status: "error", message: err?.message ?? "Unknown error" }, 500);
-  }
+  // mark as generating
+  await c.env.DB.prepare(
+    `INSERT INTO dispatches (user_id, week_key, html, generated_at) VALUES (?, 'generating', '...generating...', unixepoch())
+     ON CONFLICT(user_id) DO UPDATE SET week_key='generating', html='...generating...', generated_at=unixepoch()`
+  ).bind(user.id).run();
+
+  // delegate to callbot server (no CPU time limit there)
+  c.executionCtx.waitUntil(
+    fetch("https://test-callbot.samo.team/gitzette/generate", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${(c.env as any).NEWSPAPERIFY_SECRET}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userId: user.id,
+        username: user.username,
+        d1AccountId: "a3265e0d0db71fdece29365819452f00",
+        d1DatabaseId: "4a3624d7-7de8-46d5-91f5-7ee79856ccaa",
+        d1Token: (c.env as any).CF_D1_TOKEN,
+      }),
+    }).catch(err => console.error("callbot dispatch failed:", err))
+  );
+
+  // record quota immediately
+  await recordGeneration(c.env.DB, user.id);
+  await recordSpend(c.env.DB, 0.10); // estimated
+
+  return c.json({ status: "queued", message: "Generating your dispatch... reload in 60 seconds." });
 });
 
 generateRoutes.get("/status", async (c) => {
@@ -202,6 +222,7 @@ STYLE RULES:
 - Always call the author "@${owner}" — never full name or "the developer"
 - Project names always lowercase: "rpg" not "RPG", "sqlever" not "Sqlever"
 - When mentioning PRs, use inline HTML links: <a href="URL">#NUMBER</a>
+- Headlines must be about the work, not meta-commentary about the author's habits or personality. No "takes no questions", "doesn't sleep", "ships quietly", etc.
 
 DATA:
 ${dataJson}
@@ -453,7 +474,9 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
   </div>
   <div class="footer">
     <span>gitzette.online/${owner}</span>
+    <span style="color:var(--rule);">·</span>
     <span>${copy.closingNote ?? "generated from public github activity"}</span>
+    <span style="color:var(--rule);">·</span>
     <span>${weekKey}</span>
   </div>
 </div>
