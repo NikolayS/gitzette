@@ -134,11 +134,11 @@ async function fetchAndServeDispatch(
   const html: string = await r2obj.text();
 
   // Image overflow guard — injected into every served dispatch document
-  const IMG_FIX_STYLE = `${headTags()}<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
+  const IMG_FIX_STYLE = `${headTags()}<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
 
   if (html.startsWith("<!DOCTYPE") || html.startsWith("<html")) {
     const breadcrumb = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow:hidden;">
-          <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;border:none;">gitzette</a>
+          <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;border:none;">gitzette</a>
           <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
           <a href="/${username}" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#aaa;text-decoration:none;border:none;">@${username}</a>
           <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
@@ -300,14 +300,14 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
 <title>gitzette — your weekly open-source dispatch</title>
 ${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
 <style>
   :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'IBM Plex Serif', Georgia, serif; background: var(--paper); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
   a { color: var(--ink); text-decoration: none; }
   .hero { width: 100%; max-width: 760px; margin: 64px auto 0; padding: 0 20px; box-sizing: border-box; }
-  .masthead { font-family: 'UnifrakturMaguntia', serif; font-size: clamp(52px, 13vw, 100px); line-height: 1; }
+  .masthead { font-family: 'Playfair Display', serif; font-weight: 900; font-style: italic; font-size: clamp(52px, 13vw, 100px); line-height: 1; }
   .tagline { font-size: clamp(15px, 2.5vw, 20px); color: var(--muted); margin: 16px 0 32px; font-style: italic; }
   .form-row { display: flex; gap: 0; max-width: 100%; }
   .form-row input { flex: 1; min-width: 0; padding: 12px 14px; border: 2px solid var(--ink); background: var(--paper); font-family: 'IBM Plex Mono', monospace; font-size: 15px; color: var(--ink); outline: none; }
@@ -434,7 +434,7 @@ function dispatchPage(
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>@${username} — gitzette ${dispatch.week_key}</title>
 ${headTags()}
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
 <style>
   :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -453,7 +453,7 @@ ${headTags()}
   .breadcrumb a:hover { color: #f7f4ee; }
   .breadcrumb .sep { color: #555; }
   .breadcrumb .current { color: #f7f4ee; }
-  .breadcrumb-logo { font-family: 'UnifrakturMaguntia', serif; font-size: 22px; color: #f7f4ee; line-height: 1; }
+  .breadcrumb-logo { font-family: 'Playfair Display', serif; font-weight: 900; font-style: italic; font-size: 22px; color: #f7f4ee; line-height: 1; }
   .regen-btn { background: none; border: 1px solid #555; color: #aaa; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 4px 12px; cursor: pointer; }
   .regen-btn:hover { border-color: #f7f4ee; color: #f7f4ee; }
 </style>
@@ -503,7 +503,7 @@ function noDispatchPage(username: string, isOwner: boolean, week_key: string | n
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
 ${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
@@ -511,7 +511,7 @@ ${headTags()}
 </style>
 </head><body>
   <div class="center">
-    <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+    <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
     <div style="font-size:18px;font-weight:700;">@${username}</div>
     <div style="color:#666;">No dispatch generated yet${week_key ? ` for ${week_key}` : ""}.</div>
     ${isOwner ? `<button id="genbtn" onclick="startGen()" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>
@@ -530,7 +530,7 @@ function weekNotFoundPage(username: string, week_key: string): string {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} ${week_key} — gitzette</title>
 ${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
@@ -538,7 +538,7 @@ ${headTags()}
 </style>
 </head><body>
   <div class="center">
-    <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+    <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
     <div style="font-size:18px;font-weight:700;">@${username} · ${week_key}</div>
     <div style="color:#666;">No dispatch for this week.</div>
     <a href="/${username}" style="color:#0f0f0f;font-size:13px;font-family:monospace;">← view latest dispatch</a>
@@ -554,7 +554,7 @@ function generatingPage(username: string): string {
 <meta http-equiv="refresh" content="10">
 ${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
@@ -562,7 +562,7 @@ ${headTags()}
 </style>
 </head><body>
   <div class="center">
-    <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+    <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
     <div style="font-size:18px;font-weight:700;">@${username}</div>
     <div style="color:#666;">Generating dispatch... refreshing automatically.</div>
     <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
@@ -577,7 +577,7 @@ function notFoundPage(username: string): string {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>not found — gitzette</title>
 ${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
@@ -585,7 +585,7 @@ ${headTags()}
 </style>
 </head><body>
   <div class="center">
-    <a href="/" style="font-family:'UnifrakturMaguntia',serif;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
+    <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
     <div style="font-size:18px;font-weight:700;">@${username}</div>
     <div style="color:#666;">User not found. Have they signed in?</div>
     <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
