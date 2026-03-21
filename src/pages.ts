@@ -71,6 +71,11 @@ function weekNavBar(username: string, week_key: string): string {
   </span>`;
 }
 
+function headTags(): string {
+  return `<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230f0f0f'/><text x='3' y='26' font-size='26' fill='%23f7f4ee' font-family='Georgia,serif' font-weight='700'>G</text></svg>">
+<meta name="theme-color" content="#0f0f0f">`;
+}
+
 function creatorFooter(): string {
   return `<div style="background:#0f0f0f;padding:10px 24px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">
     built by <a href="https://github.com/NikolayS" style="color:#ccc;text-decoration:none;border:none;">@NikolayS</a>
@@ -129,7 +134,7 @@ async function fetchAndServeDispatch(
   const html: string = await r2obj.text();
 
   // Image overflow guard — injected into every served dispatch document
-  const IMG_FIX_STYLE = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
+  const IMG_FIX_STYLE = `${headTags()}<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}</style>`;
 
   if (html.startsWith("<!DOCTYPE") || html.startsWith("<html")) {
     const breadcrumb = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow:hidden;">
@@ -293,6 +298,7 @@ function homePage(recent: { username: string; week_key: string; generated_at: nu
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>gitzette — your weekly open-source dispatch</title>
+${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>
@@ -374,6 +380,7 @@ function statusPage(stats: { spent: number; monthlyBudget: number; pct: number; 
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>gitzette — system status</title>
+${headTags()}
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; }
@@ -426,6 +433,7 @@ function dispatchPage(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>@${username} — gitzette ${dispatch.week_key}</title>
+${headTags()}
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,700;1,400&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>
   :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
@@ -493,6 +501,7 @@ function dispatchPage(
 function noDispatchPage(username: string, isOwner: boolean, week_key: string | null): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
+${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>
@@ -519,6 +528,7 @@ function noDispatchPage(username: string, isOwner: boolean, week_key: string | n
 function weekNotFoundPage(username: string, week_key: string): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} ${week_key} — gitzette</title>
+${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>
@@ -542,6 +552,7 @@ function generatingPage(username: string): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
 <meta http-equiv="refresh" content="10">
+${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>
@@ -564,6 +575,7 @@ function generatingPage(username: string): string {
 function notFoundPage(username: string): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>not found — gitzette</title>
+${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
 <style>
