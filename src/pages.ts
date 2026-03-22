@@ -806,7 +806,6 @@ ${headTags()}
 function generatingPage(username: string): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
-<meta http-equiv="refresh" content="10">
 ${headTags()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
@@ -819,11 +818,44 @@ ${headTags()}
   <div class="center">
     <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
     <div style="font-size:18px;font-weight:700;">@${username}</div>
-    <div style="color:#666;">Generating dispatch... refreshing automatically.</div>
+    <div id="status-msg" style="color:#666;">Generating dispatch... this takes about 60 seconds.</div>
+    <div id="retry-btn" style="display:none;">
+      <div style="color:#c00;font-size:13px;margin-bottom:12px;">Generation timed out. Something went wrong.</div>
+      <a href="/generate" id="retry-link" style="display:inline-block;padding:10px 24px;background:#0f0f0f;color:#f7f4ee;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;text-decoration:none;" onclick="this.textContent='retrying...';retryGen();return false;">Try again</a>
+    </div>
     <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
   </div>
   ${ctaFooter()}
   ${creatorFooter()}
+  <script>
+  let n = 0;
+  const iv = setInterval(async () => {
+    n++;
+    try {
+      const s = await fetch('/generate/status').then(r => r.json());
+      if (s.status === 'ready') { clearInterval(iv); location.reload(); return; }
+      if (s.status === 'failed') {
+        clearInterval(iv);
+        document.getElementById('status-msg').style.display = 'none';
+        document.getElementById('retry-btn').style.display = 'block';
+        return;
+      }
+      if (s.status === 'generating') {
+        document.getElementById('status-msg').textContent = 'Generating dispatch... (' + Math.round(s.age) + 's)';
+      }
+    } catch(e) {}
+    if (n > 36) { // 3 min client-side max
+      clearInterval(iv);
+      document.getElementById('status-msg').style.display = 'none';
+      document.getElementById('retry-btn').style.display = 'block';
+    }
+  }, 5000);
+
+  async function retryGen() {
+    await fetch('/generate', { method: 'POST' });
+    setTimeout(() => location.reload(), 2000);
+  }
+  </script>
 </body></html>`;
 }
 

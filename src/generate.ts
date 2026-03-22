@@ -67,8 +67,28 @@ generateRoutes.post("/", async (c) => {
 generateRoutes.get("/status", async (c) => {
   const user = await getUser(c);
   if (!user) return c.json({ error: "not authenticated" }, 401);
+
+  // Check for generating sentinel first
+  const sentinel = await c.env.DB.prepare(
+    `SELECT generated_at FROM dispatches WHERE user_id = ? AND week_key = 'generating'`
+  ).bind(user.id).first<{ generated_at: number }>();
+
+  if (sentinel) {
+    const ageSeconds = Math.floor(Date.now() / 1000) - sentinel.generated_at;
+    const TTL = 5 * 60; // 5 minutes
+    if (ageSeconds > TTL) {
+      // Generation timed out — clean up sentinel, return failed status
+      await c.env.DB.prepare(
+        `DELETE FROM dispatches WHERE user_id = ? AND week_key = 'generating'`
+      ).bind(user.id).run();
+      return c.json({ status: "failed", message: "Generation timed out. Please try again." });
+    }
+    return c.json({ status: "generating", age: ageSeconds });
+  }
+
+  // Look for a real completed dispatch
   const row = await c.env.DB.prepare(
-    `SELECT week_key, generated_at FROM dispatches WHERE user_id = ?`
+    `SELECT week_key, generated_at FROM dispatches WHERE user_id = ? AND week_key != 'generating' AND r2_key IS NOT NULL ORDER BY generated_at DESC LIMIT 1`
   ).bind(user.id).first<{ week_key: string; generated_at: number }>();
   if (!row) return c.json({ status: "none" });
   return c.json({ status: "ready", week_key: row.week_key, generated_at: row.generated_at });
