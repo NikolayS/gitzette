@@ -770,8 +770,37 @@ ${headTags()}
     <div style="font-size:18px;font-weight:700;">@${username}</div>
     <div style="color:#666;">No dispatch generated yet${week_key ? ` for ${week_key}` : ""}.</div>
     ${isOwner ? `<button id="genbtn" onclick="startGen()" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>
+    <div id="gen-msg" style="font-size:12px;color:#666;max-width:300px;line-height:1.5;display:none;"></div>
     <script>
-    async function startGen(){const btn=document.getElementById('genbtn');btn.disabled=true;btn.textContent='generating...';await fetch('/generate',{method:'POST'});let n=0;const iv=setInterval(async()=>{n++;btn.textContent='generating... ('+n*5+'s)';const s=await fetch('/generate/status').then(r=>r.json());if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(iv);location.reload();}if(n>24){clearInterval(iv);btn.textContent='reload manually';}},5000);}
+    async function startGen(){
+      const btn=document.getElementById('genbtn');
+      const msg=document.getElementById('gen-msg');
+      btn.disabled=true; btn.textContent='checking...';
+      const res=await fetch('/generate',{method:'POST'});
+      const data=await res.json();
+      if(data.error==='no_activity'){
+        btn.style.display='none';
+        msg.textContent=data.message;
+        msg.style.display='block';
+        return;
+      }
+      if(data.error){
+        btn.disabled=false; btn.textContent='generate now';
+        msg.textContent=data.message||data.error;
+        msg.style.display='block';
+        return;
+      }
+      btn.textContent='generating...';
+      let n=0;
+      const iv=setInterval(async()=>{
+        n++;
+        btn.textContent='generating... ('+n*5+'s)';
+        const s=await fetch('/generate/status').then(r=>r.json());
+        if(s.status==='ready'){clearInterval(iv);location.reload();}
+        if(s.status==='failed'){clearInterval(iv);btn.disabled=false;btn.textContent='try again';msg.textContent='Something went wrong on our end. Try again.';msg.style.display='block';}
+        if(n>24){clearInterval(iv);btn.textContent='reload manually';}
+      },5000);
+    }
     </script>` : ""}
     <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
   </div>
