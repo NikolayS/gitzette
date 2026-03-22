@@ -362,6 +362,15 @@ ${headTags()}
     </div>
     <div class="dispatch-count">${dispatches.length} dispatch${dispatches.length !== 1 ? "es" : ""}</div>
     <div>${rows}</div>
+    ${dispatches.length > 0 ? `
+    <div style="margin-top:32px;border-top:1px solid var(--rule);padding-top:20px;">
+      <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;">▸ latest dispatch</div>
+      <div style="position:relative;overflow:hidden;border:1px solid var(--rule);height:280px;background:var(--paper);cursor:pointer;" onclick="window.location='/${username}/${dispatches[0].week_key}'">
+        <iframe src="/${username}/${dispatches[0].week_key}" style="width:200%;height:560px;transform:scale(0.5);transform-origin:top left;pointer-events:none;border:none;" loading="lazy" title="Latest dispatch"></iframe>
+        <div style="position:absolute;inset:0;"></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px;">${weekKeyToRange(dispatches[0].week_key)} · <a href="/${username}/${dispatches[0].week_key}" style="color:var(--ink);">read full dispatch →</a></div>
+    </div>` : ""}
   </div>
   <footer>
     ${ctaFooter()}
