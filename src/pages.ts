@@ -217,7 +217,12 @@ async function fetchAndServeDispatch(
   const r2obj = await c.env.DISPATCHES.get(r2_key);
   if (!r2obj) return c.html(noDispatchPage(username, isOwner, week_key), 404);
 
-  const html: string = await r2obj.text();
+  // cache-bust illustration URLs with generated_at timestamp
+  const rawHtml: string = await r2obj.text();
+  const html = rawHtml.replace(
+    /(src=["'])(\/img\/[^"'?]+)(["'])/g,
+    `$1$2?v=${generated_at}$3`
+  );
 
   // Query adjacent weeks to show proper nav (only for existing weeks)
   const prevKey = adjacentWeekKey(week_key, -1);
