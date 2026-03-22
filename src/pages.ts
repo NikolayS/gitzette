@@ -547,8 +547,8 @@ ${headTags()}
   .row-date { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--ink); flex: 1; display: flex; align-items: baseline; gap: 8px; }
   .row-week-secondary { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); }
   .row-cta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); flex-shrink: 0; }
-  .auth-note { width: 100%; max-width: 760px; margin: 28px auto 0; padding: 0 20px; box-sizing: border-box; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); }
-  .auth-note a { color: var(--ink); border-bottom: 1px solid var(--rule); }
+  .auth-note { width: 100%; max-width: 760px; margin: 0 auto; padding: 0 20px; box-sizing: border-box; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); }
+  .auth-note a { color: var(--ink); text-decoration: none; }
   footer { margin-top: auto; }
 </style>
 </head>
@@ -562,7 +562,7 @@ ${headTags()}
       <input id="username-input" type="text" placeholder="try: torvalds, sindresorhus, antirez" autocomplete="off" autocorrect="off" spellcheck="false">
       <button type="submit">Read →</button>
     </form>
-    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <div style="margin-top:12px;margin-bottom:28px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">explore:</span>
       <button onclick="document.getElementById('username-input').value='torvalds';go2('torvalds');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">torvalds</button>
       <button onclick="document.getElementById('username-input').value='antirez';go2('antirez');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">antirez</button>
@@ -580,8 +580,11 @@ ${headTags()}
       window.location.href = '/' + u;
     }
     </script>
-    <div class="auth-note">To generate your own dispatch, <a href="/auth/github">sign in with GitHub</a>.
-      <p style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;margin-top:6px;">We only read public activity — commits, PRs, releases. No private repo access, ever.</p>
+    <div class="auth-note">
+      <a href="/auth/github" style="display:inline-flex;align-items:center;gap:8px;margin-top:4px;padding:11px 20px;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.04em;text-decoration:none;border:none;">
+        ⬡ Generate my dispatch
+      </a>
+      <p style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;margin-top:10px;">Signs in with GitHub. We only read public activity — commits, PRs, releases. No private repo access, ever.</p>
     </div>
   </div>
   <div style="max-width:760px;margin:0 auto;padding:0 20px;box-sizing:border-box;">
