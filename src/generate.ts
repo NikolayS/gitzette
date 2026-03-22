@@ -33,29 +33,6 @@ generateRoutes.post("/", async (c) => {
     }, 503);
   }
 
-  // quick activity check — fail fast if no recent public events
-  try {
-    const eventsRes = await fetch(
-      `https://api.github.com/users/${encodeURIComponent(user.username)}/events/public?per_page=10`,
-      { headers: { "User-Agent": "gitzette/1.0", "Accept": "application/vnd.github+json",
-                   "Authorization": `Bearer ${(c.env as any).GITHUB_TOKEN}` } }
-    );
-    if (eventsRes.ok) {
-      const events: any[] = await eventsRes.json();
-      const cutoff = Date.now() - 28 * 24 * 60 * 60 * 1000; // 4 weeks
-      const recentActivity = events.filter(e =>
-        ["PushEvent","PullRequestEvent","CreateEvent","ReleaseEvent"].includes(e.type) &&
-        new Date(e.created_at).getTime() > cutoff
-      );
-      if (recentActivity.length === 0) {
-        return c.json({
-          error: "no_activity",
-          message: "No public commits, PRs, or releases found in the last 4 weeks. Push some code and come back!",
-        }, 422);
-      }
-    }
-  } catch { /* ignore — proceed with generation if check fails */ }
-
   // mark as generating (sentinel row — deleted on completion)
   await c.env.DB.prepare(
     `INSERT INTO dispatches (user_id, week_key, r2_key, generated_at) VALUES (?, 'generating', NULL, unixepoch())
