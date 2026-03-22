@@ -4,6 +4,7 @@ import { html } from "hono/html";
 import { authRoutes } from "./auth";
 import { generateRoutes } from "./generate";
 import { pageRoutes } from "./pages";
+import { reviewRoutes } from "./review";
 
 export interface Env {
   DB: D1Database;
@@ -27,6 +28,9 @@ app.route("/auth", authRoutes);
 
 // ── generation ────────────────────────────────────────────────────────────────
 app.route("/generate", generateRoutes);
+
+// ── review / feedback ─────────────────────────────────────────────────────────
+app.route("/review", reviewRoutes);
 
 // ── public dispatch pages ─────────────────────────────────────────────────────
 app.route("/", pageRoutes);
