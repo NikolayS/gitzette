@@ -579,16 +579,17 @@ ${headTags()}
     <div style="font-family:'IBM Plex Serif',serif;font-size:14px;font-style:italic;color:#888;margin:-20px 0 24px;">For open-source maintainers and builders. Your GitHub week, turned into a shareable newspaper — automatically.</div>
     <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#888;margin-bottom:10px;">No account needed — explore anyone's open-source week</div>
     <form id="read-form" class="form-row" action="" method="get" onsubmit="go(event)">
-      <input id="username-input" type="text" placeholder="try: torvalds, sindresorhus, antirez" autocomplete="off" autocorrect="off" spellcheck="false">
+      <input id="username-input" type="text" placeholder="try: torvalds, steipete, karpathy" autocomplete="off" autocorrect="off" spellcheck="false">
       <button type="submit">Read →</button>
     </form>
     <div style="margin-top:12px;margin-bottom:28px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">explore:</span>
       <button onclick="document.getElementById('username-input').value='torvalds';go2('torvalds');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">torvalds</button>
-      <button onclick="document.getElementById('username-input').value='antirez';go2('antirez');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">antirez</button>
-      <button onclick="document.getElementById('username-input').value='sindresorhus';go2('sindresorhus');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">sindresorhus</button>
-      <button onclick="document.getElementById('username-input').value='gaearon';go2('gaearon');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">gaearon</button>
-      <button onclick="document.getElementById('username-input').value='Rich-Harris';go2('Rich-Harris');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">Rich-Harris</button>
+      <button onclick="document.getElementById('username-input').value='steipete';go2('steipete');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">steipete</button>
+      <button onclick="document.getElementById('username-input').value='karpathy';go2('karpathy');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">karpathy</button>
+      <button onclick="document.getElementById('username-input').value='DHH';go2('DHH');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">DHH</button>
+      <button onclick="document.getElementById('username-input').value='mitchellh';go2('mitchellh');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">mitchellh</button>
+      <button onclick="document.getElementById('username-input').value='dcramer';go2('dcramer');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">dcramer</button>
     </div>
     <script>
     function go(e) {
