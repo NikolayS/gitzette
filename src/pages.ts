@@ -400,7 +400,9 @@ pageRoutes.get("/", async (c) => {
      ORDER BY d.generated_at DESC LIMIT 100`
   ).all<{ username: string; week_key: string; generated_at: number }>();
 
-  return c.html(homePage(recent.results ?? []));
+  const cwk = currentWeekKey();
+  const filtered = (recent.results ?? []).filter(d => d.week_key <= cwk);
+  return c.html(homePage(filtered));
 });
 
 // /status — private quota dashboard (token-gated)
@@ -604,11 +606,11 @@ ${headTags()}
   <div style="max-width:760px;margin:0 auto;padding:0 20px;box-sizing:border-box;">
     <div style="margin:40px 0;">
       <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#888;margin-bottom:12px;">▸ example dispatch</div>
-      <div style="position:relative;overflow:hidden;border:1px solid #c8c2b4;height:320px;background:#f7f4ee;cursor:pointer;" onclick="window.location='/NikolayS/2026-W13'">
-        <iframe src="/NikolayS/2026-W13" style="width:200%;height:640px;transform:scale(0.5);transform-origin:top left;pointer-events:none;border:none;" loading="lazy" title="Example dispatch"></iframe>
+      <div style="position:relative;overflow:hidden;border:1px solid #c8c2b4;height:320px;background:#f7f4ee;cursor:pointer;" onclick="window.location='${(() => { const ex = recent.find(d => d.username === 'NikolayS') ?? recent[0]; return ex ? `/${ex.username}/${ex.week_key}` : '/NikolayS/2026-W12'; })()}'">
+        <iframe src="${(() => { const ex = recent.find(d => d.username === 'NikolayS') ?? recent[0]; return ex ? `/${ex.username}/${ex.week_key}` : '/NikolayS/2026-W12'; })()}" style="width:200%;height:640px;transform:scale(0.5);transform-origin:top left;pointer-events:none;border:none;" loading="lazy" title="Example dispatch"></iframe>
         <div style="position:absolute;inset:0;"></div>
       </div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;margin-top:8px;">@NikolayS · <a href="/NikolayS/2026-W13" style="color:var(--ink);">view full dispatch →</a></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;margin-top:8px;">${(() => { const ex = recent.find(d => d.username === 'NikolayS') ?? recent[0]; return ex ? `@${ex.username}` : '@NikolayS'; })()} · <a href="${(() => { const ex = recent.find(d => d.username === 'NikolayS') ?? recent[0]; return ex ? `/${ex.username}/${ex.week_key}` : '/NikolayS/2026-W12'; })()}" style="color:var(--ink);">view full dispatch →</a></div>
     </div>
   </div>
   ${recent.length > 0 ? `
