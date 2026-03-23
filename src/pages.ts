@@ -82,11 +82,15 @@ function headTags(): string {
 <meta name="theme-color" content="#0f0f0f">`;
 }
 
+const APP_VERSION = "v2026.03.23.1";
+
 function creatorFooter(): string {
   return `<div style="background:#0f0f0f;padding:10px 24px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">
     built by <a href="https://github.com/NikolayS" style="color:#ccc;text-decoration:none;border:none;">@NikolayS</a>
     &nbsp;·&nbsp;
     <a href="https://gitzette.online" style="color:#ccc;text-decoration:none;border:none;">gitzette.online</a>
+    &nbsp;·&nbsp;
+    <span style="color:#555;">${APP_VERSION}</span>
   </div>`;
 }
 
