@@ -298,10 +298,10 @@ async function fetchAndServeDispatch(
       .replace("</head>", `${IMG_FIX_STYLE}</head>`)
       .replace("<body>", `<body>${ownerBar}`)
       .replace("</body>", `${dispatchFooter(username, week_key, prevExists ? prevKey : null, nextExists ? nextKey : null)}</body>`);
-    return c.html(out);
+    return c.html(out, 200, { "Cache-Control": "no-store" });
   }
 
-  return c.html(dispatchPage(username, { html: processedHtml, week_key, generated_at }, isOwner));
+  return c.html(dispatchPage(username, { html: processedHtml, week_key, generated_at }, isOwner), 200, { "Cache-Control": "no-store" });
 }
 
 function userProfilePage(
