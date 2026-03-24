@@ -16,11 +16,11 @@ type Article = {
   body: string;
 };
 
-/** Parse <h2> or <h3> headlines + next <p> from dispatch HTML */
+/** Parse <h1>, <h2> or <h3> headlines + next <p> from dispatch HTML */
 function parseArticles(html: string): Article[] {
   const articles: Article[] = [];
-  // Match h2 or h3 tags
-  const headlineRe = /<h[23][^>]*>([\s\S]*?)<\/h[23]>/gi;
+  // Match h1, h2 or h3 tags (h1 is used for lead articles)
+  const headlineRe = /<h[123][^>]*>([\s\S]*?)<\/h[123]>/gi;
   let match: RegExpExecArray | null;
 
   // We'll work with the raw html indices to find the next <p> after each headline
