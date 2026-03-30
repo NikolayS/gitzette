@@ -8,6 +8,7 @@
     "db:init": "wrangler d1 execute gitzette-db --remote --file=schema.sql"
   },
   "dependencies": {
+    "@chenglou/pretext": "^0.0.3",
     "hono": "^4.6.0"
   },
   "devDependencies": {
