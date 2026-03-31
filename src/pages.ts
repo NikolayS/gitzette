@@ -421,6 +421,7 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png)}", async (c) => {
     headers: {
       "Content-Type": isPng ? "image/png" : "image/jpeg",
       "Cache-Control": "public, max-age=31536000, immutable",
+      "Access-Control-Allow-Origin": "*",
     },
   });
 });
