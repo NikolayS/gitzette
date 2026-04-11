@@ -86,11 +86,9 @@ const APP_VERSION = "v2026.03.23.1";
 
 function creatorFooter(): string {
   return `<div style="background:#0f0f0f;padding:10px 24px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">
-    built by <a href="https://github.com/NikolayS" style="color:#ccc;text-decoration:none;border:none;">@NikolayS</a>
-    &nbsp;·&nbsp;
     <a href="https://gitzette.online" style="color:#ccc;text-decoration:none;border:none;">gitzette.online</a>
     &nbsp;·&nbsp;
-    <span style="color:#555;">${APP_VERSION}</span>
+    <span style="color:#aaa;">${new Date().getFullYear()} &copy; AISlopMedia, Inc.</span>
   </div>`;
 }
 
@@ -137,7 +135,7 @@ function ctaFooter(): string {
   // Solid CTA block — dark background so the white/paper button pops.
   // Uses width:min(100%,420px) for full-width on mobile without a media query.
   return `<div style="background:#0f0f0f;padding:40px 24px 44px;text-align:center;font-family:'IBM Plex Mono',monospace;">
-    <p style="color:#666;font-size:12px;letter-spacing:.04em;margin:0 0 20px;">Show your work, without writing about it.</p>
+    <p style="color:#666;font-size:12px;letter-spacing:.04em;margin:0 0 20px;">Your GitHub week, turned into something worth reading.</p>
     <a href="/auth/github"
        style="display:inline-block;background:#f7f4ee;color:#0f0f0f;font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;letter-spacing:.02em;text-decoration:none;padding:16px 40px;border:none;cursor:pointer;width:min(100%,420px);box-sizing:border-box;"
        onmouseover="this.style.background='#ffffff'"
@@ -221,11 +219,13 @@ async function fetchAndServeDispatch(
   const r2obj = await c.env.DISPATCHES.get(r2_key);
   if (!r2obj) return c.html(noDispatchPage(username, isOwner, week_key), 404);
 
-  // cache-bust illustration URLs with generated_at timestamp
+  // cache-bust illustration URLs with generated_at timestamp + global version
+  // Bump ILLUS_V when illustrations are batch-reprocessed (e.g. transparency fixes)
+  const ILLUS_V = 2;
   const rawHtml: string = await r2obj.text();
   const html = rawHtml.replace(
-    /(src=["'])(\/img\/[^"'?]+)(["'])/g,
-    `$1$2?v=${generated_at}$3`
+    /((?:src|data-img)=["'])((?:https:\/\/gitzette\.online)?\/img\/[^"'?]+)(["'])/g,
+    `$1$2?v=${generated_at}.${ILLUS_V}$3`
   );
 
   // Query adjacent weeks to show proper nav (only for existing weeks)
@@ -420,7 +420,7 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png)}", async (c) => {
   return new Response(buf, {
     headers: {
       "Content-Type": isPng ? "image/png" : "image/jpeg",
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": "public, max-age=86400",
       "Access-Control-Allow-Origin": "*",
     },
   });
@@ -577,11 +577,11 @@ ${headTags()}
 <body>
   <div class="hero">
     <div class="masthead">gitzette</div>
-    <div class="tagline">Show your work, without writing about it.</div>
+    <div class="tagline">Your GitHub week, turned into something worth reading.</div>
     <div style="font-family:'IBM Plex Serif',serif;font-size:14px;font-style:italic;color:#888;margin:-20px 0 24px;">For open-source maintainers and builders. Your GitHub week, turned into a shareable newspaper — automatically.</div>
     <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#888;margin-bottom:10px;">No account needed — explore anyone's open-source week</div>
     <form id="read-form" class="form-row" action="" method="get" onsubmit="go(event)">
-      <input id="username-input" type="text" placeholder="try: torvalds, steipete, karpathy" autocomplete="off" autocorrect="off" spellcheck="false">
+      <input id="username-input" type="text" placeholder="try: torvalds, simonw, karpathy" autocomplete="off" autocorrect="off" spellcheck="false">
       <button type="submit">Read →</button>
     </form>
     <div style="margin-top:12px;margin-bottom:28px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -592,6 +592,7 @@ ${headTags()}
       <button onclick="document.getElementById('username-input').value='DHH';go2('DHH');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">DHH</button>
       <button onclick="document.getElementById('username-input').value='mitchellh';go2('mitchellh');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">mitchellh</button>
       <button onclick="document.getElementById('username-input').value='dcramer';go2('dcramer');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">dcramer</button>
+      <button onclick="document.getElementById('username-input').value='simonw';go2('simonw');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">simonw</button>
     </div>
     <script>
     function go(e) {
