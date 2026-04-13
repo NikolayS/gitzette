@@ -39,22 +39,9 @@ generateRoutes.post("/", async (c) => {
      ON CONFLICT(user_id, week_key) DO UPDATE SET r2_key=NULL, generated_at=unixepoch()`
   ).bind(user.id).run();
 
-  // delegate to callbot server (no CPU time limit there)
+  // run generation in the background (waitUntil keeps the Worker alive after response)
   c.executionCtx.waitUntil(
-    fetch("https://test-callbot.samo.team/gitzette/generate", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${(c.env as any).NEWSPAPERIFY_SECRET}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        userId: user.id,
-        username: user.username,
-        d1AccountId: "a3265e0d0db71fdece29365819452f00",
-        d1DatabaseId: "4a3624d7-7de8-46d5-91f5-7ee79856ccaa",
-        d1Token: (c.env as any).CF_D1_TOKEN,
-      }),
-    }).catch(err => console.error("callbot dispatch failed:", err))
+    runGeneration(c.env, user).catch(err => console.error("generation failed:", err))
   );
 
   // record quota immediately
@@ -520,16 +507,28 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
 // ── week key helper ───────────────────────────────────────────────────────────
 
 function weekKey(d: Date): string {
-  const jan1 = new Date(d.getFullYear(), 0, 1);
-  const week = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
-  return `${d.getFullYear()}-W${String(week).padStart(2, "0")}`;
+  const aoe = new Date(d.getTime() - 12 * 60 * 60 * 1000);
+  const thu = new Date(aoe);
+  thu.setUTCDate(aoe.getUTCDate() - ((aoe.getUTCDay() + 6) % 7) + 3);
+  const y = thu.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const mon1 = new Date(jan4);
+  mon1.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7));
+  return `${y}-W${String(Math.floor((thu.getTime() - mon1.getTime()) / (7 * 86400000)) + 1).padStart(2, "0")}`;
 }
 
 // ── main generation pipeline ──────────────────────────────────────────────────
 
 async function runGeneration(env: Env, user: { id: string; username: string }): Promise<number> {
   const to = new Date();
-  const from = new Date(to.getTime() - 7 * 86400 * 1000);
+  // Snap from= to Monday 00:00 AoE (= Monday 12:00 UTC)
+  const AOE_MS = 12 * 60 * 60 * 1000;
+  const nowAoE = new Date(Date.now() - AOE_MS);
+  const dayOfWeek = (nowAoE.getUTCDay() + 6) % 7; // Mon=0…Sun=6
+  const mondayAoE = new Date(nowAoE);
+  mondayAoE.setUTCDate(nowAoE.getUTCDate() - dayOfWeek);
+  mondayAoE.setUTCHours(0, 0, 0, 0);
+  const from = new Date(mondayAoE.getTime() + AOE_MS);
 
   const npUrl = (env as any).NEWSPAPERIFY_URL ?? "https://test-callbot.samo.team/newspaperify";
   const npSecret = (env as any).NEWSPAPERIFY_SECRET ?? "";
@@ -589,9 +588,14 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
 }
 
 async function saveDispatch(db: D1Database, r2: R2Bucket, userId: string, username: string, html: string, _from: Date, to: Date): Promise<void> {
-  const jan1 = new Date(to.getFullYear(), 0, 1);
-  const week = Math.ceil(((to.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
-  const wk = `${to.getFullYear()}-W${String(week).padStart(2, "0")}`;
+  const aoe = new Date(to.getTime() - 12 * 60 * 60 * 1000);
+  const thu = new Date(aoe);
+  thu.setUTCDate(aoe.getUTCDate() - ((aoe.getUTCDay() + 6) % 7) + 3);
+  const y = thu.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const mon1 = new Date(jan4);
+  mon1.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7));
+  const wk = `${y}-W${String(Math.floor((thu.getTime() - mon1.getTime()) / (7 * 86400000)) + 1).padStart(2, "0")}`;
   const r2Key = `dispatches/${username}/${wk}.html`;
 
   // store HTML in R2
