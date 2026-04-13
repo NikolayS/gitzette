@@ -539,7 +539,7 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   const repoNames: string[] = allRepos
     .filter((r: any) => !r.private && !r.fork)
     .map((r: any) => r.name)
-    .slice(0, 30);
+    .slice(0, 8); // keep under CF Workers free-plan 50-subrequest limit (~8 repos × 6 calls = 48)
   console.log(`[gen] ${user.username}: ${repoNames.length} repos`);
 
   if (repoNames.length === 0) {
