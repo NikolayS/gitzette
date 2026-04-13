@@ -4,6 +4,9 @@ compatibility_date = "2024-11-01"
 account_id = "a3265e0d0db71fdece29365819452f00"
 compatibility_flags = ["nodejs_compat"]
 
+[limits]
+subrequest_limit = 1000
+
 [[d1_databases]]
 binding = "DB"
 database_name = "gitzette-db"
