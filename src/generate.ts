@@ -534,11 +534,13 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   const npSecret = (env as any).NEWSPAPERIFY_SECRET ?? "";
 
   // list public repos
+  console.log(`[gen] ${user.username}: fetching repos`);
   const allRepos = await ghGet(`/users/${user.username}/repos?per_page=100&sort=pushed`, env.GITHUB_TOKEN);
   const repoNames: string[] = allRepos
     .filter((r: any) => !r.private && !r.fork)
     .map((r: any) => r.name)
     .slice(0, 30);
+  console.log(`[gen] ${user.username}: ${repoNames.length} repos`);
 
   if (repoNames.length === 0) {
     await saveDispatch(env.DB, user.id, user.username, "<p>No public repos found.</p>", from, to);
@@ -549,11 +551,13 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   const reposData: RepoData[] = [];
   for (let i = 0; i < repoNames.length; i += 5) {
     const batch = repoNames.slice(i, i + 5);
+    console.log(`[gen] ${user.username}: batch ${i}-${i+batch.length}`);
     const results = await Promise.all(
       batch.map(repo => getRepoData(user.username, repo, from, to, env.GITHUB_TOKEN, npUrl, npSecret))
     );
     reposData.push(...results.filter((r): r is RepoData => r !== null));
   }
+  console.log(`[gen] ${user.username}: ${reposData.length} active repos`);
 
   if (reposData.length === 0) {
     await saveDispatch(env.DB, user.id, user.username, "<p>No activity this week.</p>", from, to);
@@ -561,7 +565,9 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   }
 
   // generate LLM copy
+  console.log(`[gen] ${user.username}: calling LLM`);
   const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
+  console.log(`[gen] ${user.username}: LLM done`);
 
   // generate AI illustrations for articles without screenshots
   if (env.GOOGLE_AI_KEY) {
@@ -579,7 +585,9 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   const html = buildHtml(copy, reposData, user.username, from, to, wk);
 
   // save
+  console.log(`[gen] ${user.username}: saving dispatch wk=${wk}`);
   await saveDispatch(env.DB, env.DISPATCHES, user.id, user.username, html, from, to);
+  console.log(`[gen] ${user.username}: done`);
 
   // rough cost estimate: ~3K tokens LLM + images
   const llmCost = 0.003;
