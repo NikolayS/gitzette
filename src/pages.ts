@@ -45,13 +45,18 @@ function adjacentWeekKey(wk: string, delta: number): string {
 }
 
 function currentWeekKey(): string {
-  const now = new Date();
-  const jan4 = new Date(now.getFullYear(), 0, 4);
-  const dow = jan4.getDay() || 7;
-  const wkStart = new Date(jan4);
-  wkStart.setDate(jan4.getDate() - dow + 1);
-  const diff = Math.round((now.getTime() - wkStart.getTime()) / (7 * 86400000));
-  return `${now.getFullYear()}-W${String(diff + 1).padStart(2, "0")}`;
+  // AoE (UTC-12): week doesn't roll until everyone on Earth finishes their Sunday
+  const nowAoE = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  // Find Thursday of this ISO week (Thursday's year owns the week)
+  const thu = new Date(nowAoE);
+  thu.setUTCDate(nowAoE.getUTCDate() - ((nowAoE.getUTCDay() + 6) % 7) + 3);
+  const y = thu.getUTCFullYear();
+  // Monday of week 1: the Monday on or before Jan 4
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const mon1 = new Date(jan4);
+  mon1.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7));
+  const week = Math.floor((thu.getTime() - mon1.getTime()) / (7 * 86400000)) + 1;
+  return `${y}-W${String(week).padStart(2, "0")}`;
 }
 
 function weekNavBar(username: string, week_key: string, prevExists?: boolean, nextExists?: boolean): string {
