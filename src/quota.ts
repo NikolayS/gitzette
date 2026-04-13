@@ -1,10 +1,16 @@
 import type { Env } from "./index";
 
 export function currentWeekKey(): string {
-  const now = new Date();
-  const jan1 = new Date(now.getFullYear(), 0, 1);
-  const week = Math.ceil(((now.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
-  return `${now.getFullYear()}-W${String(week).padStart(2, "0")}`;
+  // AoE (UTC-12): week doesn't roll until everyone on Earth finishes their Sunday
+  const nowAoE = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  const thu = new Date(nowAoE);
+  thu.setUTCDate(nowAoE.getUTCDate() - ((nowAoE.getUTCDay() + 6) % 7) + 3);
+  const y = thu.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const mon1 = new Date(jan4);
+  mon1.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7));
+  const week = Math.floor((thu.getTime() - mon1.getTime()) / (7 * 86400000)) + 1;
+  return `${y}-W${String(week).padStart(2, "0")}`;
 }
 
 export function currentMonthKey(): string {
