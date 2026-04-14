@@ -169,38 +169,24 @@ async function getRepoData(owner: string, repo: string, from: Date, to: Date, to
 
 // ── image generation ──────────────────────────────────────────────────────────
 
-async function generateIllustration(subject: string, googleKey: string, newspaperifyUrl: string, secret: string): Promise<string | null> {
-  const style = "Black and white editorial newspaper illustration, woodcut style, high contrast ink on paper. Subject: ";
-  const prompt = style + subject;
+async function generateIllustration(subject: string, openAiKey: string, r2: R2Bucket, username: string): Promise<string | null> {
+  const STYLE = "Victorian-era woodcut engraving with detailed cross-hatching. PORTRAIT orientation — taller than wide. Pure black ink lines on pure white background. NO background shading, NO dark fills, NO border, NO frame, NO text or labels. CRITICAL: the object must have a COMPLEX IRREGULAR SILHOUETTE. Subject: ";
+  const prompt = STYLE + subject;
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict?key=${googleKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1, aspectRatio: "16:9" } }),
-      }
-    );
+    const res = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${openAiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "png" }),
+    });
     const data: any = await res.json();
-    if (data.predictions?.[0]?.bytesBase64Encoded) {
-      // run through newspaperify on callbot
-      const b64raw = data.predictions[0].bytesBase64Encoded;
-      const imgUrl = `data:image/png;base64,${b64raw}`;
-      // For base64 data URIs we post directly — pass as-is since callbot accepts URLs
-      // Instead, pass the raw bytes through the proxy via a special param
-      const npRes = await fetch(`${newspaperifyUrl}?secret=${secret}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ b64: b64raw }),
-      });
-      if (npRes.ok) {
-        const d: any = await npRes.json();
-        if (d.image) return d.image;
-      }
-      // fallback: return as-is
-      return imgUrl;
-    }
-  } catch (e) { console.warn("Imagen error:", e); }
+    if (!data.data?.[0]?.b64_json) return null;
+    const buf = Uint8Array.from(atob(data.data[0].b64_json), c => c.charCodeAt(0));
+    // store in R2 under illustrations/
+    const slug = subject.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
+    const key = `illustrations/${slug}.png`;
+    await r2.put(key, buf, { httpMetadata: { contentType: "image/png" } });
+    return `https://gitzette.online/img/${slug}.png`;
+  } catch (e) { console.warn("illustration error:", e); }
   return null;
 }
 
@@ -223,15 +209,20 @@ async function generateCopy(reposData: RepoData[], from: Date, to: Date, owner: 
 
 Week of ${fromLabel} – ${toLabel}.
 
+VOICE: You are writing for a technical audience of software engineers who have seen it all. They appreciate dry wit, specific technical jokes, and copy that treats them as intelligent adults. Think: The Economist meets lobste.rs. Never explain the joke. Never say "innovative" or "robust". Be specific, be wry, be smart.
+
 STYLE RULES:
-- Punchy headlines, dry wit, newspaper voice
+- Punchy headlines with dry wit — but wit must come from the actual technical content, not wordplay
 - Strict with facts: never invent numbers, dates, or features not in the data
-- Headlines: specific, not generic. "rpg teaches EXPLAIN to read its own X-rays" not "rpg gets new features"
+- Headlines: deeply specific, not generic. "rpg teaches EXPLAIN to read its own X-rays" not "rpg gets new features"
 - Short sentences. Active voice. No emoji. No markdown (no **bold**, no backticks).
 - Always call the author "@${owner}" — never full name or "the developer"
 - Project names always lowercase: "rpg" not "RPG", "sqlever" not "Sqlever"
 - When mentioning PRs, use inline HTML links: <a href="URL">#NUMBER</a>
-- Headlines must be about the work, not meta-commentary about the author's habits or personality. No "takes no questions", "doesn't sleep", "ships quietly", etc.
+- Tagline: something wry and specific to this week's theme, not generic. Make it sound like a film logline.
+- editionNote: one surprising sentence that captures the spirit of this week. Include a dry observation.
+- Article bodies: mix the technical detail with one sardonic observation. Don't belabor it.
+- Headlines must be about the work, not meta-commentary about the author's habits. No "takes no questions", "doesn't sleep", "ships quietly".
 
 DATA:
 ${dataJson}
@@ -258,7 +249,7 @@ Return ONLY a JSON object (no markdown fences):
     method: "POST",
     headers: { "Authorization": `Bearer ${orKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "anthropic/claude-sonnet-4-5",
+      model: "anthropic/claude-opus-4-5",
       max_tokens: 3000,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -334,9 +325,24 @@ function buildDataGraphics(reposData: RepoData[], from: Date, to: Date): string 
   return `<div style="font-family:'IBM Plex Mono',monospace;">${ticker}${commitChart}${starLeaderboard}</div>`;
 }
 
+// ── article image helper ──────────────────────────────────────────────────────
+
+function articleImg(src: string, alt: string, isIllustration: boolean): string {
+  if (isIllustration) {
+    // woodcut illustration: float right with shape-outside
+    return `<div style="float:right;margin:0 0 8px 16px;width:180px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');">
+      <img src="${src}" style="width:180px;display:block;" alt="${alt}">
+    </div>`;
+  }
+  // screenshot: float right, max 45% width, border
+  return `<div style="float:right;margin:0 0 8px 16px;max-width:45%;">
+    <img src="${src}" style="width:100%;display:block;border:1px solid var(--rule);" alt="${alt}">
+  </div>`;
+}
+
 // ── html builder ──────────────────────────────────────────────────────────────
 
-function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, to: Date, weekKey: string): string {
+function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, to: Date, weekKey: string, illustratedRepos: Set<string> = new Set()): string {
   const fromLabel = from.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const toLabel = to.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const totalCommits = reposData.reduce((s,r)=>s+r.commitCount,0);
@@ -357,8 +363,9 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
       <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
       <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
-      ${img ? `<img src="${img}" style="width:100%;max-height:200px;object-fit:cover;margin-bottom:10px;display:block;" alt="${a.repo}">` : ""}
+      ${img ? articleImg(img, a.repo, illustratedRepos.has(a.repo)) : ""}
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
+      <div style="clear:both;"></div>
       ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
       ${prLinks ? `<div style="margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);">merged: ${prLinks}</div>` : ""}
     </div>`;
@@ -379,8 +386,9 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
       <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
       <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
-      ${img ? `<img src="${img}" style="width:100%;max-height:200px;object-fit:cover;margin-bottom:10px;display:block;" alt="${a.repo}">` : ""}
+      ${img ? articleImg(img, a.repo, illustratedRepos.has(a.repo)) : ""}
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
+      <div style="clear:both;"></div>
       ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
       ${prLinks ? `<div style="margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);">merged: ${prLinks}</div>` : ""}
     </div>`;
@@ -401,8 +409,9 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
       <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
       <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
-      ${img ? `<img src="${img}" style="width:100%;max-height:200px;object-fit:cover;margin-bottom:10px;display:block;" alt="${a.repo}">` : ""}
+      ${img ? articleImg(img, a.repo, illustratedRepos.has(a.repo)) : ""}
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
+      <div style="clear:both;"></div>
       ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
       ${prLinks ? `<div style="margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);">merged: ${prLinks}</div>` : ""}
     </div>`;
@@ -570,19 +579,21 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   console.log(`[gen] ${user.username}: LLM done`);
 
   // generate AI illustrations for articles without screenshots
-  if (env.GOOGLE_AI_KEY) {
+  const illustratedRepos = new Set<string>();
+  const openAiKey = (env as any).OPENAI_API_KEY;
+  if (openAiKey) {
     for (const article of (copy.articles ?? [])) {
       const repo = reposData.find((r: RepoData) => r.name === article.repo);
       if (repo && repo.demoImages.length === 0 && article.illustrationPrompt) {
-        const img = await generateIllustration(article.illustrationPrompt, env.GOOGLE_AI_KEY, npUrl, npSecret);
-        if (img) repo.demoImages.push(img);
+        const img = await generateIllustration(article.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
+        if (img) { repo.demoImages.push(img); illustratedRepos.add(repo.name); }
       }
     }
   }
 
   // build HTML
   const wk = weekKey(to);
-  const html = buildHtml(copy, reposData, user.username, from, to, wk);
+  const html = buildHtml(copy, reposData, user.username, from, to, wk, illustratedRepos);
 
   // save
   console.log(`[gen] ${user.username}: saving dispatch wk=${wk}`);
