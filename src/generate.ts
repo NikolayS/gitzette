@@ -578,16 +578,19 @@ async function runGeneration(env: Env, user: { id: string; username: string }): 
   const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
   console.log(`[gen] ${user.username}: LLM done`);
 
-  // generate AI illustrations for articles without screenshots
+  // generate ONE AI illustration for the lead article only (to stay within CF Worker time limits)
   const illustratedRepos = new Set<string>();
   const openAiKey = (env as any).OPENAI_API_KEY;
   if (openAiKey) {
-    for (const article of (copy.articles ?? [])) {
-      const repo = reposData.find((r: RepoData) => r.name === article.repo);
-      if (repo && repo.demoImages.length === 0 && article.illustrationPrompt) {
-        const img = await generateIllustration(article.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
-        if (img) { repo.demoImages.push(img); illustratedRepos.add(repo.name); }
-      }
+    const lead = (copy.articles ?? []).find((a: any) => {
+      const repo = reposData.find((r: RepoData) => r.name === a.repo);
+      return repo && repo.demoImages.length === 0 && a.illustrationPrompt;
+    });
+    if (lead) {
+      const repo = reposData.find((r: RepoData) => r.name === lead.repo)!;
+      console.log(`[gen] ${user.username}: generating illustration for ${lead.repo}`);
+      const img = await generateIllustration(lead.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
+      if (img) { repo.demoImages.push(img); illustratedRepos.add(repo.name); }
     }
   }
 
