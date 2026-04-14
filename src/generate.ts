@@ -162,9 +162,8 @@ async function getRepoData(owner: string, repo: string, from: Date, to: Date, to
 
     if (releases.length === 0 && mergedPRs.length === 0 && commitCount === 0) return null;
 
-    const demoImages = await getReadmeImages(owner, repo, token, newspaperifyUrl, secret);
-
-    return { name: repo, description: info.description, url: info.html_url, stars: info.stargazers_count ?? 0, releases, mergedPRs, openPRs, commitCount, demoImages };
+    // Skip README images in Worker — AI illustrations are generated separately, saving subrequests
+    return { name: repo, description: info.description, url: info.html_url, stars: info.stargazers_count ?? 0, releases, mergedPRs, openPRs, commitCount, demoImages: [] };
   } catch (err) {
     console.error(`skipping ${repo}:`, err);
     return null;
