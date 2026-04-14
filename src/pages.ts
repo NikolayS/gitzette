@@ -285,13 +285,13 @@ async function fetchAndServeDispatch(
           }
           clearTimeout(_regenTimer);_regenPending=false;
           btn.disabled=true; btn.textContent='generating...';
-          await fetch('/generate',{method:'POST'});
+          await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:'${week_key}'})});
           let n=0;
           const iv=setInterval(async()=>{
             n++; btn.textContent='generating... ('+(n*5)+'s)';
             const s=await fetch('/generate/status').then(r=>r.json());
             if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(iv);location.reload();}
-            if(n>24){clearInterval(iv);btn.textContent='reload manually';}
+            if(n>60){clearInterval(iv);btn.textContent='reload manually';}
           },5000);
         }
         </script>`
@@ -756,7 +756,7 @@ ${headTags()}
     }
     clearTimeout(_regenTimer);_regenPending=false;
     btn.disabled=true; btn.textContent='generating...';
-    const res = await fetch('/generate',{method:'POST'});
+    const res = await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:'${dispatch.week_key}'})});
     const data = await res.json();
     if (data.error) { btn.textContent=data.message||data.error; setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000); return; }
     let n=0;
@@ -764,7 +764,7 @@ ${headTags()}
       n++;
       const s=await fetch('/generate/status').then(r=>r.json());
       if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(poll);location.reload();}
-      else if(n>24){clearInterval(poll);btn.textContent='reload manually';}
+      else if(n>60){clearInterval(poll);btn.textContent='reload manually';}
       else btn.textContent='generating... ('+(n*5)+'s)';
     },5000);
   }

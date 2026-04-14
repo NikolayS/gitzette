@@ -39,9 +39,13 @@ generateRoutes.post("/", async (c) => {
      ON CONFLICT(user_id, week_key) DO UPDATE SET r2_key=NULL, generated_at=unixepoch()`
   ).bind(user.id).run();
 
+  // accept optional weekKey from request body (for regenerating past weeks)
+  let targetWeek: string | undefined;
+  try { const body = await c.req.json(); targetWeek = body?.weekKey; } catch {}
+
   // run generation in the background (waitUntil keeps the Worker alive after response)
   c.executionCtx.waitUntil(
-    runGeneration(c.env, user).catch(err => console.error("generation failed:", err))
+    runGeneration(c.env, user, targetWeek).catch(err => console.error("generation failed:", err))
   );
 
   // record quota immediately
@@ -528,16 +532,29 @@ function weekKey(d: Date): string {
 
 // ── main generation pipeline ──────────────────────────────────────────────────
 
-async function runGeneration(env: Env, user: { id: string; username: string }): Promise<number> {
-  const to = new Date();
-  // Snap from= to Monday 00:00 AoE (= Monday 12:00 UTC)
-  const AOE_MS = 12 * 60 * 60 * 1000;
-  const nowAoE = new Date(Date.now() - AOE_MS);
-  const dayOfWeek = (nowAoE.getUTCDay() + 6) % 7; // Mon=0…Sun=6
-  const mondayAoE = new Date(nowAoE);
-  mondayAoE.setUTCDate(nowAoE.getUTCDate() - dayOfWeek);
-  mondayAoE.setUTCHours(0, 0, 0, 0);
-  const from = new Date(mondayAoE.getTime() + AOE_MS);
+async function runGeneration(env: Env, user: { id: string; username: string }, targetWeek?: string): Promise<number> {
+  let from: Date, to: Date;
+  if (targetWeek && /^\d{4}-W\d{2}$/.test(targetWeek)) {
+    // compute Monday-Sunday range from week key (e.g. "2026-W15")
+    const [year, w] = targetWeek.split("-W").map(Number);
+    const jan4 = new Date(Date.UTC(year, 0, 4));
+    const mon1 = new Date(jan4);
+    mon1.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7));
+    from = new Date(mon1);
+    from.setUTCDate(mon1.getUTCDate() + (w - 1) * 7);
+    to = new Date(from);
+    to.setUTCDate(from.getUTCDate() + 7);
+  } else {
+    to = new Date();
+    // Snap from= to Monday 00:00 AoE (= Monday 12:00 UTC)
+    const AOE_MS = 12 * 60 * 60 * 1000;
+    const nowAoE = new Date(Date.now() - AOE_MS);
+    const dayOfWeek = (nowAoE.getUTCDay() + 6) % 7; // Mon=0…Sun=6
+    const mondayAoE = new Date(nowAoE);
+    mondayAoE.setUTCDate(nowAoE.getUTCDate() - dayOfWeek);
+    mondayAoE.setUTCHours(0, 0, 0, 0);
+    from = new Date(mondayAoE.getTime() + AOE_MS);
+  }
 
   const npUrl = (env as any).NEWSPAPERIFY_URL ?? "https://test-callbot.samo.team/newspaperify";
   const npSecret = (env as any).NEWSPAPERIFY_SECRET ?? "";
