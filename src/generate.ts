@@ -62,7 +62,7 @@ generateRoutes.get("/status", async (c) => {
 
   if (sentinel) {
     const ageSeconds = Math.floor(Date.now() / 1000) - sentinel.generated_at;
-    const TTL = 5 * 60; // 5 minutes
+    const TTL = 10 * 60; // 10 minutes (Opus + illustration generation is slow)
     if (ageSeconds > TTL) {
       // Generation timed out — clean up sentinel, return failed status
       await c.env.DB.prepare(
