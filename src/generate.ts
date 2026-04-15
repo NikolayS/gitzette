@@ -182,8 +182,10 @@ async function generateIllustration(subject: string, openAiKey: string, r2: R2Bu
       body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "png" }),
     });
     const data: any = await res.json();
-    if (!data.data?.[0]?.b64_json) return null;
-    const buf = Uint8Array.from(atob(data.data[0].b64_json), c => c.charCodeAt(0));
+    console.log(`[illust] response keys: ${JSON.stringify(Object.keys(data))}, data[0] keys: ${data.data?.[0] ? JSON.stringify(Object.keys(data.data[0])) : 'none'}`);
+    const b64 = data.data?.[0]?.b64_json;
+    if (!b64) return null;
+    const buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     // store in R2 under illustrations/
     const slug = subject.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
     const key = `illustrations/${slug}.png`;
