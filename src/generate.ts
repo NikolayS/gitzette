@@ -225,6 +225,8 @@ STYLE RULES:
 - Article bodies: mix the technical detail with one sardonic observation. Don't belabor it.
 - Headlines must be about the work, not meta-commentary about the author's habits. No "takes no questions", "doesn't sleep", "ships quietly".
 
+IMPORTANT: Write exactly ONE article per repo in the data. Even repos with just 1 commit deserve a short, punchy write-up — a single dry sentence about what changed is fine. Never merge repos into one article. A newspaper covers all beats, not just the loudest one.
+
 DATA:
 ${dataJson}
 
@@ -235,12 +237,12 @@ Return ONLY a JSON object (no markdown fences):
   "editionNote": "one sentence: e.g. 'Four releases, one leaked key, and a migration tool that arrived fully armed.'",
   "articles": [
     {
-      "repo": "repo name",
+      "repo": "repo name (must match exactly one repo from the data)",
       "headline": "punchy newspaper headline",
       "deck": "one-sentence italic subheading",
-      "body": "2-4 sentence article body with specific features/PRs. Inline HTML links ok.",
+      "body": "2-4 sentence article body with specific features/PRs. Inline HTML links ok. For low-activity repos, one dry sentence is fine.",
       "tag": "RELEASE | FEATURE | SECURITY | PENDING | COMMUNITY",
-      "illustrationPrompt": "10-15 word subject for editorial illustration (only if repo has no screenshots)"
+      "illustrationPrompt": "10-15 word subject for editorial illustration (a concrete physical object, not abstract — e.g. 'a brass sextant on a nautical chart' not 'navigation concept')"
     }
   ],
   "closingNote": "dry one-liner sign-off"
@@ -330,13 +332,13 @@ function buildDataGraphics(reposData: RepoData[], from: Date, to: Date): string 
 
 function articleImg(src: string, alt: string, isIllustration: boolean): string {
   if (isIllustration) {
-    // woodcut illustration: float right with shape-outside
-    return `<div style="float:right;margin:0 0 8px 16px;width:180px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');">
-      <img src="${src}" style="width:180px;display:block;" alt="${alt}">
+    // woodcut illustration: float right with shape-outside, compact
+    return `<div style="float:right;margin:0 0 8px 14px;width:140px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');shape-margin:8px;">
+      <img src="${src}" style="width:140px;display:block;" alt="${alt}">
     </div>`;
   }
-  // screenshot: float right, max 45% width, border
-  return `<div style="float:right;margin:0 0 8px 16px;max-width:45%;">
+  // screenshot: float right, max 35% width, border
+  return `<div style="float:right;margin:0 0 8px 14px;max-width:35%;">
     <img src="${src}" style="width:100%;display:block;border:1px solid var(--rule);" alt="${alt}">
   </div>`;
 }
