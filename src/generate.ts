@@ -564,7 +564,7 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const repoNames: string[] = allRepos
     .filter((r: any) => !r.private && !r.fork)
     .map((r: any) => r.name)
-    .slice(0, 8); // keep under CF Workers free-plan 50-subrequest limit (~8 repos × 6 calls = 48)
+    .slice(0, 30);
   console.log(`[gen] ${user.username}: ${repoNames.length} repos`);
 
   if (repoNames.length === 0) {
@@ -594,19 +594,17 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
   console.log(`[gen] ${user.username}: LLM done`);
 
-  // generate ONE AI illustration for the lead article only (to stay within CF Worker time limits)
+  // generate AI illustrations for articles without screenshots
   const illustratedRepos = new Set<string>();
   const openAiKey = (env as any).OPENAI_API_KEY;
   if (openAiKey) {
-    const lead = (copy.articles ?? []).find((a: any) => {
-      const repo = reposData.find((r: RepoData) => r.name === a.repo);
-      return repo && repo.demoImages.length === 0 && a.illustrationPrompt;
-    });
-    if (lead) {
-      const repo = reposData.find((r: RepoData) => r.name === lead.repo)!;
-      console.log(`[gen] ${user.username}: generating illustration for ${lead.repo}`);
-      const img = await generateIllustration(lead.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
-      if (img) { repo.demoImages.push(img); illustratedRepos.add(repo.name); }
+    for (const article of (copy.articles ?? [])) {
+      const repo = reposData.find((r: RepoData) => r.name === article.repo);
+      if (repo && repo.demoImages.length === 0 && article.illustrationPrompt) {
+        console.log(`[gen] ${user.username}: generating illustration for ${article.repo}`);
+        const img = await generateIllustration(article.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
+        if (img) { repo.demoImages.push(img); illustratedRepos.add(repo.name); }
+      }
     }
   }
 
