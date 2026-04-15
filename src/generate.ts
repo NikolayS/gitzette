@@ -33,26 +33,22 @@ generateRoutes.post("/", async (c) => {
     }, 503);
   }
 
-  // mark as generating (sentinel row — deleted on completion)
-  await c.env.DB.prepare(
-    `INSERT INTO dispatches (user_id, week_key, r2_key, generated_at) VALUES (?, 'generating', NULL, unixepoch())
-     ON CONFLICT(user_id, week_key) DO UPDATE SET r2_key=NULL, generated_at=unixepoch()`
-  ).bind(user.id).run();
-
   // accept optional weekKey from request body (for regenerating past weeks)
   let targetWeek: string | undefined;
   try { const body = await c.req.json(); targetWeek = body?.weekKey; } catch {}
-
-  // run generation in the background (waitUntil keeps the Worker alive after response)
-  c.executionCtx.waitUntil(
-    runGeneration(c.env, user, targetWeek).catch(err => console.error("generation failed:", err))
-  );
 
   // record quota immediately
   await recordGeneration(c.env.DB, user.id);
   await recordSpend(c.env.DB, 0.10); // estimated
 
-  return c.json({ status: "queued", message: "Generating your dispatch... reload in 60 seconds." });
+  // run generation synchronously (waitUntil gets killed too early for Opus + illustrations)
+  try {
+    await runGeneration(c.env, user, targetWeek);
+    return c.json({ status: "ready", message: "Dispatch generated." });
+  } catch (err) {
+    console.error("generation failed:", err);
+    return c.json({ error: "generation_failed", message: String(err) }, 500);
+  }
 });
 
 generateRoutes.get("/status", async (c) => {
