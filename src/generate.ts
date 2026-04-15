@@ -182,7 +182,7 @@ async function generateIllustration(subject: string, openAiKey: string, r2: R2Bu
       body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "png" }),
     });
     const data: any = await res.json();
-    console.log(`[illust] response keys: ${JSON.stringify(Object.keys(data))}, data[0] keys: ${data.data?.[0] ? JSON.stringify(Object.keys(data.data[0])) : 'none'}`);
+    if (data.error) { console.warn(`[illust] OpenAI error: ${JSON.stringify(data.error)}`); return null; }
     const b64 = data.data?.[0]?.b64_json;
     if (!b64) return null;
     const buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
