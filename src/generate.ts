@@ -332,13 +332,13 @@ function buildDataGraphics(reposData: RepoData[], from: Date, to: Date): string 
 
 function articleImg(src: string, alt: string, isIllustration: boolean): string {
   if (isIllustration) {
-    // woodcut illustration: float right with shape-outside, compact
-    return `<div style="float:right;margin:0 0 8px 14px;width:140px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');shape-margin:8px;">
+    // woodcut illustration: float left with shape-outside, compact
+    return `<div style="float:left;margin:0 14px 8px 0;width:140px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');shape-margin:8px;">
       <img src="${src}" style="width:140px;display:block;" alt="${alt}">
     </div>`;
   }
-  // screenshot: float right, max 35% width, border
-  return `<div style="float:right;margin:0 0 8px 14px;max-width:35%;">
+  // screenshot: float left, max 35% width, border
+  return `<div style="float:left;margin:0 14px 8px 0;max-width:35%;">
     <img src="${src}" style="width:100%;display:block;border:1px solid var(--rule);" alt="${alt}">
   </div>`;
 }
