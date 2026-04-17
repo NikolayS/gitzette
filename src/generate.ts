@@ -132,31 +132,41 @@ async function getReadmeImages(owner: string, repo: string, token: string, newsp
   } catch { return []; }
 }
 
-async function getRepoData(owner: string, repo: string, from: Date, to: Date, token: string, newspaperifyUrl: string, secret: string): Promise<RepoData | null> {
+async function getRepoData(owner: string, repo: string, from: Date, to: Date, token: string, newspaperifyUrl: string, secret: string, isFork: boolean = false, authorFilter?: string): Promise<RepoData | null> {
   try {
     const info = await ghGet(`/repos/${owner}/${repo}`, token);
-    const allReleases = await ghGet(`/repos/${owner}/${repo}/releases?per_page=20`, token);
-    const releases: Release[] = allReleases
-      .filter((r: any) => { const d = new Date(r.published_at); return d >= from && d <= to; })
-      .map((r: any) => ({ tag: r.tag_name, name: r.name || r.tag_name, date: r.published_at, body: (r.body || "").slice(0, 2000), url: r.html_url }));
 
-    const allPRs = await ghGet(`/repos/${owner}/${repo}/pulls?state=closed&per_page=50&sort=updated&direction=desc`, token);
-    const mergedPRs: PR[] = allPRs
-      .filter((p: any) => { if (!p.merged_at) return false; const d = new Date(p.merged_at); return d >= from && d <= to; })
-      .map((p: any) => ({ number: p.number, title: p.title, state: "merged" as const, date: p.merged_at, url: p.html_url, author: p.user?.login || "unknown" }));
+    // For forks, skip releases/PRs (those belong to upstream) and only count user's commits
+    let releases: Release[] = [];
+    let mergedPRs: PR[] = [];
+    let openPRs: PR[] = [];
 
-    const openPRsRaw = await ghGet(`/repos/${owner}/${repo}/pulls?state=open&per_page=50&sort=created&direction=desc`, token);
-    const openPRs: PR[] = openPRsRaw
-      .filter((p: any) => { const d = new Date(p.created_at); return d >= from && d <= to; })
-      .map((p: any) => ({ number: p.number, title: p.title, state: "open" as const, date: p.created_at, url: p.html_url, author: p.user?.login || "unknown" }));
+    if (!isFork) {
+      const allReleases = await ghGet(`/repos/${owner}/${repo}/releases?per_page=20`, token);
+      releases = allReleases
+        .filter((r: any) => { const d = new Date(r.published_at); return d >= from && d <= to; })
+        .map((r: any) => ({ tag: r.tag_name, name: r.name || r.tag_name, date: r.published_at, body: (r.body || "").slice(0, 2000), url: r.html_url }));
+
+      const allPRs = await ghGet(`/repos/${owner}/${repo}/pulls?state=closed&per_page=50&sort=updated&direction=desc`, token);
+      mergedPRs = allPRs
+        .filter((p: any) => { if (!p.merged_at) return false; const d = new Date(p.merged_at); return d >= from && d <= to; })
+        .map((p: any) => ({ number: p.number, title: p.title, state: "merged" as const, date: p.merged_at, url: p.html_url, author: p.user?.login || "unknown" }));
+
+      const openPRsRaw = await ghGet(`/repos/${owner}/${repo}/pulls?state=open&per_page=50&sort=created&direction=desc`, token);
+      openPRs = openPRsRaw
+        .filter((p: any) => { const d = new Date(p.created_at); return d >= from && d <= to; })
+        .map((p: any) => ({ number: p.number, title: p.title, state: "open" as const, date: p.created_at, url: p.html_url, author: p.user?.login || "unknown" }));
+    }
 
     let commitCount = 0;
     try {
-      const commits = await ghGet(`/repos/${owner}/${repo}/commits?since=${from.toISOString()}&until=${to.toISOString()}&per_page=100`, token);
+      // For forks, filter by author so we only count the user's own commits (not upstream merges)
+      const authorParam = authorFilter ? `&author=${encodeURIComponent(authorFilter)}` : "";
+      const commits = await ghGet(`/repos/${owner}/${repo}/commits?since=${from.toISOString()}&until=${to.toISOString()}&per_page=100${authorParam}`, token);
       commitCount = Array.isArray(commits) ? commits.length : 0;
     } catch { /* empty repo */ }
 
-    if (releases.length === 0 && mergedPRs.length === 0 && commitCount === 0) return null;
+    if (releases.length === 0 && mergedPRs.length === 0 && openPRs.length === 0 && commitCount === 0) return null;
 
     // Skip README images in Worker — AI illustrations are generated separately, saving subrequests
     return { name: repo, description: info.description, url: info.html_url, stars: info.stargazers_count ?? 0, releases, mergedPRs, openPRs, commitCount, demoImages: [] };
@@ -558,34 +568,77 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const npUrl = (env as any).NEWSPAPERIFY_URL ?? "https://test-callbot.samo.team/newspaperify";
   const npSecret = (env as any).NEWSPAPERIFY_SECRET ?? "";
 
-  // list public repos
+  // list public repos (including forks — we filter out forks' upstream activity elsewhere)
   console.log(`[gen] ${user.username}: fetching repos`);
   const allRepos = await ghGet(`/users/${user.username}/repos?per_page=100&sort=pushed`, env.GITHUB_TOKEN);
-  const repoNames: string[] = allRepos
-    .filter((r: any) => !r.private && !r.fork)
-    .map((r: any) => r.name)
-    .slice(0, 30);
-  console.log(`[gen] ${user.username}: ${repoNames.length} repos`);
+  const publicRepos = allRepos.filter((r: any) => !r.private).slice(0, 30);
+  const ownedFullNames = new Set<string>(publicRepos.map((r: any) => r.full_name.toLowerCase()));
+  console.log(`[gen] ${user.username}: ${publicRepos.length} repos (incl. forks)`);
 
-  if (repoNames.length === 0) {
-    await saveDispatch(env.DB, user.id, user.username, "<p>No public repos found.</p>", from, to);
+  if (publicRepos.length === 0 && !targetWeek) {
+    await saveDispatch(env.DB, env.DISPATCHES, user.id, user.username, "<p>No public repos found.</p>", from, to);
     return 0;
   }
 
+  // Search for PRs the user authored in ANY repo during the window (catches external contributions)
+  const fromISO = from.toISOString().slice(0, 10);
+  const toISO = new Date(to.getTime() - 86400000).toISOString().slice(0, 10);
+  console.log(`[gen] ${user.username}: searching PRs ${fromISO}..${toISO}`);
+  let externalPRs: { fullName: string; items: any[] }[] = [];
+  try {
+    const searchRes = await ghGet(`/search/issues?q=author:${encodeURIComponent(user.username)}+is:pr+created:${fromISO}..${toISO}&per_page=100`, env.GITHUB_TOKEN);
+    const byRepo = new Map<string, any[]>();
+    for (const item of searchRes.items || []) {
+      const fullName = item.repository_url.replace("https://api.github.com/repos/", "");
+      if (ownedFullNames.has(fullName.toLowerCase())) continue; // skip own repos
+      if (!byRepo.has(fullName)) byRepo.set(fullName, []);
+      byRepo.get(fullName)!.push(item);
+    }
+    externalPRs = [...byRepo.entries()].map(([fullName, items]) => ({ fullName, items }));
+    console.log(`[gen] ${user.username}: ${externalPRs.length} external repos with PRs`);
+  } catch (err) { console.warn("PR search failed:", err); }
+
   // fetch repo data in parallel (batches of 5 to avoid rate limits)
   const reposData: RepoData[] = [];
-  for (let i = 0; i < repoNames.length; i += 5) {
-    const batch = repoNames.slice(i, i + 5);
+  for (let i = 0; i < publicRepos.length; i += 5) {
+    const batch = publicRepos.slice(i, i + 5);
     console.log(`[gen] ${user.username}: batch ${i}-${i+batch.length}`);
     const results = await Promise.all(
-      batch.map(repo => getRepoData(user.username, repo, from, to, env.GITHUB_TOKEN, npUrl, npSecret))
+      batch.map((repo: any) => getRepoData(
+        user.username, repo.name, from, to, env.GITHUB_TOKEN, npUrl, npSecret,
+        repo.fork, repo.fork ? user.username : undefined,
+      ))
     );
     reposData.push(...results.filter((r): r is RepoData => r !== null));
   }
-  console.log(`[gen] ${user.username}: ${reposData.length} active repos`);
+
+  // Add external repos where the user authored PRs
+  for (const { fullName, items } of externalPRs) {
+    try {
+      const info = await ghGet(`/repos/${fullName}`, env.GITHUB_TOKEN);
+      const mergedPRs: PR[] = items
+        .filter((p: any) => p.pull_request?.merged_at)
+        .map((p: any) => ({
+          number: p.number, title: p.title, state: "merged" as const,
+          date: p.pull_request.merged_at, url: p.html_url, author: user.username,
+        }));
+      const openPRs: PR[] = items
+        .filter((p: any) => !p.pull_request?.merged_at && p.state === "open")
+        .map((p: any) => ({
+          number: p.number, title: p.title, state: "open" as const,
+          date: p.created_at, url: p.html_url, author: user.username,
+        }));
+      reposData.push({
+        name: fullName, description: info.description, url: info.html_url,
+        stars: info.stargazers_count ?? 0,
+        releases: [], mergedPRs, openPRs, commitCount: 0, demoImages: [],
+      });
+    } catch (err) { console.warn(`external repo ${fullName} failed:`, err); }
+  }
+  console.log(`[gen] ${user.username}: ${reposData.length} active repos total`);
 
   if (reposData.length === 0) {
-    await saveDispatch(env.DB, user.id, user.username, "<p>No activity this week.</p>", from, to);
+    await saveDispatch(env.DB, env.DISPATCHES, user.id, user.username, "<p>No activity this week.</p>", from, to);
     return 0;
   }
 
