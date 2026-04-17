@@ -487,6 +487,7 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
   :root { --ink: #0f0f0f; --paper: #f7f4ee; --rule: #c8c2b4; --muted: #666; }
   body { background: #e8e4dc; font-family: 'IBM Plex Sans', sans-serif; color: var(--ink); font-size: 15px; line-height: 1.6; }
   a { color: var(--ink); text-decoration: none; }
+  .body p a[href*="/pull/"], .body p a[href*="/issues/"] { border-bottom: 1px solid #a08878; color: #5a3a2a; }
   a:hover { text-decoration: underline; }
   .paper { max-width: 960px; margin: 24px auto; background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 2px 12px rgba(0,0,0,.15); }
   .header { padding: 20px 24px 14px; border-bottom: 3px solid var(--ink); }
