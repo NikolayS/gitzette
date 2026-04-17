@@ -416,15 +416,16 @@ pageRoutes.get("/", async (c) => {
 
 // /status — private quota dashboard (token-gated)
 // serve illustration images from R2
-pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png)}", async (c) => {
+pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
   const { slug } = c.req.param();
   const obj = await c.env.DISPATCHES.get(`illustrations/${slug}`);
   if (!obj) return c.text("not found", 404);
   const buf = await obj.arrayBuffer();
-  const isPng = slug.endsWith(".png");
+  const contentType = slug.endsWith(".webp") ? "image/webp"
+    : slug.endsWith(".png") ? "image/png" : "image/jpeg";
   return new Response(buf, {
     headers: {
-      "Content-Type": isPng ? "image/png" : "image/jpeg",
+      "Content-Type": contentType,
       "Cache-Control": "public, max-age=86400",
       "Access-Control-Allow-Origin": "*",
     },

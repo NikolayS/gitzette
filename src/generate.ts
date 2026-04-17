@@ -187,21 +187,22 @@ async function generateIllustration(subject: string, openAiKey: string, r2: R2Bu
   const STYLE = "Victorian-era woodcut engraving with detailed cross-hatching. PORTRAIT orientation — taller than wide. Pure black ink lines on pure white background. NO background shading, NO dark fills, NO border, NO frame, NO text or labels. CRITICAL: the object must have a COMPLEX IRREGULAR SILHOUETTE. Subject: ";
   const prompt = STYLE + subject;
   try {
+    // WebP + low quality → ~10x smaller files (display is 140px, source was 1024x1024 PNG)
     const res = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: { "Authorization": `Bearer ${openAiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "png" }),
+      body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "webp", quality: "low" }),
     });
     const data: any = await res.json();
     if (data.error) { console.warn(`[illust] OpenAI error: ${JSON.stringify(data.error)}`); return null; }
     const b64 = data.data?.[0]?.b64_json;
     if (!b64) return null;
     const buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    // store in R2 under illustrations/
     const slug = subject.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
-    const key = `illustrations/${slug}.png`;
-    await r2.put(key, buf, { httpMetadata: { contentType: "image/png" } });
-    return `https://gitzette.online/img/${slug}.png`;
+    const key = `illustrations/${slug}.webp`;
+    await r2.put(key, buf, { httpMetadata: { contentType: "image/webp" } });
+    console.log(`[illust] stored ${slug}.webp (${buf.byteLength} bytes)`);
+    return `https://gitzette.online/img/${slug}.webp`;
   } catch (e) { console.warn("illustration error:", e); }
   return null;
 }
