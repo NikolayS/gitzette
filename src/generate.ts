@@ -191,7 +191,7 @@ async function generateIllustration(subject: string, openAiKey: string, r2: R2Bu
     const res = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: { "Authorization": `Bearer ${openAiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "webp", quality: "low" }),
+      body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "webp", quality: "low", output_compression: 50 }),
     });
     const data: any = await res.json();
     if (data.error) { console.warn(`[illust] OpenAI error: ${JSON.stringify(data.error)}`); return null; }
@@ -349,13 +349,13 @@ function buildDataGraphics(reposData: RepoData[], from: Date, to: Date): string 
 function articleImg(src: string, alt: string, isIllustration: boolean): string {
   if (isIllustration) {
     // woodcut illustration: float left with shape-outside, compact
-    return `<div style="float:left;margin:0 14px 8px 0;width:140px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');shape-margin:8px;">
-      <img src="${src}" style="width:140px;display:block;" alt="${alt}">
+    return `<div style="float:left;margin:0 12px 6px 0;width:100px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');shape-margin:6px;">
+      <img src="${src}" style="width:100px;display:block;" alt="${alt}" loading="lazy">
     </div>`;
   }
-  // screenshot: float left, max 35% width, border
-  return `<div style="float:left;margin:0 14px 8px 0;max-width:35%;">
-    <img src="${src}" style="width:100%;display:block;border:1px solid var(--rule);" alt="${alt}">
+  // screenshot: float left, max 28% width, border
+  return `<div style="float:left;margin:0 12px 6px 0;max-width:28%;">
+    <img src="${src}" style="width:100%;display:block;border:1px solid var(--rule);" alt="${alt}" loading="lazy">
   </div>`;
 }
 
