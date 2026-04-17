@@ -168,8 +168,13 @@ async function getRepoData(owner: string, repo: string, from: Date, to: Date, to
 
     if (releases.length === 0 && mergedPRs.length === 0 && openPRs.length === 0 && commitCount === 0) return null;
 
-    // Skip README images in Worker — AI illustrations are generated separately, saving subrequests
-    return { name: repo, description: info.description, url: info.html_url, stars: info.stargazers_count ?? 0, releases, mergedPRs, openPRs, commitCount, demoImages: [] };
+    // Fetch README screenshot (for own non-fork repos) — real screenshots preferred over AI illustrations
+    let demoImages: string[] = [];
+    if (!isFork) {
+      try { demoImages = await getReadmeImages(owner, repo, token, newspaperifyUrl, secret); } catch {}
+    }
+
+    return { name: repo, description: info.description, url: info.html_url, stars: info.stargazers_count ?? 0, releases, mergedPRs, openPRs, commitCount, demoImages };
   } catch (err) {
     console.error(`skipping ${repo}:`, err);
     return null;
@@ -648,17 +653,34 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
   console.log(`[gen] ${user.username}: LLM done`);
 
-  // generate AI illustrations for articles without screenshots
+  // Determine image budget: aim for ~40% of articles to have images (25-50% range).
+  // Real screenshots count first; fill remainder with AI illustrations on the most prominent articles.
   const illustratedRepos = new Set<string>();
   const openAiKey = (env as any).OPENAI_API_KEY;
+  const articles = copy.articles ?? [];
+  const targetImageCount = Math.max(1, Math.round(articles.length * 0.4));
+  const articlesWithScreenshots = articles.filter((a: any) => {
+    const repo = reposData.find((r: RepoData) => r.name === a.repo);
+    return repo && repo.demoImages.length > 0;
+  });
+  let aiBudget = Math.max(0, targetImageCount - articlesWithScreenshots.length);
+  console.log(`[gen] ${user.username}: ${articles.length} articles, ${articlesWithScreenshots.length} w/ screenshots, ${aiBudget} AI budget`);
+
+  // Prioritize FEATURE/RELEASE articles (more visually prominent) for AI illustrations
+  const priority = (tag: string) => tag === "FEATURE" || tag === "RELEASE" ? 0 : tag === "SECURITY" ? 1 : 2;
+  const eligibleForAi = articles
+    .filter((a: any) => {
+      const repo = reposData.find((r: RepoData) => r.name === a.repo);
+      return repo && repo.demoImages.length === 0 && a.illustrationPrompt;
+    })
+    .sort((a: any, b: any) => priority(a.tag) - priority(b.tag));
+
   if (openAiKey) {
-    for (const article of (copy.articles ?? [])) {
-      const repo = reposData.find((r: RepoData) => r.name === article.repo);
-      if (repo && repo.demoImages.length === 0 && article.illustrationPrompt) {
-        console.log(`[gen] ${user.username}: generating illustration for ${article.repo}`);
-        const img = await generateIllustration(article.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
-        if (img) { repo.demoImages.push(img); illustratedRepos.add(repo.name); }
-      }
+    for (const article of eligibleForAi.slice(0, aiBudget)) {
+      const repo = reposData.find((r: RepoData) => r.name === article.repo)!;
+      console.log(`[gen] ${user.username}: generating illustration for ${article.repo}`);
+      const img = await generateIllustration(article.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
+      if (img) { repo.demoImages.push(img); illustratedRepos.add(repo.name); }
     }
   }
 
