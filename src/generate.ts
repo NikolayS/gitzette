@@ -191,7 +191,7 @@ async function generateIllustration(subject: string, openAiKey: string, r2: R2Bu
     const res = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: { "Authorization": `Bearer ${openAiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "webp", quality: "low", output_compression: 50 }),
+      body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size: "1024x1024", background: "transparent", output_format: "webp", quality: "low", output_compression: 60 }),
     });
     const data: any = await res.json();
     if (data.error) { console.warn(`[illust] OpenAI error: ${JSON.stringify(data.error)}`); return null; }
@@ -226,22 +226,57 @@ async function generateCopy(reposData: RepoData[], from: Date, to: Date, owner: 
 
 Week of ${fromLabel} – ${toLabel}.
 
-VOICE: You are writing for a technical audience of software engineers who have seen it all. They appreciate dry wit, specific technical jokes, and copy that treats them as intelligent adults. Think: The Economist meets lobste.rs. Never explain the joke. Never say "innovative" or "robust". Be specific, be wry, be smart.
+EDITORIAL STYLE GUIDE — follow every rule strictly:
 
-STYLE RULES:
-- Punchy headlines with dry wit — but wit must come from the actual technical content, not wordplay
-- Strict with facts: never invent numbers, dates, or features not in the data
-- Headlines: deeply specific, not generic. "rpg teaches EXPLAIN to read its own X-rays" not "rpg gets new features"
-- Short sentences. Active voice. No emoji. No markdown (no **bold**, no backticks).
-- Always call the author "@${owner}" — never full name or "the developer"
-- Project names always lowercase: "rpg" not "RPG", "sqlever" not "Sqlever"
-- When mentioning PRs, use inline HTML links: <a href="URL">#NUMBER</a>
-- Tagline: something wry and specific to this week's theme, not generic. Make it sound like a film logline.
-- editionNote: one surprising sentence that captures the spirit of this week. Include a dry observation.
-- Article bodies: mix the technical detail with one sardonic observation. Don't belabor it.
-- Headlines must be about the work, not meta-commentary about the author's habits. No "takes no questions", "doesn't sleep", "ships quietly".
+## Voice
+Think: a senior engineer who writes well and has a personality. Not a marketer. Not a release notes bot. NOT a dry changelog. The reader runs this software in production — they can read commits themselves. What they want is ENTERTAINMENT + INSIGHT: the angle they didn't see, the consequence that's actually funny, the irony of a two-line fix that took three weeks.
 
-IMPORTANT: Write exactly ONE article per repo in the data. Even repos with just 1 commit deserve a short, punchy write-up — a single dry sentence about what changed is fine. Never merge repos into one article. A newspaper covers all beats, not just the loudest one.
+Reference tone: a sharp Hacker News comment written by someone who actually read the code AND has a sense of humor. Wit is not the enemy of accuracy — it's what makes accurate content worth reading.
+
+THE LEV TEST: would a reader forward this to a colleague because it's *entertaining*, not just informative? If the honest answer is "accurate but boring" — rewrite. If someone wanted facts, they'd read the repo.
+
+## Headlines
+- VARY the structure. Never all "[project] [verb]s [noun]".
+  - Consequence-first: "a 200ms blip was enough to lose a primary — not anymore"
+  - Observation: "the backoff patroni needed to stop over-eager failovers"
+  - Mechanism: "etcd v3's Unavailable exception now lands somewhere safe"
+- Name the mechanism, not just the outcome. Cute is fine when it illuminates the mechanism.
+- Sentence case only. No Title Case.
+
+## Body Copy (CRITICAL)
+Every body answers: (1) situation before, (2) what specifically changed, (3) effect.
+
+NEVER open with "@author merged #NNN —" — that's boilerplate. Don't start with "#123 does X" either. Lead with the bug, the behavior, or the fact about the software. Attribute mid-sentence.
+
+- Bad opener: "@${owner} merged #123 which fixes..."
+- Bad opener: "#123 adds proper handling for..."
+- Good opener: "Patroni used to pull the failover trigger the moment a heartbeat gap appeared. @${owner}'s <a href=\\"URL\\">#3453</a> adds the backoff it needed."
+
+CONCRETE PR/ISSUE LINKS: every body MUST link to specific PRs mentioned, inline, as HTML anchors: <a href="https://github.com/...">#NUMBER</a>. The LINK is the citation. Use real PR URLs from the data. No bare numbers.
+
+One metaphor per article max — grounded in technical reality, not decoration.
+
+## Finding the Angle
+Every article needs a hook — something surprising, counterintuitive, or reveals how the software actually works. A static library build isn't news. The fact it unlocks embedding the terminal in other apps — that's the angle. If you can't find an angle, write less body, not more.
+
+## Attribution & Facts
+- Always refer to the author as "@${owner}" — never full name or "the developer"
+- Project names always lowercase: "rpg" not "RPG"
+- For forks/external repos (e.g. postgres, multigres, pgdog): write about @${owner}'s OWN commits/PRs only. Do not attribute upstream activity to @${owner}.
+- Never invent numbers, class names, method names, or features not in the data.
+- No emoji. No markdown (no **bold**, no backticks outside <code>).
+
+## What to Ban
+- Pure test/CI-only PRs as standalone articles (skip unless only activity)
+- Bot-opened dependency/sync PRs as standalone articles
+- Vague drama with no technical content ("haunted", "plagued")
+- Bundling unrelated PRs into one article
+- Headlines about author habits ("takes no questions", "ships quietly")
+
+IMPORTANT: Write exactly ONE article per repo in the data. Even repos with just 1 commit deserve a punchy one-sentence write-up. Never merge repos.
+
+AVAILABLE REPOS (use ONLY these exact names in "repo"):
+${reposData.map(r => `- ${r.name}${r.description ? ` (${r.description.slice(0, 80)})` : ""}`).join("\n")}
 
 DATA:
 ${dataJson}
@@ -249,19 +284,19 @@ ${dataJson}
 Return ONLY a JSON object (no markdown fences):
 {
   "masthead": "the dispatch",
-  "tagline": "witty one-line tagline specific to this week",
-  "editionNote": "one sentence: e.g. 'Four releases, one leaked key, and a migration tool that arrived fully armed.'",
+  "tagline": "a one-line tagline for this week — dry, specific, t-shirt-worthy. Not 'busy week'. Something like: 'turns out the parser wasn't walking all the way down' or 'OIDs: still 32 bits in someone's head, 64 bits in reality'",
+  "editionNote": "one punchy sentence. Engineer humor — self-aware, slightly dark, grounded in what actually happened. Example: 'Three data corruption bugs fixed. One of them existed since day one.'",
   "articles": [
     {
-      "repo": "repo name (must match exactly one repo from the data)",
-      "headline": "punchy newspaper headline",
+      "repo": "exact repo name from AVAILABLE REPOS",
+      "headline": "punchy newspaper headline, sentence case, varied structure",
       "deck": "one-sentence italic subheading",
-      "body": "2-4 sentence article body with specific features/PRs. Inline HTML links ok. For low-activity repos, one dry sentence is fine.",
+      "body": "2-4 sentences. Lead with the situation or failure mode, not '@owner merged #N'. Be specific. MUST include inline HTML <a href='URL'>#NUMBER</a> citations for every PR mentioned. Think: sharp Hacker News comment by someone who actually read the diff.",
       "tag": "RELEASE | FEATURE | SECURITY | PENDING | COMMUNITY",
-      "illustrationPrompt": "10-15 word subject for editorial illustration (a concrete physical object, not abstract — e.g. 'a brass sextant on a nautical chart' not 'navigation concept')"
+      "illustrationPrompt": "a single CONCRETE PHYSICAL OBJECT with an IRREGULAR silhouette for Victorian woodcut (8-12 words). Good: 'an ornate hourglass on a wrought-iron stand', 'a gnarled oak tree with sprawling bare branches', 'a pocket watch on a chain'. Bad: 'a stack of books', 'a server rack' (too rectangular). No text, signs, or labels."
     }
   ],
-  "closingNote": "dry one-liner sign-off"
+  "closingNote": "one-line sign-off. Dry engineer humor — makes you exhale through your nose. Something like 'shipping is easy; reading your own query tree is hard' or 'data arrived N times. now it arrives once. progress.' Not inspirational. Not corporate."
 }`;
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
