@@ -465,7 +465,7 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
   @media (min-width: 1400px) {
     body { background: #d8d4cc; }
     .broadsheet-wrap { display: flex; align-items: flex-start; max-width: 1900px; margin: 32px auto; }
-    .broadsheet-wrap .paper { max-width: none; flex: 1; margin: 0; }
+    .broadsheet-wrap .paper { max-width: none; flex: 1 1 0; min-width: 0; margin: 0; }
     .broadsheet-wrap .paper.page-2 { display: block; border-left: 3px double var(--rule); margin-left: -1px; }
     .broadsheet-wrap .paper:first-child .articles-p2 { display: none; }
     .broadsheet-wrap .paper:first-child .grid-2-1 { grid-template-columns: 1fr; }
