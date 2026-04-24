@@ -298,7 +298,7 @@ Every article needs a hook — something surprising, counterintuitive, or reveal
 - Bundling unrelated PRs into one article
 - Headlines about author habits ("takes no questions", "ships quietly")
 
-IMPORTANT: Write exactly ONE article per repo in the data. Even repos with just 1 commit deserve a punchy one-sentence write-up. Never merge repos.
+IMPORTANT: Write AT MOST 8 articles total. Order by newsworthiness: releases > big features > pending work > minor activity. If there are more than 8 active repos, drop the least newsworthy ones (or cover them in a one-sentence closingNote aside). Each article should be about exactly ONE repo — never merge repos into one article.
 
 AVAILABLE REPOS (use ONLY these exact names in "repo"):
 ${reposData.map(r => `- ${r.name}${r.description ? ` (${r.description.slice(0, 80)})` : ""}`).join("\n")}
@@ -715,30 +715,44 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
   console.log(`[gen] ${user.username}: LLM done`);
 
-  // Determine image budget: aim for ~40% of articles to have images (25-50% range).
-  // Real screenshots count first; fill remainder with AI illustrations on the most prominent articles.
+  // Enforce total image budget (~40% of articles, 25-50% range). Screenshots + AI illustrations combined.
   const illustratedRepos = new Set<string>();
   const openAiKey = (env as any).OPENAI_API_KEY;
   const articles = copy.articles ?? [];
-  const targetImageCount = Math.max(1, Math.round(articles.length * 0.4));
-  const articlesWithScreenshots = articles.filter((a: any) => {
-    const repo = reposData.find((r: RepoData) => r.name === a.repo);
-    return repo && repo.demoImages.length > 0;
-  });
-  let aiBudget = Math.max(0, targetImageCount - articlesWithScreenshots.length);
-  console.log(`[gen] ${user.username}: ${articles.length} articles, ${articlesWithScreenshots.length} w/ screenshots, ${aiBudget} AI budget`);
+  const targetImageCount = Math.max(1, Math.min(4, Math.round(articles.length * 0.4)));
+  const priority = (tag: string) => tag === "RELEASE" ? 0 : tag === "FEATURE" ? 1 : tag === "SECURITY" ? 2 : 3;
+  const articlesByPriority = articles.map((a: any, idx: number) => ({ a, idx }))
+    .sort((x: any, y: any) => priority(x.a.tag) - priority(y.a.tag) || x.idx - y.idx);
 
-  // Prioritize FEATURE/RELEASE articles (more visually prominent) for AI illustrations
-  const priority = (tag: string) => tag === "FEATURE" || tag === "RELEASE" ? 0 : tag === "SECURITY" ? 1 : 2;
-  const eligibleForAi = articles
-    .filter((a: any) => {
+  // Prune screenshots beyond budget (keep them on highest-priority articles only)
+  const screenshotKeeps = new Set<string>();
+  let kept = 0;
+  for (const { a } of articlesByPriority) {
+    const repo = reposData.find((r: RepoData) => r.name === a.repo);
+    if (repo && repo.demoImages.length > 0 && kept < targetImageCount) {
+      screenshotKeeps.add(a.repo);
+      kept++;
+    }
+  }
+  // Clear screenshots from articles beyond budget
+  for (const a of articles) {
+    if (!screenshotKeeps.has(a.repo)) {
+      const repo = reposData.find((r: RepoData) => r.name === a.repo);
+      if (repo) repo.demoImages = [];
+    }
+  }
+
+  let aiBudget = Math.max(0, targetImageCount - kept);
+  console.log(`[gen] ${user.username}: ${articles.length} articles, target=${targetImageCount} pics, kept=${kept} screenshots, ai budget=${aiBudget}`);
+
+  const eligibleForAi = articlesByPriority
+    .filter(({ a }: any) => {
       const repo = reposData.find((r: RepoData) => r.name === a.repo);
       return repo && repo.demoImages.length === 0 && a.illustrationPrompt;
-    })
-    .sort((a: any, b: any) => priority(a.tag) - priority(b.tag));
+    });
 
-  if (openAiKey) {
-    for (const article of eligibleForAi.slice(0, aiBudget)) {
+  if (openAiKey && aiBudget > 0) {
+    for (const { a: article } of eligibleForAi.slice(0, aiBudget)) {
       const repo = reposData.find((r: RepoData) => r.name === article.repo)!;
       console.log(`[gen] ${user.username}: generating illustration for ${article.repo}`);
       const img = await generateIllustration(article.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
