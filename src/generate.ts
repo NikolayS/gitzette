@@ -715,21 +715,25 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
   console.log(`[gen] ${user.username}: LLM done`);
 
-  // Enforce total image budget (~40% of articles, 25-50% range). Screenshots + AI illustrations combined.
+  // Enforce total image budget (~40% of articles, 25-50% range). Mix screenshots + AI illustrations.
+  // Guarantee at least 1-2 AI illustrations per dispatch — they're the distinctive visual identity.
   const illustratedRepos = new Set<string>();
   const openAiKey = (env as any).OPENAI_API_KEY;
   const articles = copy.articles ?? [];
-  const targetImageCount = Math.max(1, Math.min(4, Math.round(articles.length * 0.4)));
+  const targetImageCount = Math.max(2, Math.min(4, Math.round(articles.length * 0.4)));
+  const minAiCount = Math.min(2, targetImageCount); // always aim for at least 1-2 AI pics
+  const maxScreenshots = Math.max(0, targetImageCount - minAiCount);
+
   const priority = (tag: string) => tag === "RELEASE" ? 0 : tag === "FEATURE" ? 1 : tag === "SECURITY" ? 2 : 3;
   const articlesByPriority = articles.map((a: any, idx: number) => ({ a, idx }))
     .sort((x: any, y: any) => priority(x.a.tag) - priority(y.a.tag) || x.idx - y.idx);
 
-  // Prune screenshots beyond budget (keep them on highest-priority articles only)
+  // Keep up to maxScreenshots README screenshots (highest-priority articles)
   const screenshotKeeps = new Set<string>();
   let kept = 0;
   for (const { a } of articlesByPriority) {
     const repo = reposData.find((r: RepoData) => r.name === a.repo);
-    if (repo && repo.demoImages.length > 0 && kept < targetImageCount) {
+    if (repo && repo.demoImages.length > 0 && kept < maxScreenshots) {
       screenshotKeeps.add(a.repo);
       kept++;
     }
@@ -742,8 +746,8 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
     }
   }
 
-  let aiBudget = Math.max(0, targetImageCount - kept);
-  console.log(`[gen] ${user.username}: ${articles.length} articles, target=${targetImageCount} pics, kept=${kept} screenshots, ai budget=${aiBudget}`);
+  const aiBudget = Math.max(0, targetImageCount - kept);
+  console.log(`[gen] ${user.username}: ${articles.length} articles, target=${targetImageCount} pics (min ${minAiCount} AI), kept=${kept} screenshots, ai budget=${aiBudget}`);
 
   const eligibleForAi = articlesByPriority
     .filter(({ a }: any) => {
