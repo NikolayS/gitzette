@@ -770,7 +770,7 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
 
   // build HTML
   const wk = weekKey(to);
-  const html = buildHtml(copy, reposData, user.username, from, to, wk, illustratedRepos);
+  const html = buildHtml(copy, reposData, user.username, from, to, wk);
 
   // save
   console.log(`[gen] ${user.username}: saving dispatch wk=${wk}`);
