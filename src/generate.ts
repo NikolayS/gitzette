@@ -408,10 +408,11 @@ function buildDataGraphics(reposData: RepoData[], from: Date, to: Date): string 
 
 function articleImg(src: string, alt: string, isIllustration: boolean): string {
   if (isIllustration) {
-    // Woodcut illustration: float left as a clean rectangular block.
-    // shape-outside with url() is avoided — cross-hatched woodcuts have transparent gaps
-    // between ink strokes, and text flows INTO those gaps, visually overlapping the image.
-    return `<div style="float:left;margin:0 14px 8px 0;width:140px;">
+    // Woodcut illustration: float left with circular shape-outside for irregular text wrap.
+    // url()-based shape-outside doesn't work — cross-hatched woodcuts have transparent gaps
+    // between ink strokes, and text flows through those gaps. A CSS circle gives a clean oval
+    // wrap (text curves around the silhouette's approximation) with no overlap.
+    return `<div style="float:left;margin:0 12px 6px 0;width:140px;height:140px;shape-outside:circle(50% at 50% 50%);-webkit-shape-outside:circle(50% at 50% 50%);shape-margin:6px;">
       <img src="${src}" style="width:140px;height:140px;object-fit:contain;display:block;" alt="${alt}" loading="lazy">
     </div>`;
   }
