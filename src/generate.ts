@@ -329,7 +329,7 @@ Return ONLY a JSON object (no markdown fences):
     headers: { "Authorization": `Bearer ${orKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "anthropic/claude-opus-4-5",
-      max_tokens: 3000,
+      max_tokens: 8000,
       messages: [{ role: "user", content: prompt }],
     }),
   });
