@@ -720,8 +720,8 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const illustratedRepos = new Set<string>();
   const openAiKey = (env as any).OPENAI_API_KEY;
   const articles = copy.articles ?? [];
-  const targetImageCount = Math.max(2, Math.min(4, Math.round(articles.length * 0.4)));
-  const minAiCount = Math.min(2, targetImageCount); // always aim for at least 1-2 AI pics
+  const targetImageCount = Math.max(2, Math.min(3, Math.round(articles.length * 0.4)));
+  const minAiCount = 2; // always at least 2 AI illustrations — that's the visual identity
   const maxScreenshots = Math.max(0, targetImageCount - minAiCount);
 
   const priority = (tag: string) => tag === "RELEASE" ? 0 : tag === "FEATURE" ? 1 : tag === "SECURITY" ? 2 : 3;
