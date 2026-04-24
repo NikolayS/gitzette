@@ -14,39 +14,64 @@ generateRoutes.post("/", async (c) => {
   const weeklyLimit = parseInt(c.env.WEEKLY_REGEN_LIMIT ?? "3");
   const monthlyBudget = parseFloat(c.env.MONTHLY_LLM_BUDGET_USD ?? "50");
 
-  const quota = await checkUserQuota(c.env.DB, user.id, weeklyLimit);
-  if (!quota.allowed) {
-    return c.json({
-      error: "weekly_limit_reached",
-      message: `You've used all ${quota.limit} generations this week. Resets Monday. Community-supported — sponsor the project at https://github.com/sponsors/NikolayS to get more generations per week.`,
-      used: quota.used, limit: quota.limit,
-      sponsor_url: "https://github.com/sponsors/NikolayS",
-    }, 429);
-  }
-
-  const budget = await checkGlobalBudget(c.env.DB, monthlyBudget);
-  if (!budget.allowed) {
-    return c.json({
-      error: "global_budget_reached",
-      message: "Monthly generation capacity is full. Try again next month. Community-supported — sponsor the project at https://github.com/sponsors/NikolayS to help expand capacity.",
-      sponsor_url: "https://github.com/sponsors/NikolayS",
-    }, 503);
-  }
-
-  // accept optional weekKey from request body (for regenerating past weeks)
+  // parse body (weekKey + optional forUsername for admin)
   let targetWeek: string | undefined;
-  try { const body = await c.req.json(); targetWeek = body?.weekKey; } catch {}
+  let forUsername: string | undefined;
+  try { const body = await c.req.json(); targetWeek = body?.weekKey; forUsername = body?.forUsername; } catch {}
 
-  // record quota immediately
-  await recordGeneration(c.env.DB, user.id);
-  await recordSpend(c.env.DB, 0.10); // estimated
+  // Admin mode: NikolayS can generate dispatches for any GitHub user
+  let target: { id: string; username: string } = user;
+  const isAdmin = user.username === "NikolayS";
+  if (forUsername && isAdmin) {
+    // Look up or create the target user in D1
+    let row = await c.env.DB.prepare(
+      `SELECT id, username FROM users WHERE username = ?`
+    ).bind(forUsername).first<{ id: string; username: string }>();
+    if (!row) {
+      // fetch avatar from GitHub and insert
+      let avatar = "";
+      try {
+        const ghRes = await fetch(`https://api.github.com/users/${encodeURIComponent(forUsername)}`, {
+          headers: { "User-Agent": "gitzette/1.0", "Accept": "application/vnd.github+json", "Authorization": `token ${c.env.GITHUB_TOKEN}` },
+        });
+        if (ghRes.ok) { const g: any = await ghRes.json(); avatar = g.avatar_url || ""; }
+      } catch { /* ignore */ }
+      const uuid = crypto.randomUUID();
+      await c.env.DB.prepare(
+        `INSERT INTO users (id, username, avatar_url, created_at) VALUES (?, ?, ?, unixepoch())`
+      ).bind(uuid, forUsername, avatar).run();
+      row = { id: uuid, username: forUsername };
+    }
+    target = row;
+  } else {
+    // non-admin or self-generation: apply quota
+    const quota = await checkUserQuota(c.env.DB, user.id, weeklyLimit);
+    if (!quota.allowed) {
+      return c.json({
+        error: "weekly_limit_reached",
+        message: `You've used all ${quota.limit} generations this week. Resets Monday. Community-supported — sponsor the project at https://github.com/sponsors/NikolayS to get more generations per week.`,
+        used: quota.used, limit: quota.limit,
+        sponsor_url: "https://github.com/sponsors/NikolayS",
+      }, 429);
+    }
+    const budget = await checkGlobalBudget(c.env.DB, monthlyBudget);
+    if (!budget.allowed) {
+      return c.json({
+        error: "global_budget_reached",
+        message: "Monthly generation capacity is full. Try again next month.",
+        sponsor_url: "https://github.com/sponsors/NikolayS",
+      }, 503);
+    }
+    await recordGeneration(c.env.DB, user.id);
+    await recordSpend(c.env.DB, 0.10);
+  }
 
   // run generation synchronously (waitUntil gets killed too early for Opus + illustrations)
   try {
-    await runGeneration(c.env, user, targetWeek);
-    return c.json({ status: "ready", message: "Dispatch generated." });
+    await runGeneration(c.env, target, targetWeek);
+    return c.json({ status: "ready", message: `Dispatch generated for @${target.username}.`, username: target.username });
   } catch (err) {
-    console.error("generation failed:", err);
+    console.error(`generation failed for ${target.username}:`, err);
     return c.json({ error: "generation_failed", message: String(err) }, 500);
   }
 });
