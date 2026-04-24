@@ -209,7 +209,7 @@ async function getRepoData(owner: string, repo: string, from: Date, to: Date, to
 // ── image generation ──────────────────────────────────────────────────────────
 
 async function generateIllustration(subject: string, openAiKey: string, r2: R2Bucket, username: string): Promise<string | null> {
-  const STYLE = "Victorian-era woodcut engraving with detailed cross-hatching. PORTRAIT orientation — taller than wide. Pure black ink lines on pure white background. NO background shading, NO dark fills, NO border, NO frame, NO text or labels. CRITICAL: the object must have a COMPLEX IRREGULAR SILHOUETTE. Subject: ";
+  const STYLE = "Victorian-era woodcut engraving with detailed cross-hatching. Pure black ink lines on a FULLY TRANSPARENT BACKGROUND (no white fill, no paper, no background whatsoever — just the object floating in transparency). The object must be centered on the canvas, occupying roughly the MIDDLE 60% of the frame, surrounded by ~20% transparent empty space on every side. The object must have a COMPLEX IRREGULAR SILHOUETTE with curves, protrusions, or asymmetric edges — never touch the canvas edges. NO borders, frames, text, signs, labels, or rectangular backgrounds. Subject: ";
   const prompt = STYLE + subject;
   try {
     // WebP + low quality → ~10x smaller files (display is 140px, source was 1024x1024 PNG)
@@ -409,8 +409,10 @@ function buildDataGraphics(reposData: RepoData[], from: Date, to: Date): string 
 function articleImg(src: string, alt: string, isIllustration: boolean): string {
   if (isIllustration) {
     // woodcut illustration: float left with shape-outside, compact
-    return `<div style="float:left;margin:0 12px 6px 0;width:100px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');shape-margin:6px;">
-      <img src="${src}" style="width:100px;display:block;" alt="${alt}" loading="lazy">
+    // shape-image-threshold: 0.5 treats half-transparent pixels as outside the shape,
+    // so text wraps tightly around the visible inked strokes (not the bounding box)
+    return `<div style="float:left;margin:0 12px 6px 0;width:140px;shape-outside:url('${src}');-webkit-shape-outside:url('${src}');shape-image-threshold:0.5;-webkit-shape-image-threshold:0.5;shape-margin:8px;">
+      <img src="${src}" style="width:140px;height:140px;object-fit:contain;display:block;" alt="${alt}" loading="lazy">
     </div>`;
   }
   // screenshot: float left, max 28% width, border
