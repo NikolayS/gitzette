@@ -421,7 +421,7 @@ function articleImg(src: string, alt: string, isIllustration: boolean): string {
 
 // ── html builder ──────────────────────────────────────────────────────────────
 
-function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, to: Date, weekKey: string, illustratedRepos: Set<string> = new Set()): string {
+function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, to: Date, weekKey: string, _illustratedRepos: Set<string> = new Set()): string {
   const fromLabel = from.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const toLabel = to.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const totalCommits = reposData.reduce((s,r)=>s+r.commitCount,0);
@@ -430,7 +430,7 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
 
   const articleHtml = (copy.articles ?? []).map((a: any, i: number) => {
     const repo = reposData.find(r => r.name === a.repo);
-    const img = repo?.demoImages?.[0];
+    const img = a._img;
     const releaseLinks = repo?.releases.slice(0,4).map((r: Release) =>
       `<a href="${r.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--ink);border-bottom:none;margin-right:8px;">${r.tag}</a><span style="color:var(--muted);font-size:11px;margin-right:12px;">${new Date(r.date).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>`
     ).join("") ?? "";
@@ -442,7 +442,7 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
       <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
       <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
-      ${img ? articleImg(img, a.repo, illustratedRepos.has(a.repo)) : ""}
+      ${img ? articleImg(img, a.repo, !!a._isIllustration) : ""}
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
       <div style="clear:both;"></div>
       ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
@@ -454,7 +454,7 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
   const articles1 = (copy.articles??[]).slice(0, splitAt).map((_: any, i: number) => {
     const repo = reposData.find(r => r.name === copy.articles[i].repo);
     const a = copy.articles[i];
-    const img = repo?.demoImages?.[0];
+    const img = a._img;
     const releaseLinks = repo?.releases.slice(0,4).map((r: Release) =>
       `<a href="${r.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--ink);border-bottom:none;margin-right:8px;">${r.tag}</a><span style="color:var(--muted);font-size:11px;margin-right:12px;">${new Date(r.date).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>`
     ).join("") ?? "";
@@ -465,7 +465,7 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
       <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
       <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
-      ${img ? articleImg(img, a.repo, illustratedRepos.has(a.repo)) : ""}
+      ${img ? articleImg(img, a.repo, !!a._isIllustration) : ""}
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
       <div style="clear:both;"></div>
       ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
@@ -477,7 +477,7 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
     const i = splitAt + ii;
     const a = copy.articles[i];
     const repo = reposData.find(r => r.name === a.repo);
-    const img = repo?.demoImages?.[0];
+    const img = a._img;
     const releaseLinks = repo?.releases.slice(0,4).map((r: Release) =>
       `<a href="${r.url}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--ink);border-bottom:none;margin-right:8px;">${r.tag}</a><span style="color:var(--muted);font-size:11px;margin-right:12px;">${new Date(r.date).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>`
     ).join("") ?? "";
@@ -488,7 +488,7 @@ function buildHtml(copy: any, reposData: RepoData[], owner: string, from: Date, 
       <div style="display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;padding:2px 6px;margin-bottom:8px;">${a.tag}</div>
       <h2 style="font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(18px,4vw,26px);font-weight:700;line-height:1.2;margin-bottom:6px;"><a href="${repo?.url??'#'}" style="color:var(--ink);text-decoration:none;">${a.headline}</a></h2>
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);margin-bottom:10px;">${a.deck}</p>
-      ${img ? articleImg(img, a.repo, illustratedRepos.has(a.repo)) : ""}
+      ${img ? articleImg(img, a.repo, !!a._isIllustration) : ""}
       <p style="font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;line-height:1.65;margin-bottom:8px;">${a.body}</p>
       <div style="clear:both;"></div>
       ${releaseLinks ? `<div style="margin-top:8px;color:var(--muted);">${releaseLinks}</div>` : ""}
@@ -715,52 +715,56 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
   console.log(`[gen] ${user.username}: LLM done`);
 
-  // Enforce total image budget (~40% of articles, 25-50% range). Mix screenshots + AI illustrations.
-  // Guarantee at least 1-2 AI illustrations per dispatch — they're the distinctive visual identity.
-  const illustratedRepos = new Set<string>();
+  // Enforce total image budget (2-3 pics, always at least 2 AI). Each article gets AT MOST its own
+  // unique image — if the LLM wrote multiple articles per repo, only one gets a picture.
   const openAiKey = (env as any).OPENAI_API_KEY;
   const articles = copy.articles ?? [];
   const targetImageCount = Math.max(2, Math.min(3, Math.round(articles.length * 0.4)));
-  const minAiCount = 2; // always at least 2 AI illustrations — that's the visual identity
+  const minAiCount = 2;
   const maxScreenshots = Math.max(0, targetImageCount - minAiCount);
 
   const priority = (tag: string) => tag === "RELEASE" ? 0 : tag === "FEATURE" ? 1 : tag === "SECURITY" ? 2 : 3;
   const articlesByPriority = articles.map((a: any, idx: number) => ({ a, idx }))
     .sort((x: any, y: any) => priority(x.a.tag) - priority(y.a.tag) || x.idx - y.idx);
 
-  // Keep up to maxScreenshots README screenshots (highest-priority articles)
-  const screenshotKeeps = new Set<string>();
+  // Pick up to maxScreenshots articles that get a screenshot.
+  // Only one article per repo, and no duplicate screenshot URLs across the dispatch.
+  const usedImageUrls = new Set<string>();
+  const reposWithImage = new Set<string>();
   let kept = 0;
   for (const { a } of articlesByPriority) {
+    if (kept >= maxScreenshots) break;
+    if (reposWithImage.has(a.repo)) continue;
     const repo = reposData.find((r: RepoData) => r.name === a.repo);
-    if (repo && repo.demoImages.length > 0 && kept < maxScreenshots) {
-      screenshotKeeps.add(a.repo);
-      kept++;
-    }
-  }
-  // Clear screenshots from articles beyond budget
-  for (const a of articles) {
-    if (!screenshotKeeps.has(a.repo)) {
-      const repo = reposData.find((r: RepoData) => r.name === a.repo);
-      if (repo) repo.demoImages = [];
-    }
+    if (!repo || repo.demoImages.length === 0) continue;
+    const url = repo.demoImages[0];
+    if (usedImageUrls.has(url)) continue;
+    a._img = url;
+    a._isIllustration = false;
+    usedImageUrls.add(url);
+    reposWithImage.add(a.repo);
+    kept++;
   }
 
   const aiBudget = Math.max(0, targetImageCount - kept);
   console.log(`[gen] ${user.username}: ${articles.length} articles, target=${targetImageCount} pics (min ${minAiCount} AI), kept=${kept} screenshots, ai budget=${aiBudget}`);
 
-  const eligibleForAi = articlesByPriority
-    .filter(({ a }: any) => {
-      const repo = reposData.find((r: RepoData) => r.name === a.repo);
-      return repo && repo.demoImages.length === 0 && a.illustrationPrompt;
-    });
-
+  // Generate AI illustrations — one per article, one per repo, unique URLs
   if (openAiKey && aiBudget > 0) {
-    for (const { a: article } of eligibleForAi.slice(0, aiBudget)) {
-      const repo = reposData.find((r: RepoData) => r.name === article.repo)!;
+    let generated = 0;
+    for (const { a: article } of articlesByPriority) {
+      if (generated >= aiBudget) break;
+      if (!article.illustrationPrompt || article._img) continue;
+      if (reposWithImage.has(article.repo)) continue;
       console.log(`[gen] ${user.username}: generating illustration for ${article.repo}`);
       const img = await generateIllustration(article.illustrationPrompt, openAiKey, env.DISPATCHES, user.username);
-      if (img) { repo.demoImages.push(img); illustratedRepos.add(repo.name); }
+      if (img && !usedImageUrls.has(img)) {
+        article._img = img;
+        article._isIllustration = true;
+        usedImageUrls.add(img);
+        reposWithImage.add(article.repo);
+        generated++;
+      }
     }
   }
 
