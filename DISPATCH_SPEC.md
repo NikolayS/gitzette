@@ -1,150 +1,78 @@
-# Gitzette Dispatch — Worker Spec
+# GitZette generation and publication spec
 
-**This file is the source of truth for how the Worker generates a dispatch.**
-Read it before touching `src/generate.ts` or adjusting any visual/editorial rule.
-Each constraint lists *why* it exists — don't "optimize" a rule without understanding the trap it avoids.
+This is the source of truth for the queued generation pipeline.
 
-See also: `../gitzette-dispatch/EDITORIAL.md` — the offline script's editorial guide (the Worker prompt mirrors it).
+## Trust boundary
 
----
+- Cloudflare is the public control plane: GitHub login, request quota, D1 queue/status, validation, R2, and serving.
+- A private runner claims work with outbound HTTPS. The host exposes no inbound endpoint.
+- The runner credential is narrow and rotatable. It is not an AI credential.
+- AI generation uses a dedicated OpenClaw/Codex identity with ChatGPT OAuth only: `openai/gpt-5.6-sol` for text and `gpt-image-2` for art. No OpenAI API key, OpenRouter, Anthropic, Google AI key, or provider fallback is allowed.
+- Repository, issue, PR, and commit text is hostile evidence, never an instruction.
 
-## Architecture
+## Job protocol
 
-- **Worker** (`/Users/nik/github/gitzette`, this repo): Cloudflare Worker running at gitzette.online. `POST /generate` runs the full pipeline synchronously.
-- **Script** (`/Users/nik/github/gitzette-dispatch`): offline generator, richer features, used for manual dispatches.
-- **CF plan**: Workers **Paid** ($5/mo) — required. Free plan has 50-subrequest limit; one dispatch needs ~200. `[limits]` in `wrangler.toml` only affects local dev, not production.
-- **Generation must be synchronous** (no `waitUntil`). `waitUntil` tasks get killed before a 3–5 minute Opus + illustration job completes.
+`POST /generate` authenticates the GitHub session, validates the target, enforces request quota, deduplicates live work, creates a D1 job, and immediately returns HTTP 202.
 
-## Admin mode
+The durable path is:
 
-`POST /generate` accepts `{ weekKey, forUsername }`. If logged-in user is `NikolayS`, `forUsername` is honored — inserts the target into the `users` table with a UUID and GitHub avatar if missing. Any other user can only generate for themselves (quota-limited).
+`queued -> collecting -> writing -> illustrating -> validating -> published`
 
----
+The runner claims a job using a random ten-minute lease. Stage transitions are forward-only and renew the lease. Expired leases may be reclaimed. Failures are either `retryable_failed` (up to five claims) or `permanent_failed`. Browser status maps these states to the legacy `generating`, `ready`, and `failed` UI contract while also returning the precise stage.
 
-## LLM
+## Canonical evidence and edition
 
-- Model: `anthropic/claude-opus-4-5` via OpenRouter. **Not sonnet** — opus is funnier and gets the voice right. This is the single biggest lever on "entertaining vs boring".
-- `max_tokens: 8000`. 3000 truncates JSON for users with 20+ active repos (simonw).
-- Prompt embeds the full editorial guide inline. The rules that actually matter are LEAD-WITH-SITUATION (don't open with "@owner merged #N"), INLINE PR LINKS as `<a href="URL">#N</a>`, and MAX 8 ARTICLES.
+The frozen evidence bundle has exactly one state:
 
-## Repo discovery
+- `active`: at least one verified GitHub evidence item.
+- `quiet`: no public activity in a successfully collected completed week.
+- `collection_failed`: incomplete evidence; publication is forbidden.
 
-- Fetch `/users/{username}/repos?per_page=100&sort=pushed`, take first 30 (**include forks**).
-- For forks: pass `author={username}` on commits query (skip upstream merges), skip releases/PRs (those belong to upstream).
-- Also run `/search/issues?q=author:{username}+is:pr+created:{from}..{to}` to catch **external contributions** (e.g. NikolayS's PRs to pgdogdev/pgdog, rust-postgres/rust-postgres, postgres-ai/*). External repos are shown with PR data only, no commits/releases.
-- Quiet weeks (0 active repos) publish a designed, deterministic “quiet week” edition with zeroed stats and an inline ink illustration. Never store a bare placeholder.
-- A total repository-scan failure is not a quiet week: abort generation and preserve the previous dispatch.
-- Legacy bare placeholders are upgraded at read time by `pages.ts` so old links remain useful without an R2 migration.
+Each evidence item has a stable ID, a typed kind, repository, title, and allowlisted `https://github.com` or `https://api.github.com` URL.
 
-## README screenshots
+The model returns typed edition JSON, never HTML. Every story cites one or more evidence IDs. Runtime validation rejects unknown evidence, unsupported enums, duplicate IDs, arbitrary URLs, excessive fields, or mismatched username/week. A deterministic renderer escapes all prose and builds links only from verified evidence.
 
-- `getReadmeImages` fetches README images via the newspaperify VM (processes to newspaper style). Used for **non-fork own repos** only. Each article carries at most one screenshot.
+Quiet-week copy is server-owned and deterministic. Model-supplied quiet-week prose is discarded. Quiet editions have no generated images.
 
----
+## Illustrations
 
-## Illustrations (OpenAI `gpt-image-1`)
+An active edition cannot publish without two or three unique illustrations. Each referenced image must:
 
-Exact parameters in `generateIllustration`:
+- be a structurally valid WebP between 256 and 2048 pixels in each dimension;
+- be no larger than 5 MiB;
+- have a unique SHA-256 digest within the edition;
+- exist under the current job's lease-scoped staging prefix;
+- match its declared digest at publication.
 
-```json
-{
-  "model": "gpt-image-1",
-  "prompt": "<STYLE>" + subject,
-  "n": 1,
-  "size": "1024x1024",
-  "background": "transparent",
-  "output_format": "webp",
-  "quality": "low",
-  "output_compression": 60
-}
+The host runner performs the richer visual checks: transparent-background cleanup, crop/padding, alpha coverage, contrast, accidental text, perceptual uniqueness, and WebP compression. Failed images are retried; the edition is not degraded to zero-image success.
+
+Final image objects are content-addressed by SHA-256 and served immutably from `/img/{digest}.webp`.
+
+## Atomic publication
+
+The runner uploads lease-scoped staging assets, then submits the manifest. The Worker validates it, verifies hashes, writes immutable image and edition objects, and uses a lease-guarded D1 batch to:
+
+1. insert an immutable edition version only if the lease is still valid;
+2. switch the public dispatch pointer only if that version exists;
+3. mark the job published using the same lease.
+
+A failed or expired regeneration cannot replace the previous edition. R2 orphans are harmless and can be garbage-collected; the D1 pointer defines what is public.
+
+## Tests and release gate
+
+CI must run:
+
+```bash
+bunx tsc --noEmit
+bun test
+bash scripts/e2e.sh
 ```
 
-- `size: "1024x1024"` is the **minimum** OpenAI supports. Can't go smaller.
-- `output_format: "webp"` + `output_compression: 60`: file size ~230–290 KB. Default PNG is ~1 MB. Without `output_compression` or `quality: low`, webp is still ~1 MB. Both flags are needed.
-- `background: "transparent"` only works with png/webp.
-- Store in R2 as `illustrations/{slug}.webp`, serve from `/img/{slug}.webp` with `Cache-Control: public, max-age=31536000, immutable`.
+The E2E launches a real local Worker with isolated D1/R2 state and crosses HTTP boundaries from website request through runner auth, claim/lease, ordered stages, artifact upload, validation, immutable publication, and public read. It covers authentication/authorization, quota, deduplication, hostile markup escaping, active and quiet editions, image/hash failures, atomic regeneration rollback, and retry/reclaim.
 
-## Illustration prompt (the STYLE prefix)
+Before production activation:
 
-Must require: Victorian-era woodcut engraving, centered object occupying **~60% of frame with ~20% transparent margin each side**, **complex irregular silhouette**, pure black ink on fully transparent background, no borders/frames/text/labels. The 20% transparent margin is load-bearing even though we now use `circle(50%)` for shape-outside — it still prevents the object from being cropped at the edges.
-
----
-
-## Image budget (per dispatch)
-
-Enforced in code — do not relax without testing:
-
-- `targetImageCount = clamp(2, round(articles.length * 0.4), 3)`
-- **Always at least 2 AI illustrations for activity editions** — they're the visual identity. `minAiCount = 2`. Set by user as non-negotiable. Quiet-week editions use one deterministic inline illustration and do not call image generation.
-- `maxScreenshots = max(0, targetImageCount - minAiCount)` (so README screenshots never absorb the whole budget).
-- **Image is per-article, not per-repo.** LLM may legitimately write 5 articles for the same repo (e.g. levkk on pgdog). Pre-fix, all 5 shared one illustration. Store the URL on the article object as `a._img` and `a._isIllustration`.
-- **Dedupe URLs across the dispatch.** If `generateIllustration` returns the same slug as another article (same illustrationPrompt), skip it — no two articles show the same pic.
-- One image max per repo in a dispatch.
-
-## Image CSS (`articleImg` helper)
-
-```html
-<div style="float:left;margin:0 12px 6px 0;width:140px;height:140px;shape-outside:circle(50% at 50% 50%);-webkit-shape-outside:circle(50% at 50% 50%);shape-margin:6px;">
-  <img src="..." style="width:140px;height:140px;object-fit:contain;display:block;" alt="..." loading="lazy">
-</div>
-```
-
-- Images float **left** (user preference; do not switch to right).
-- `shape-outside: circle(50%)` — **not** `url(...)`. Woodcut cross-hatching has 30–40% transparent holes INSIDE the silhouette; `shape-outside: url()` reads the alpha channel and lets text flow THROUGH those gaps, visually overlapping the image. `circle(50%)` wraps text around the 140px circular boundary — still pretext-style, no overlap. Do not try `shape-image-threshold: 0.5` — same problem.
-- `object-fit: contain` — prevents cropping for non-square aspect content.
-- `loading="lazy"` — reduces initial page weight.
-- Screenshots (not AI illustrations) use a separate treatment: `float:left; max-width:28%; border:1px solid var(--rule);` without shape-outside.
-
-## Body PR link styling
-
-```css
-.body p a[href*="/pull/"], .body p a[href*="/issues/"] {
-  border-bottom: 1px solid #a08878;
-  color: #5a3a2a;
-}
-```
-
-Subtle warm-brown underline — just enough that `#123` reads as a link without screaming for attention.
-
----
-
-## Layout (broadsheet)
-
-At viewport ≥ 1400 px, two papers sit side-by-side. Critical CSS in `buildHtml`:
-
-```css
-.broadsheet-wrap .paper {
-  max-width: none;
-  flex: 1 1 0;
-  min-width: 0;     /* without this, edition-bar long text forces one paper to overflow */
-  margin: 0;
-  overflow: hidden; /* clamps paper to its flex width */
-}
-.broadsheet-wrap .masthead { font-size: clamp(24px, 3.5vw, 48px); } /* smaller in broadsheet */
-```
-
-`min-width: 0` is essential. Flex items default to `min-width: auto` which expands to content width — the edition-bar's long tagline would make p1 1078 px and p2 only 435 px.
-
----
-
-## Week key logic (AoE, Monday-first)
-
-All three functions (`pages.ts:currentWeekKey`, `generate.ts:weekKey/isoWeekKeyAoE`, `quota.ts:currentWeekKey`) must agree:
-
-- AoE (UTC−12): subtract 12 h from now before computing.
-- Monday as day 0 of the week: `(dow + 6) % 7`.
-- ISO week year = year of the Thursday of the week.
-
-`/generate` accepts `{ weekKey: "YYYY-WNN" }` to regenerate past weeks. Without it, defaults to Monday 00:00 AoE (= Mon 12:00 UTC) of the current week through now.
-
----
-
-## Never forget
-
-- Opus > Sonnet for copy. Cheaper sonnet *sounds* acceptable but produces boring output. Lev test: would a senior engineer forward this? If no, it's too flat.
-- Images per **article**, not per repo.
-- `shape-outside: circle()`, not `url()`. Not negotiable for woodcut style.
-- At least 2 AI illustrations per dispatch, always.
-- Unique URLs across every dispatch — dedupe at selection time and at generation time.
-- Never publish article-free HTML. Validate LLM articles and the final document before writing to R2.
-- Test changes by actually regenerating at least 2 users with different profile shapes (a quiet one like DHH, a busy one like simonw) and viewing the output. CSS changes require regeneration to take effect — the CSS is inlined in the R2 HTML.
+1. Run the five canonical canaries: NikolayS W32, steipete W14, torvalds W16, one genuine Karpathy quiet week, and PhysShell W30.
+2. Inspect active output on mobile and desktop and verify at least two meaningful illustrations.
+3. Verify the dedicated runner has only OAuth auth and no AI API-key profile/fallback.
+4. Deploy, then immediately run `bash /tmp/gl-dispatch/dispatch/smoke-test.sh` as required by the workspace rule.

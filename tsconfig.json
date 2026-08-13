@@ -12,9 +12,12 @@
   "include": [
     "src/auth.ts",
     "src/dispatch-health.ts",
-    "src/generate.ts",
+    "src/edition.ts",
+    "src/image.ts",
     "src/index.ts",
     "src/pages.ts",
-    "src/quota.ts"
+    "src/quota.ts",
+    "src/queue.ts",
+    "src/runner.ts"
   ]
 }

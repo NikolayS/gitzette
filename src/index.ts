@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { html } from "hono/html";
 import { authRoutes } from "./auth";
-import { generateRoutes } from "./generate";
+import { queueRoutes } from "./queue";
+import { runnerRoutes } from "./runner";
 import { pageRoutes } from "./pages";
 
 export interface Env {
@@ -11,13 +12,12 @@ export interface Env {
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   GITHUB_TOKEN: string;
-  OPENROUTER_API_KEY: string;
-  GOOGLE_AI_KEY: string;
   SESSION_SECRET: string;
   WEEKLY_REGEN_LIMIT: string;
   MONTHLY_LLM_BUDGET_USD: string;
   NEWSPAPERIFY_URL: string;
   NEWSPAPERIFY_SECRET: string;
+  RUNNER_SECRET: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -26,7 +26,8 @@ const app = new Hono<{ Bindings: Env }>();
 app.route("/auth", authRoutes);
 
 // ── generation ────────────────────────────────────────────────────────────────
-app.route("/generate", generateRoutes);
+app.route("", queueRoutes);
+app.route("/runner", runnerRoutes);
 
 // ── public dispatch pages ─────────────────────────────────────────────────────
 app.route("/", pageRoutes);
