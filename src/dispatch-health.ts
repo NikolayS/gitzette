@@ -4,7 +4,16 @@ const LEGACY_EMPTY_DISPATCHES = new Set([
 ]);
 
 export function isLegacyEmptyDispatch(html: string): boolean {
-  return LEGACY_EMPTY_DISPATCHES.has(html.trim().toLowerCase());
+  const normalized = html.trim().toLowerCase();
+  if (LEGACY_EMPTY_DISPATCHES.has(normalized)) return true;
+
+  // Some early Worker editions contain a complete masthead/stats document but
+  // no article at all. Treat those as empty too; CSS selectors do not count.
+  const isDocument = normalized.startsWith("<!doctype") || normalized.startsWith("<html");
+  if (!isDocument) return false;
+  const hasArticleClass = /class=["'][^"']*\barticle\b[^"']*["']/i.test(html);
+  const hasHeadline = /<h2\b[^>]*>/i.test(html);
+  return !hasArticleClass && !hasHeadline;
 }
 
 export function addArticleMarkers(html: string): string {
