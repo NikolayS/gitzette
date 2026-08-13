@@ -34,7 +34,7 @@ export type Edition = {
 
 export type PublicationManifest = {
   generatorVersion: string;
-  model: "openai/gpt-5.6-sol";
+  model: "openai/gpt-5.6-sol" | "deterministic";
   promptVersion: string;
   evidence: EvidenceBundle;
   edition: Edition;
@@ -72,7 +72,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   if (!input || typeof input !== "object") throw new Error("invalid manifest");
   const manifest = input as PublicationManifest;
   assertString(manifest.generatorVersion, "generatorVersion", 100);
-  if (manifest.model !== "openai/gpt-5.6-sol") throw new Error("forbidden model");
+  if (manifest.model !== "openai/gpt-5.6-sol" && manifest.model !== "deterministic") throw new Error("forbidden model");
   assertString(manifest.promptVersion, "promptVersion", 100);
 
   const evidence = manifest.evidence;
@@ -140,6 +140,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   for (const key of usedIllustrations) if (!imageKeys.has(key)) throw new Error("missing illustration artifact");
 
   if (evidence.state === "active") {
+    if (manifest.model !== "openai/gpt-5.6-sol") throw new Error("active edition requires gpt-5.6-sol");
     if (edition.stories.length === 0) throw new Error("active edition has no stories");
     if (manifest.images.length < ACTIVE_MIN_IMAGES || usedIllustrations.size < ACTIVE_MIN_IMAGES) {
       throw new Error(`active edition requires at least ${ACTIVE_MIN_IMAGES} illustrations`);
@@ -147,6 +148,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   } else if (edition.stories.length !== 0 || manifest.images.length !== 0) {
     throw new Error("quiet edition must be deterministic and image-free");
   } else {
+    if (manifest.model !== "deterministic") throw new Error("quiet edition must declare deterministic model");
     // Quiet-week prose is server-owned, so a model cannot turn an empty
     // evidence bundle into unsupported editorial copy.
     manifest.edition = quietEdition(username, weekKey);

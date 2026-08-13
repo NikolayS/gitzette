@@ -56,7 +56,7 @@ function manifest(weekKey: string, imageHashes: Record<string, string>) {
 function quietManifest(weekKey: string) {
   return {
     generatorVersion: "e2e-1",
-    model: "openai/gpt-5.6-sol",
+    model: "deterministic",
     promptVersion: "e2e-editor-1",
     evidence: { state: "quiet", username: "octocat", weekKey, items: [] },
     edition: { headline: "This model copy must be discarded", tagline: "Unsupported", closingNote: "Unsupported", stories: [] },

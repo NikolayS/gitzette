@@ -80,6 +80,7 @@ describe("typed publication manifest", () => {
   test("distinguishes quiet weeks from collection failures", () => {
     const quiet = activeManifest();
     quiet.evidence.state = "quiet";
+    quiet.model = "deterministic";
     quiet.evidence.items = [];
     quiet.edition.stories = [];
     quiet.images = [];
@@ -89,6 +90,19 @@ describe("typed publication manifest", () => {
 
     quiet.evidence.state = "collection_failed";
     expect(() => validateManifest(quiet, "octocat", "2026-W32")).toThrow("collection failed");
+  });
+
+  test("requires truthful model provenance for active and quiet editions", () => {
+    const active = activeManifest();
+    active.model = "deterministic";
+    expect(() => validateManifest(active, "octocat", "2026-W32")).toThrow("active edition requires gpt-5.6-sol");
+
+    const quiet = activeManifest();
+    quiet.evidence.state = "quiet";
+    quiet.evidence.items = [];
+    quiet.edition.stories = [];
+    quiet.images = [];
+    expect(() => validateManifest(quiet, "octocat", "2026-W32")).toThrow("quiet edition must declare deterministic model");
   });
 
   test("escapes hostile model text and creates links only from evidence", () => {
