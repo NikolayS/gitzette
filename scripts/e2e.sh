@@ -28,7 +28,8 @@ server_pid=$!
 
 ready=false
 for _ in $(seq 1 60); do
-  if curl --silent --fail "http://127.0.0.1:$port/" | rg -q "gitzette"; then
+  response="$(curl --silent --fail "http://127.0.0.1:$port/" || true)"
+  if [[ "$response" == *gitzette* ]]; then
     ready=true
     break
   fi
