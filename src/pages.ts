@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { getUser } from "./auth";
+import { isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
 import type { Env } from "./index";
 
 export const pageRoutes = new Hono<{ Bindings: Env }>();
@@ -228,7 +229,12 @@ async function fetchAndServeDispatch(
   // Bump ILLUS_V when illustrations are batch-reprocessed (e.g. transparency fixes)
   const ILLUS_V = 2;
   const rawHtml: string = await r2obj.text();
-  const html = rawHtml.replace(
+  // Old zero-activity generations were published as a bare paragraph. Repair
+  // them at read time so historical links become useful without an R2 migration.
+  const recoveredHtml = isLegacyEmptyDispatch(rawHtml)
+    ? slowNewsFragment(username)
+    : rawHtml;
+  const html = recoveredHtml.replace(
     /((?:src|data-img)=["'])((?:https:\/\/gitzette\.online)?\/img\/[^"'?]+)(["'])/g,
     `$1$2?v=${generated_at}.${ILLUS_V}$3`
   );

@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute gitzette-db --remote --file=schema.sql"
+    "db:init": "wrangler d1 execute gitzette-db --remote --file=schema.sql",
+    "test": "bun test"
   },
   "dependencies": {
     "hono": "^4.6.0"

@@ -32,7 +32,9 @@ See also: `../gitzette-dispatch/EDITORIAL.md` — the offline script's editorial
 - Fetch `/users/{username}/repos?per_page=100&sort=pushed`, take first 30 (**include forks**).
 - For forks: pass `author={username}` on commits query (skip upstream merges), skip releases/PRs (those belong to upstream).
 - Also run `/search/issues?q=author:{username}+is:pr+created:{from}..{to}` to catch **external contributions** (e.g. NikolayS's PRs to pgdogdev/pgdog, rust-postgres/rust-postgres, postgres-ai/*). External repos are shown with PR data only, no commits/releases.
-- Quiet weeks (0 active repos) save a `<p>No activity this week.</p>` placeholder; no illustrations generated.
+- Quiet weeks (0 active repos) publish a designed, deterministic “quiet week” edition with zeroed stats and an inline ink illustration. Never store a bare placeholder.
+- A total repository-scan failure is not a quiet week: abort generation and preserve the previous dispatch.
+- Legacy bare placeholders are upgraded at read time by `pages.ts` so old links remain useful without an R2 migration.
 
 ## README screenshots
 
@@ -73,7 +75,7 @@ Must require: Victorian-era woodcut engraving, centered object occupying **~60% 
 Enforced in code — do not relax without testing:
 
 - `targetImageCount = clamp(2, round(articles.length * 0.4), 3)`
-- **Always at least 2 AI illustrations** — they're the visual identity. `minAiCount = 2`. Set by user as non-negotiable.
+- **Always at least 2 AI illustrations for activity editions** — they're the visual identity. `minAiCount = 2`. Set by user as non-negotiable. Quiet-week editions use one deterministic inline illustration and do not call image generation.
 - `maxScreenshots = max(0, targetImageCount - minAiCount)` (so README screenshots never absorb the whole budget).
 - **Image is per-article, not per-repo.** LLM may legitimately write 5 articles for the same repo (e.g. levkk on pgdog). Pre-fix, all 5 shared one illustration. Store the URL on the article object as `a._img` and `a._isIllustration`.
 - **Dedupe URLs across the dispatch.** If `generateIllustration` returns the same slug as another article (same illustrationPrompt), skip it — no two articles show the same pic.
@@ -144,4 +146,5 @@ All three functions (`pages.ts:currentWeekKey`, `generate.ts:weekKey/isoWeekKeyA
 - `shape-outside: circle()`, not `url()`. Not negotiable for woodcut style.
 - At least 2 AI illustrations per dispatch, always.
 - Unique URLs across every dispatch — dedupe at selection time and at generation time.
+- Never publish article-free HTML. Validate LLM articles and the final document before writing to R2.
 - Test changes by actually regenerating at least 2 users with different profile shapes (a quiet one like DHH, a busy one like simonw) and viewing the output. CSS changes require regeneration to take effect — the CSS is inlined in the R2 HTML.

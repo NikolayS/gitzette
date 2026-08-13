@@ -91,6 +91,6 @@ export async function getUser(c: any): Promise<{ id: string; username: string; a
     `SELECT u.id, u.username, u.avatar_url FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token = ? AND s.expires_at > ?`
-  ).bind(token, now).first<{ id: string; username: string; avatar_url: string }>();
+  ).bind(token, now).first() as { id: string; username: string; avatar_url: string } | null;
   return row ?? null;
 }

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getUser } from "./auth";
 import { checkUserQuota, checkGlobalBudget, recordSpend, recordGeneration } from "./quota";
+import { slowNewsCopy } from "./dispatch-health";
 import type { Env } from "./index";
 
 export const generateRoutes = new Hono<{ Bindings: Env }>();
@@ -22,6 +23,7 @@ generateRoutes.post("/", async (c) => {
   // Admin mode: NikolayS can generate dispatches for any GitHub user
   let target: { id: string; username: string } = user;
   const isAdmin = user.username === "NikolayS";
+  const shouldRecordUsage = !(forUsername && isAdmin);
   if (forUsername && isAdmin) {
     // Look up or create the target user in D1
     let row = await c.env.DB.prepare(
@@ -62,13 +64,16 @@ generateRoutes.post("/", async (c) => {
         sponsor_url: "https://github.com/sponsors/NikolayS",
       }, 503);
     }
-    await recordGeneration(c.env.DB, user.id);
-    await recordSpend(c.env.DB, 0.10);
   }
 
   // run generation synchronously (waitUntil gets killed too early for Opus + illustrations)
   try {
-    await runGeneration(c.env, target, targetWeek);
+    const generationCost = await runGeneration(c.env, target, targetWeek);
+    if (shouldRecordUsage) {
+      // Failed generations should not consume quota or budget.
+      await recordGeneration(c.env.DB, user.id);
+      await recordSpend(c.env.DB, generationCost);
+    }
     return c.json({ status: "ready", message: `Dispatch generated for @${target.username}.`, username: target.username });
   } catch (err) {
     console.error(`generation failed for ${target.username}:`, err);
@@ -116,6 +121,32 @@ interface RepoData {
   commitCount: number; demoImages: string[];
 }
 
+export function validateGeneratedCopy(copy: any, reposData: RepoData[]): any {
+  if (!copy || !Array.isArray(copy.articles)) {
+    throw new Error("LLM response has no articles array");
+  }
+
+  const knownRepos = new Set(reposData.map(repo => repo.name));
+  const validArticles = copy.articles.filter((article: any) =>
+    article &&
+    knownRepos.has(article.repo) &&
+    typeof article.headline === "string" && article.headline.trim().length > 0 &&
+    typeof article.body === "string" && article.body.trim().length > 0
+  );
+
+  if (validArticles.length === 0) {
+    throw new Error("LLM response has no publishable articles");
+  }
+
+  return { ...copy, articles: validArticles };
+}
+
+export function assertPublishableDispatch(html: string): void {
+  if (!/<h2\b[^>]*>[\s\S]*?<\/h2>/i.test(html) || !/<p\b[^>]*>[\s\S]*?<\/p>/i.test(html)) {
+    throw new Error("refusing to publish a dispatch without an article");
+  }
+}
+
 // ── github api ────────────────────────────────────────────────────────────────
 
 async function ghGet(path: string, token: string): Promise<any> {
@@ -158,52 +189,49 @@ async function getReadmeImages(owner: string, repo: string, token: string, newsp
 }
 
 async function getRepoData(owner: string, repo: string, from: Date, to: Date, token: string, newspaperifyUrl: string, secret: string, isFork: boolean = false, authorFilter?: string): Promise<RepoData | null> {
-  try {
-    const info = await ghGet(`/repos/${owner}/${repo}`, token);
+  // Repository metadata is mandatory. Optional GitHub features may return
+  // 404/409, so their failures must not discard otherwise valid activity.
+  const info = await ghGet(`/repos/${owner}/${repo}`, token);
 
-    // For forks, skip releases/PRs (those belong to upstream) and only count user's commits
-    let releases: Release[] = [];
-    let mergedPRs: PR[] = [];
-    let openPRs: PR[] = [];
+  // For forks, skip releases/PRs (those belong to upstream) and only count user's commits
+  let releases: Release[] = [];
+  let mergedPRs: PR[] = [];
+  let openPRs: PR[] = [];
 
-    if (!isFork) {
-      const allReleases = await ghGet(`/repos/${owner}/${repo}/releases?per_page=20`, token);
-      releases = allReleases
-        .filter((r: any) => { const d = new Date(r.published_at); return d >= from && d <= to; })
-        .map((r: any) => ({ tag: r.tag_name, name: r.name || r.tag_name, date: r.published_at, body: (r.body || "").slice(0, 2000), url: r.html_url }));
+  if (!isFork) {
+    const allReleases = await ghGet(`/repos/${owner}/${repo}/releases?per_page=20`, token).catch(() => []);
+    releases = allReleases
+      .filter((r: any) => { const d = new Date(r.published_at); return d >= from && d <= to; })
+      .map((r: any) => ({ tag: r.tag_name, name: r.name || r.tag_name, date: r.published_at, body: (r.body || "").slice(0, 2000), url: r.html_url }));
 
-      const allPRs = await ghGet(`/repos/${owner}/${repo}/pulls?state=closed&per_page=50&sort=updated&direction=desc`, token);
-      mergedPRs = allPRs
-        .filter((p: any) => { if (!p.merged_at) return false; const d = new Date(p.merged_at); return d >= from && d <= to; })
-        .map((p: any) => ({ number: p.number, title: p.title, state: "merged" as const, date: p.merged_at, url: p.html_url, author: p.user?.login || "unknown" }));
+    const allPRs = await ghGet(`/repos/${owner}/${repo}/pulls?state=closed&per_page=50&sort=updated&direction=desc`, token).catch(() => []);
+    mergedPRs = allPRs
+      .filter((p: any) => { if (!p.merged_at) return false; const d = new Date(p.merged_at); return d >= from && d <= to; })
+      .map((p: any) => ({ number: p.number, title: p.title, state: "merged" as const, date: p.merged_at, url: p.html_url, author: p.user?.login || "unknown" }));
 
-      const openPRsRaw = await ghGet(`/repos/${owner}/${repo}/pulls?state=open&per_page=50&sort=created&direction=desc`, token);
-      openPRs = openPRsRaw
-        .filter((p: any) => { const d = new Date(p.created_at); return d >= from && d <= to; })
-        .map((p: any) => ({ number: p.number, title: p.title, state: "open" as const, date: p.created_at, url: p.html_url, author: p.user?.login || "unknown" }));
-    }
-
-    let commitCount = 0;
-    try {
-      // For forks, filter by author so we only count the user's own commits (not upstream merges)
-      const authorParam = authorFilter ? `&author=${encodeURIComponent(authorFilter)}` : "";
-      const commits = await ghGet(`/repos/${owner}/${repo}/commits?since=${from.toISOString()}&until=${to.toISOString()}&per_page=100${authorParam}`, token);
-      commitCount = Array.isArray(commits) ? commits.length : 0;
-    } catch { /* empty repo */ }
-
-    if (releases.length === 0 && mergedPRs.length === 0 && openPRs.length === 0 && commitCount === 0) return null;
-
-    // Fetch README screenshot (for own non-fork repos) — real screenshots preferred over AI illustrations
-    let demoImages: string[] = [];
-    if (!isFork) {
-      try { demoImages = await getReadmeImages(owner, repo, token, newspaperifyUrl, secret); } catch {}
-    }
-
-    return { name: repo, description: info.description, url: info.html_url, stars: info.stargazers_count ?? 0, releases, mergedPRs, openPRs, commitCount, demoImages };
-  } catch (err) {
-    console.error(`skipping ${repo}:`, err);
-    return null;
+    const openPRsRaw = await ghGet(`/repos/${owner}/${repo}/pulls?state=open&per_page=50&sort=created&direction=desc`, token).catch(() => []);
+    openPRs = openPRsRaw
+      .filter((p: any) => { const d = new Date(p.created_at); return d >= from && d <= to; })
+      .map((p: any) => ({ number: p.number, title: p.title, state: "open" as const, date: p.created_at, url: p.html_url, author: p.user?.login || "unknown" }));
   }
+
+  let commitCount = 0;
+  try {
+    // Filter by author when requested so forks do not inherit upstream activity.
+    const authorParam = authorFilter ? `&author=${encodeURIComponent(authorFilter)}` : "";
+    const commits = await ghGet(`/repos/${owner}/${repo}/commits?since=${from.toISOString()}&until=${to.toISOString()}&per_page=100${authorParam}`, token);
+    commitCount = Array.isArray(commits) ? commits.length : 0;
+  } catch { /* empty repo */ }
+
+  if (releases.length === 0 && mergedPRs.length === 0 && openPRs.length === 0 && commitCount === 0) return null;
+
+  // Fetch README screenshot (for own non-fork repos) — real screenshots preferred over AI illustrations
+  let demoImages: string[] = [];
+  if (!isFork) {
+    try { demoImages = await getReadmeImages(owner, repo, token, newspaperifyUrl, secret); } catch {}
+  }
+
+  return { name: repo, description: info.description, url: info.html_url, stars: info.stargazers_count ?? 0, releases, mergedPRs, openPRs, commitCount, demoImages };
 }
 
 // ── image generation ──────────────────────────────────────────────────────────
@@ -623,7 +651,9 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
     from = new Date(mon1);
     from.setUTCDate(mon1.getUTCDate() + (w - 1) * 7);
     to = new Date(from);
-    to.setUTCDate(from.getUTCDate() + 7);
+    // Keep the endpoint inside the requested ISO week. Using next Monday made
+    // regeneration of W15 get saved under W16.
+    to.setTime(from.getTime() + 7 * 86400000 - 1);
   } else {
     to = new Date();
     // Snap from= to Monday 00:00 AoE (= Monday 12:00 UTC)
@@ -646,14 +676,9 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   const ownedFullNames = new Set<string>(publicRepos.map((r: any) => r.full_name.toLowerCase()));
   console.log(`[gen] ${user.username}: ${publicRepos.length} repos (incl. forks)`);
 
-  if (publicRepos.length === 0 && !targetWeek) {
-    await saveDispatch(env.DB, env.DISPATCHES, user.id, user.username, "<p>No public repos found.</p>", from, to);
-    return 0;
-  }
-
   // Search for PRs the user authored in ANY repo during the window (catches external contributions)
   const fromISO = from.toISOString().slice(0, 10);
-  const toISO = new Date(to.getTime() - 86400000).toISOString().slice(0, 10);
+  const toISO = to.toISOString().slice(0, 10);
   console.log(`[gen] ${user.username}: searching PRs ${fromISO}..${toISO}`);
   let externalPRs: { fullName: string; items: any[] }[] = [];
   try {
@@ -671,16 +696,26 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
 
   // fetch repo data in parallel (batches of 5 to avoid rate limits)
   const reposData: RepoData[] = [];
+  let successfulScans = 0;
+  let failedScans = 0;
   for (let i = 0; i < publicRepos.length; i += 5) {
     const batch = publicRepos.slice(i, i + 5);
     console.log(`[gen] ${user.username}: batch ${i}-${i+batch.length}`);
-    const results = await Promise.all(
+    const results = await Promise.allSettled(
       batch.map((repo: any) => getRepoData(
         user.username, repo.name, from, to, env.GITHUB_TOKEN, npUrl, npSecret,
         repo.fork, repo.fork ? user.username : undefined,
       ))
     );
-    reposData.push(...results.filter((r): r is RepoData => r !== null));
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        successfulScans++;
+        if (result.value) reposData.push(result.value);
+      } else {
+        failedScans++;
+        console.error(`failed to scan ${batch[index].name}:`, result.reason);
+      }
+    });
   }
 
   // Add external repos where the user authored PRs
@@ -706,17 +741,26 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
       });
     } catch (err) { console.warn(`external repo ${fullName} failed:`, err); }
   }
-  console.log(`[gen] ${user.username}: ${reposData.length} active repos total`);
+  console.log(`[gen] ${user.username}: ${reposData.length} active repos, ${failedScans} scan failures`);
 
-  if (reposData.length === 0) {
-    await saveDispatch(env.DB, env.DISPATCHES, user.id, user.username, "<p>No activity this week.</p>", from, to);
-    return 0;
+  if (publicRepos.length > 0 && successfulScans === 0) {
+    throw new Error(`GitHub scan failed for all ${failedScans} repositories`);
   }
 
-  // generate LLM copy
-  console.log(`[gen] ${user.username}: calling LLM`);
-  const copy = await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY);
-  console.log(`[gen] ${user.username}: LLM done`);
+  let copy: any;
+  const slowNews = reposData.length === 0;
+  if (slowNews) {
+    console.log(`[gen] ${user.username}: publishing slow-news edition`);
+    copy = slowNewsCopy(user.username);
+  } else {
+    // generate and validate LLM copy before spending money on illustrations
+    console.log(`[gen] ${user.username}: calling LLM`);
+    copy = validateGeneratedCopy(
+      await generateCopy(reposData, from, to, user.username, env.OPENROUTER_API_KEY),
+      reposData,
+    );
+    console.log(`[gen] ${user.username}: LLM done`);
+  }
 
   // Enforce total image budget (2-3 pics, always at least 2 AI). Each article gets AT MOST its own
   // unique image — if the LLM wrote multiple articles per repo, only one gets a picture.
@@ -774,6 +818,7 @@ async function runGeneration(env: Env, user: { id: string; username: string }, t
   // build HTML
   const wk = weekKey(to);
   const html = buildHtml(copy, reposData, user.username, from, to, wk);
+  assertPublishableDispatch(html);
 
   // save
   console.log(`[gen] ${user.username}: saving dispatch wk=${wk}`);
