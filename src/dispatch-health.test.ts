@@ -9,6 +9,12 @@ describe("empty dispatch recovery", () => {
     expect(isLegacyEmptyDispatch("<p>A real article.</p>")).toBe(false);
   });
 
+  test("recognizes full documents with a masthead but no articles", () => {
+    expect(isLegacyEmptyDispatch(`<!DOCTYPE html><html><head><style>.article { color: black; }</style></head><body><div class="masthead">the dispatch</div></body></html>`)).toBe(true);
+    expect(isLegacyEmptyDispatch(`<!DOCTYPE html><html><body><h2>Real headline</h2><p>Real body</p></body></html>`)).toBe(false);
+    expect(isLegacyEmptyDispatch(`<!DOCTYPE html><html><body><section class="article">News</section></body></html>`)).toBe(false);
+  });
+
   test("builds a useful slow-news edition", () => {
     const copy = slowNewsCopy("octocat");
     expect(copy.articles).toHaveLength(1);
