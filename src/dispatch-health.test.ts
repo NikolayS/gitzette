@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isLegacyEmptyDispatch, slowNewsCopy, slowNewsFragment } from "./dispatch-health";
+import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsCopy, slowNewsFragment } from "./dispatch-health";
 import { assertPublishableDispatch, validateGeneratedCopy } from "./generate";
 
 describe("empty dispatch recovery", () => {
@@ -15,6 +15,12 @@ describe("empty dispatch recovery", () => {
     expect(copy.articles[0].headline).toContain("Moment of Silence");
     expect(copy.articles[0].deck).toContain("@octocat");
     expect(slowNewsFragment("octocat")).toContain("The presses remain ready");
+    expect(slowNewsFragment("octocat")).toContain(`class="article"`);
+  });
+
+  test("adds semantic markers to generated article blocks", () => {
+    const html = `<div style="margin-bottom:32px;padding-bottom:32px;border-bottom:1px solid var(--rule);"><h2>News</h2></div>`;
+    expect(addArticleMarkers(html)).toContain(`<div class="article"`);
   });
 });
 

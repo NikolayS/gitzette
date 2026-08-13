@@ -7,6 +7,13 @@ export function isLegacyEmptyDispatch(html: string): boolean {
   return LEGACY_EMPTY_DISPATCHES.has(html.trim().toLowerCase());
 }
 
+export function addArticleMarkers(html: string): string {
+  return html.replace(
+    /<div style="margin-bottom:32px;padding-bottom:32px;border-bottom:1px solid var\(--rule\);">/g,
+    `<div class="article" style="margin-bottom:32px;padding-bottom:32px;border-bottom:1px solid var(--rule);">`,
+  );
+}
+
 export function slowNewsCopy(username: string) {
   return {
     masthead: "the dispatch",
@@ -27,7 +34,7 @@ export function slowNewsCopy(username: string) {
 export function slowNewsFragment(username: string): string {
   const copy = slowNewsCopy(username);
   const article = copy.articles[0];
-  return `<section style="max-width:760px;margin:0 auto;padding:48px 24px 64px;">
+  return `<section class="article" style="max-width:760px;margin:0 auto;padding:48px 24px 64px;">
     <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;">${article.tag}</div>
     <h1 style="font-family:'Playfair Display',Georgia,serif;font-size:clamp(32px,8vw,64px);line-height:1.02;margin-bottom:14px;">${article.headline}</h1>
     <p style="font-family:Georgia,serif;font-size:18px;font-style:italic;color:#666;margin-bottom:28px;">${article.deck}</p>
