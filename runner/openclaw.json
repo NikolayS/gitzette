@@ -1,0 +1,61 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "port": 18930,
+    "auth": {
+      "mode": "token",
+      "token": "replace-at-install-with-random-64-byte-token",
+      "rateLimit": {
+        "maxAttempts": 5,
+        "windowMs": 60000,
+        "lockoutMs": 300000,
+        "exemptLoopback": false
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/var/lib/gitzette-runner/workspace",
+      "model": {
+        "primary": "openai/gpt-5.6-sol",
+        "fallbacks": []
+      },
+      "imageGenerationModel": {
+        "primary": "openai/gpt-image-2",
+        "fallbacks": []
+      },
+      "sandbox": {
+        "mode": "all",
+        "scope": "agent",
+        "workspaceAccess": "none"
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "name": "GitZette sealed inference",
+        "workspace": "/var/lib/gitzette-runner/workspace",
+        "agentDir": "/var/lib/gitzette-runner/.openclaw/agents/main/agent",
+        "models": {
+          "openai/gpt-5.6-sol": {
+            "agentRuntime": {
+              "id": "codex"
+            }
+          }
+        },
+        "tools": {
+          "deny": ["*"]
+        }
+      }
+    ]
+  },
+  "tools": {
+    "deny": ["*"],
+    "elevated": {
+      "enabled": false
+    }
+  },
+  "channels": {}
+}

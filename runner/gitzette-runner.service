@@ -1,0 +1,41 @@
+[Unit]
+Description=GitZette isolated OAuth pull runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gitzette-runner
+Group=gitzette-runner
+WorkingDirectory=/opt/gitzette-runner
+ExecStart=/usr/local/bin/bun run runner/main.ts
+EnvironmentFile=/etc/gitzette-runner/environment
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RemoveIPC=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/gitzette-runner
+UMask=0077
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

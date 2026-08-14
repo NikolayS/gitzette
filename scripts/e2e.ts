@@ -1,4 +1,6 @@
 import { expect } from "bun:test";
+import { ControlPlaneClient } from "../runner/control-plane";
+import { RunnerEngine } from "../runner/run";
 
 const base = process.env.E2E_BASE_URL!;
 const sessionHeaders = { cookie: "session=e2e-session", "content-type": "application/json" };
@@ -137,12 +139,22 @@ expect(browserStatus.body.stage).toBe("published");
 // Quiet weeks are rendered from server-owned copy and need no model images.
 const quiet = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W31" }) });
 const quietId = quiet.body.job.id as string;
-const quietClaim = await json("/runner/jobs/claim", { method: "POST", headers: runnerHeaders });
-const quietLease = quietClaim.body.job.leaseToken as string;
-for (const stage of ["writing", "illustrating", "validating"]) {
-  expect((await json(`/runner/jobs/${quietId}/stage`, { method: "PATCH", headers: runnerHeaders, body: JSON.stringify({ leaseToken: quietLease, stage }) })).response.status).toBe(200);
-}
-expect((await json(`/runner/jobs/${quietId}/publish`, { method: "POST", headers: runnerHeaders, body: JSON.stringify({ leaseToken: quietLease, manifest: quietManifest("2026-W31") }) })).response.status).toBe(200);
+const quietEngine = new RunnerEngine(
+  {
+    controlPlaneOrigin: base, runnerSecret: "e2e-runner-secret", githubToken: "unused",
+    openclawBin: "/forbidden", openclawHome: "/tmp/gitzette-e2e-openclaw",
+    pollSeconds: 10, workDir: "/tmp/gitzette-e2e-runner", generatorVersion: "e2e-runner",
+  },
+  new ControlPlaneClient(base, "e2e-runner-secret"),
+  { collect: async (username, weekKey) => ({ state: "quiet", username, weekKey, items: [] }) },
+  {
+    write: async () => { throw new Error("quiet week must not invoke text AI"); },
+    illustrate: async () => { throw new Error("quiet week must not invoke image AI"); },
+    reviewIllustration: async () => { throw new Error("quiet week must not invoke image review"); },
+  },
+);
+expect(await quietEngine.runOnce()).toBe("processed");
+expect((await json(`/generate/jobs/${quietId}`, { headers: sessionHeaders })).body.job.status).toBe("published");
 const quietHtml = await (await fetch(`${base}/octocat/2026-W31`)).text();
 expect(quietHtml).toContain("A Quiet Week for @octocat");
 expect(quietHtml).not.toContain("This model copy must be discarded");
