@@ -10,7 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bunx tsc --noEmit
-      - run: bun test
-      - run: bash scripts/e2e.sh
+      - name: Install image validation runtime
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+      - run: bun install --frozen-lockfile
+      - run: bun run test:all
+      - run: npm audit --audit-level=high
