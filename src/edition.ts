@@ -44,6 +44,13 @@ export type PublicationManifest = {
 const EVIDENCE_TYPES = new Set(["commit", "pull_request", "issue", "release", "discussion", "repository"]);
 const STORY_TAGS = new Set(["RELEASE", "FEATURE", "SECURITY", "PENDING", "COMMUNITY"]);
 
+function assertExactKeys(value: unknown, field: string, allowed: readonly string[]): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`invalid ${field}`);
+  const allow = new Set(allowed);
+  const unknown = Object.keys(value).filter((key) => !allow.has(key));
+  if (unknown.length > 0) throw new Error(`unknown ${field} field: ${unknown[0]}`);
+}
+
 export function quietEdition(username: string, weekKey: string): Edition {
   return {
     headline: `A Quiet Week for @${username}`,
@@ -69,13 +76,14 @@ function isGitHubUrl(value: string): boolean {
 }
 
 export function validateManifest(input: unknown, username: string, weekKey: string): PublicationManifest {
-  if (!input || typeof input !== "object") throw new Error("invalid manifest");
+  assertExactKeys(input, "manifest", ["generatorVersion", "model", "promptVersion", "evidence", "edition", "images"]);
   const manifest = input as PublicationManifest;
   assertString(manifest.generatorVersion, "generatorVersion", 100);
   if (manifest.model !== "openai/gpt-5.6-sol" && manifest.model !== "deterministic") throw new Error("forbidden model");
   assertString(manifest.promptVersion, "promptVersion", 100);
 
   const evidence = manifest.evidence;
+  assertExactKeys(evidence, "evidence", ["state", "username", "weekKey", "items"]);
   if (!evidence || evidence.username !== username || evidence.weekKey !== weekKey) {
     throw new Error("evidence target mismatch");
   }
@@ -85,7 +93,8 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   if (!Array.isArray(evidence.items) || evidence.items.length > 500) throw new Error("invalid evidence items");
   const evidenceIds = new Set<string>();
   for (const item of evidence.items) {
-    if (!item || typeof item !== "object" || !EVIDENCE_TYPES.has(item.type)) throw new Error("invalid evidence type");
+    assertExactKeys(item, "evidence item", ["id", "type", "title", "url", "repo"]);
+    if (!EVIDENCE_TYPES.has(item.type)) throw new Error("invalid evidence type");
     assertString(item.id, "evidence id", 120);
     assertString(item.title, "evidence title", 500);
     assertString(item.repo, "evidence repo", 200);
@@ -98,6 +107,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   if (evidence.state === "quiet" && evidence.items.length !== 0) throw new Error("quiet edition contains evidence");
 
   const edition = manifest.edition;
+  assertExactKeys(edition, "edition", ["headline", "tagline", "closingNote", "stories"]);
   if (!edition || !Array.isArray(edition.stories) || edition.stories.length > 8) throw new Error("invalid edition stories");
   assertString(edition.headline, "edition headline", 160);
   assertString(edition.tagline, "edition tagline", 300);
@@ -105,7 +115,8 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
 
   const usedIllustrations = new Set<string>();
   for (const story of edition.stories) {
-    if (!story || typeof story !== "object" || !STORY_TAGS.has(story.tag)) throw new Error("invalid story tag");
+    assertExactKeys(story, "story", ["headline", "deck", "paragraphs", "evidenceIds", "tag", "illustrationKey"]);
+    if (!STORY_TAGS.has(story.tag)) throw new Error("invalid story tag");
     assertString(story.headline, "story headline", 240);
     assertString(story.deck, "story deck", 500);
     if (!Array.isArray(story.paragraphs) || story.paragraphs.length < 1 || story.paragraphs.length > 4) {
@@ -129,6 +140,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   const imageKeys = new Set<string>();
   const imageHashes = new Set<string>();
   for (const image of manifest.images) {
+    assertExactKeys(image, "image", ["key", "contentType", "sha256"]);
     if (!/^image-[1-3]\.webp$/.test(image.key) || image.contentType !== "image/webp" || !/^[a-f0-9]{64}$/.test(image.sha256)) {
       throw new Error("invalid image metadata");
     }

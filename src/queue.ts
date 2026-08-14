@@ -4,6 +4,7 @@ import type { Env } from "./index";
 
 const WEEK_KEY = /^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/;
 const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"];
+const MAX_GENERATE_BODY_BYTES = 2048;
 
 type JobRow = {
   id: string;
@@ -53,8 +54,14 @@ queueRoutes.post("/generate", async (c) => {
   const requester = await getUser(c);
   if (!requester) return c.json({ error: "not authenticated" }, 401);
 
+  const declaredLength = Number(c.req.header("content-length") || 0);
+  if (declaredLength > MAX_GENERATE_BODY_BYTES) return c.json({ error: "request body too large" }, 413);
+
   let body: { weekKey?: unknown; forUsername?: unknown } = {};
   try { body = await c.req.json(); } catch { /* empty body uses defaults */ }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "invalid request body" }, 400);
+  const unknownFields = Object.keys(body).filter((key) => key !== "weekKey" && key !== "forUsername");
+  if (unknownFields.length > 0) return c.json({ error: `unknown request field: ${unknownFields[0]}` }, 400);
   const weekKey = body.weekKey === undefined ? defaultCompletedWeek() : body.weekKey;
   if (typeof weekKey !== "string" || !WEEK_KEY.test(weekKey)) return c.json({ error: "invalid weekKey" }, 400);
 
