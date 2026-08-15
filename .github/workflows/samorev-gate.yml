@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
 
+concurrency:
+  group: samorev-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   statuses: read
@@ -23,9 +27,15 @@ jobs:
           # success. This PR-triggered check verifies the status is attached to
           # the current head without creating a circular wait during review.
           for attempt in $(seq 1 4); do
-            state="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/status" --jq '.statuses[] | select(.context == "samorev") | .state' | head -1)"
+            status="$(gh api "repos/$REPOSITORY/statuses/$HEAD_SHA" --jq '[.[] | select(.context == "samorev")][0] // {}')"
+            state="$(jq -r '.state // empty' <<<"$status")"
+            creator="$(jq -r '.creator.login // empty' <<<"$status")"
+            if [ -n "$state" ] && [ "$creator" != "NikolayS" ]; then
+              echo "samorev status has unexpected creator: $creator"
+              exit 1
+            fi
             if [ "$state" = pending ] || [ "$state" = success ]; then
-              echo "samorev status exists on exact head $HEAD_SHA ($state)"
+              echo "samorev status exists on exact head $HEAD_SHA ($state by $creator)"
               exit 0
             fi
             if [ "$state" = failure ] || [ "$state" = error ]; then

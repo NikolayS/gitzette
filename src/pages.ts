@@ -440,7 +440,7 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
 
 pageRoutes.get("/status", async (c) => {
   const authorization = c.req.header("authorization") || "";
-  const token = /^Bearer +(.+)$/i.exec(authorization)?.[1] ?? "";
+  const token = bearerToken(authorization);
   if (!token || !await secretMatches(token, c.env.STATUS_TOKEN)) {
     return c.text("403 Forbidden", 403);
   }
@@ -474,6 +474,10 @@ export async function secretMatches(supplied: string, expected: string | undefin
   let difference = 0;
   for (let index = 0; index < a.length; index++) difference |= a[index] ^ b[index];
   return difference === 0;
+}
+
+export function bearerToken(authorization: string): string {
+  return /^Bearer\s+(\S+)\s*$/i.exec(authorization)?.[1] ?? "";
 }
 
 // public profile page — lists all dispatches (or latest if only one)

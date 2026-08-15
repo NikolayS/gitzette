@@ -20,4 +20,10 @@ surface of `Tanya301/samorev` after every post-review change and post its verdic
 as that status; a prior SHA cannot satisfy the gate. Green CI alone is not a
 review.
 
+The status is published out-of-band by the owner-authorized TARS review runner:
+it runs `Tanya301/samorev --blocking --fetch`, then posts the parsed verdict to
+GitHub's commit-status API with context `samorev`, target URL set to the PR, and
+the exact reviewed SHA. `samorev-gate.yml` accepts that status only from
+`NikolayS`; branch protection requires the status itself to be `success`.
+
 Before production activation, complete the canaries and mandatory post-deploy smoke test listed in `DISPATCH_SPEC.md`.

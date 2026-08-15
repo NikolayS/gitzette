@@ -16,6 +16,8 @@ export type RunnerConfig = {
 };
 
 const FORBIDDEN_AI_ENV = /(?:API|AUTH|ACCESS|OAUTH)[-_]?(?:KEY|TOKEN|SECRET)|(?:KEY|TOKEN|SECRET)[-_]?(?:API|AUTH|ACCESS|OAUTH)|_API_BASE|_BASE_URL|BEDROCK|VERTEX|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_AI|AZURE_OPENAI_ENDPOINT|OPENAI|ANTHROPIC|CLAUDE|GEMINI|REPLICATE|HUGGINGFACE|HF_TOKEN/i;
+const ALLOWED_RUNNER_CREDENTIALS = new Set(["GITZETTE_RUNNER_SECRET", "GITZETTE_GITHUB_TOKEN"]);
+const CREDENTIAL_SUFFIX = /(?:KEY|TOKEN|SECRET|CREDENTIALS?)$/i;
 
 function required(env: Record<string, string | undefined>, name: string): string {
   const value = env[name]?.trim();
@@ -25,7 +27,9 @@ function required(env: Record<string, string | undefined>, name: string): string
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): RunnerConfig {
   for (const [key, value] of Object.entries(env)) {
-    if (value && FORBIDDEN_AI_ENV.test(key)) throw new Error(`${key} is forbidden; GitZette AI auth must be OAuth-only`);
+    if (value && !ALLOWED_RUNNER_CREDENTIALS.has(key) && (FORBIDDEN_AI_ENV.test(key) || CREDENTIAL_SUFFIX.test(key))) {
+      throw new Error(`${key} is forbidden; GitZette AI auth must be OAuth-only`);
+    }
   }
 
   const rawOrigin = required(env, "GITZETTE_CONTROL_PLANE_ORIGIN");

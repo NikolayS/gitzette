@@ -12,7 +12,8 @@ Your dispatch lives at `gitzette.online/@yourusername`.
 
 ## Quotas
 
-- 3 manual regenerations per week per user (resets Monday)
+- 3 manual regenerations per user in a rolling seven-day window
+- 100 total generations across all users in a rolling seven-day window
 
 Community-supported. [Sponsor the project](https://github.com/sponsors/NikolayS) to get more generations per week.
 
@@ -33,13 +34,13 @@ Community-supported. [Sponsor the project](https://github.com/sponsors/NikolayS)
 wrangler d1 create gitzette-db
 
 # update wrangler.toml with the returned database_id
-# apply versioned migrations
-wrangler d1 migrations apply gitzette-db --remote
+# verify the one-time production baseline and apply versioned migrations
+bun run db:migrate
 
 # set secrets
 wrangler secret put GITHUB_CLIENT_SECRET
-wrangler secret put GITHUB_TOKEN
 wrangler secret put SESSION_SECRET
+wrangler secret put STATUS_TOKEN
 wrangler secret put RUNNER_SECRET
 
 # deploy
@@ -55,3 +56,10 @@ bun run test:all
 ```
 
 The Worker contains no AI provider key or fallback. `RUNNER_SECRET` authenticates only the narrow runner API; model OAuth credentials remain on the private host.
+# Review gate
+
+`main` requires `typecheck`, `samorev-gate`, and an exact-head `samorev` commit
+status. The owner-authorized TARS runner invokes Tanya301/samorev out of band,
+parses its blocking verdict, and posts the status through GitHub's statuses API.
+The PR-triggered gate verifies the status belongs to the current SHA and was
+created by `NikolayS`; branch protection requires `success`, including for admins.
