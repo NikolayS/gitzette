@@ -1,3 +1,0 @@
-# Workflow changes are security-sensitive. The externally posted exact-SHA
-# samorev status remains the branch-protection authorization boundary.
-.github/** @NikolayS

@@ -8,6 +8,8 @@ describe("ISO week validation", () => {
   });
 
   test("rejects nonexistent week 53 and incomplete weeks", () => {
+    expect(() => parseIsoWeekKey("2025-W53")).toThrow("does not exist");
+    expect(isCompletedIsoWeekKey("2025-W53", new Date("2026-02-01T00:00:00Z"))).toBe(false);
     expect(() => parseIsoWeekKey("2027-W53")).toThrow("does not exist");
     expect(isCompletedIsoWeekKey("2026-W32", new Date("2026-08-14T08:00:00Z"))).toBe(true);
     expect(isCompletedIsoWeekKey("2026-W33", new Date("2026-08-14T08:00:00Z"))).toBe(false);

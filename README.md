@@ -47,6 +47,12 @@ wrangler secret put RUNNER_SECRET
 wrangler deploy
 ```
 
+`bun run db:migrate` is the only supported production migration path. Never run
+bare `wrangler d1 migrations apply ... --remote`: that bypasses the live
+pre-cutover schema assertion. The tag-deploy workflow enforces the wrapper
+before every Worker deployment; after cutover, the D1 migration ledger controls
+subsequent migrations.
+
 ## Development
 
 ```bash
