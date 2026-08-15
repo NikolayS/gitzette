@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { renderEdition, validateManifest, type PublicationManifest } from "./edition";
 import { hasPublicationDimensions, webpDimensions } from "./image";
+import { bearerToken, secretMatches } from "./credentials";
 import type { Env } from "./index";
 
 const DEFAULT_LEASE_SECONDS = 10 * 60;
@@ -27,9 +28,10 @@ type ClaimedJob = {
 export const runnerRoutes = new Hono<{ Bindings: Env }>();
 
 runnerRoutes.use("*", async (c, next) => {
-  const expected = c.env.RUNNER_SECRET;
-  const supplied = c.req.header("authorization");
-  if (!expected || supplied !== `Bearer ${expected}`) return c.json({ error: "unauthorized" }, 401);
+  const supplied = bearerToken(c.req.header("authorization") || "");
+  if (!supplied || !await secretMatches(supplied, c.env.RUNNER_SECRET)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
   await next();
 });
 

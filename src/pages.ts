@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { getUser } from "./auth";
+import { bearerToken, secretMatches } from "./credentials";
 import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
 import type { Env } from "./index";
 
@@ -461,24 +462,6 @@ pageRoutes.get("/status", async (c) => {
     oldestQueuedSeconds: jobsRow?.oldest_queued ? Math.max(0, now - jobsRow.oldest_queued) : 0,
   }));
 });
-
-export async function secretMatches(supplied: string, expected: string | undefined): Promise<boolean> {
-  if (!expected) return false;
-  const encoder = new TextEncoder();
-  const [left, right] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(supplied)),
-    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
-  ]);
-  const a = new Uint8Array(left);
-  const b = new Uint8Array(right);
-  let difference = 0;
-  for (let index = 0; index < a.length; index++) difference |= a[index] ^ b[index];
-  return difference === 0;
-}
-
-export function bearerToken(authorization: string): string {
-  return /^Bearer\s+(\S+)\s*$/i.exec(authorization)?.[1] ?? "";
-}
 
 // public profile page — lists all dispatches (or latest if only one)
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {

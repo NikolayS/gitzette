@@ -7,7 +7,7 @@ server_pid=""
 
 cleanup() {
   if [[ -n "$server_pid" ]]; then
-    kill "$server_pid" 2>/dev/null || true
+    kill -- -"$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
   fi
   rm -rf "$state_dir"
@@ -23,7 +23,7 @@ for attempt in $(seq 1 5); do
   # Ask the kernel for a free loopback port, then retry if another process wins
   # the small close-to-bind race before Wrangler starts.
   port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
-  bunx wrangler dev --local --port "$port" --persist-to "$state_dir" \
+  setsid bunx wrangler dev --local --port "$port" --persist-to "$state_dir" \
     --var RUNNER_SECRET:e2e-runner-secret \
     --var SESSION_SECRET:e2e-session-secret \
     --var WEEKLY_REGEN_LIMIT:10 \
@@ -48,7 +48,7 @@ for attempt in $(seq 1 5); do
   done
 
   if [[ -n "$server_pid" ]]; then
-    kill "$server_pid" 2>/dev/null || true
+    kill -- -"$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
     server_pid=""
   fi
