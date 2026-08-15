@@ -79,8 +79,8 @@ queueRoutes.post("/generate", async (c) => {
   if (live) return c.json({ status: "accepted", job: publicJob(live), deduplicated: true }, 202);
 
   const id = crypto.randomUUID();
-  const requestLimit = Math.max(1, Number.parseInt(c.env.WEEKLY_REGEN_LIMIT || "3", 10) || 3);
-  const globalLimit = positiveInteger(c.env.GLOBAL_WEEKLY_GENERATION_LIMIT, DEFAULT_GLOBAL_WEEKLY_LIMIT);
+  const requestLimit = Math.max(1, Number.parseInt(c.env.ROLLING_7D_USER_GENERATION_LIMIT || "3", 10) || 3);
+  const globalLimit = positiveInteger(c.env.ROLLING_7D_GLOBAL_GENERATION_LIMIT, DEFAULT_GLOBAL_WEEKLY_LIMIT);
   try {
     const inserted = await c.env.DB.prepare(
       `INSERT INTO generation_jobs (id,user_id,requested_by,week_key,status)

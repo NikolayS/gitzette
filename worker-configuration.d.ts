@@ -8,7 +8,8 @@ declare namespace Cloudflare {
 	interface Env {
 		DISPATCHES: R2Bucket;
 		DB: D1Database;
-		WEEKLY_REGEN_LIMIT: "3";
+		ROLLING_7D_USER_GENERATION_LIMIT: "3";
+		ROLLING_7D_GLOBAL_GENERATION_LIMIT: "100";
 		MONTHLY_LLM_BUDGET_USD: "50";
 		NEWSPAPERIFY_URL: "https://test-callbot.samo.team/newspaperify";
 		GITHUB_CLIENT_ID: string;

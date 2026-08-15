@@ -17,9 +17,8 @@ binding = "DISPATCHES"
 bucket_name = "gitzette-dispatches"
 
 [vars]
-# Quotas use rolling seven-day windows, not calendar/ISO-week resets.
-WEEKLY_REGEN_LIMIT = "3"
-GLOBAL_WEEKLY_GENERATION_LIMIT = "100"
+ROLLING_7D_USER_GENERATION_LIMIT = "3"
+ROLLING_7D_GLOBAL_GENERATION_LIMIT = "100"
 MAX_QUEUE_AGE_SECONDS = "21600"
 
 # secrets (set via: wrangler secret put GITHUB_CLIENT_SECRET etc.)

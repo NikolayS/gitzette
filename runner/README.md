@@ -44,8 +44,6 @@ revocation response are production activation gates; if OAuth is revoked or
 limited, generation intentionally fails closed and operators disable the runner
 while existing editions remain available.
 
-Control-plane quota configuration uses rolling seven-day windows:
-`WEEKLY_REGEN_LIMIT` is per requester and
-`GLOBAL_WEEKLY_GENERATION_LIMIT` protects the shared OAuth identity across all
-requesters. The names are retained for compatibility; neither resets at an ISO
-week boundary.
+`ROLLING_7D_USER_GENERATION_LIMIT` is per requester and
+`ROLLING_7D_GLOBAL_GENERATION_LIMIT` protects the shared OAuth identity across
+all requesters.

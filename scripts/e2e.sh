@@ -29,8 +29,8 @@ for attempt in $(seq 1 5); do
   setsid bunx wrangler dev --local --port "$port" --persist-to "$state_dir" \
     --var RUNNER_SECRET:e2e-runner-secret \
     --var SESSION_SECRET:e2e-session-secret \
-    --var WEEKLY_REGEN_LIMIT:10 \
-    --var GLOBAL_WEEKLY_GENERATION_LIMIT:5 \
+    --var ROLLING_7D_USER_GENERATION_LIMIT:10 \
+    --var ROLLING_7D_GLOBAL_GENERATION_LIMIT:5 \
     --var MAX_QUEUE_AGE_SECONDS:2 \
     --var RUNNER_LEASE_SECONDS:2 \
     --show-interactive-dev-session=false >"$state_dir/wrangler.log" 2>&1 &

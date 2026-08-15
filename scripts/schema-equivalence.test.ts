@@ -15,4 +15,19 @@ describe("schema equivalence", () => {
     )).toBe(false);
     expect(() => canonicalSchema([{ results: [{ name: "jobs" }] }])).toThrow("invalid Wrangler schema row");
   });
+
+  test("preserves literal whitespace and compares nullable implicit objects by name", () => {
+    expect(schemasMatch(
+      schema("CREATE TABLE jobs(id TEXT DEFAULT 'a  b')"),
+      schema("CREATE TABLE jobs(id TEXT DEFAULT 'a b')"),
+    )).toBe(false);
+    expect(schemasMatch(
+      [{ results: [{ type: "index", name: "sqlite_autoindex_jobs_1", sql: null }] }],
+      [{ results: [{ type: "index", name: "sqlite_autoindex_jobs_1", sql: null }] }],
+    )).toBe(true);
+    expect(schemasMatch(
+      [{ results: [{ type: "index", name: "sqlite_autoindex_jobs_1", sql: null }] }],
+      [{ results: [{ type: "index", name: "sqlite_autoindex_jobs_2", sql: null }] }],
+    )).toBe(false);
+  });
 });

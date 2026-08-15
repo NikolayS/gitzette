@@ -1,11 +1,43 @@
 type SchemaRow = { type: string; name: string; sql: string | null };
 
-function canonicalSql(sql: string | null): string {
-  return String(sql)
+function collapseSqlWhitespace(sql: string): string {
+  let result = "";
+  let quote = "";
+  let pendingSpace = false;
+  for (let index = 0; index < sql.length; index++) {
+    const char = sql[index];
+    if (quote) {
+      result += char;
+      if (char === quote) {
+        if (sql[index + 1] === quote) result += sql[++index];
+        else quote = "";
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
+      pendingSpace = false;
+      quote = char;
+      result += char;
+    } else if (/\s/.test(char)) {
+      pendingSpace = true;
+    } else if (char === "(" || char === "," || char === ")") {
+      result = result.trimEnd() + char;
+      pendingSpace = false;
+    } else {
+      if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
+      pendingSpace = false;
+      result += char;
+    }
+  }
+  return result.trim();
+}
+
+function canonicalSql(sql: string | null): string | null {
+  if (sql === null) return null;
+  return collapseSqlWhitespace(sql)
     .replace(/CREATE (TABLE|INDEX|TRIGGER|VIEW) IF NOT EXISTS/gi, "CREATE $1")
-    .replace(/^CREATE TABLE "([A-Za-z0-9_]+)"/i, "CREATE TABLE $1")
-    .replace(/\s+/g, " ")
-    .replace(/\s*([(),])\s*/g, "$1")
+    .replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) "([A-Za-z0-9_]+)"/i, "CREATE $1 $2")
     .trim();
 }
 
