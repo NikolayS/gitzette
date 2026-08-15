@@ -5,5 +5,6 @@
     "types": ["bun", "@cloudflare/workers-types"],
     "noEmit": true
   },
-  "include": ["./**/*.ts", "../src/**/*.test.ts", "../src/edition.ts", "../src/image.ts", "../src/week.ts", "../scripts/**/*.ts"]
+  "include": ["./**/*.ts", "../src/**/*.test.ts", "../src/edition.ts", "../src/image.ts", "../src/week.ts", "../scripts/**/*.ts"],
+  "exclude": []
 }

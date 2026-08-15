@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir, stat } from "node:fs/promises";
 import { loadConfig } from "./config";
 import { ControlPlaneClient } from "./control-plane";
 import { GitHubCollector } from "./github";
@@ -6,8 +6,8 @@ import { OpenClawInference } from "./inference";
 import { RunnerEngine } from "./run";
 
 const config = loadConfig();
-await mkdir(config.workDir, { recursive: true, mode: 0o700 });
-await mkdir(`${config.openclawHome}/tmp`, { recursive: true, mode: 0o700 });
+await ensurePrivateDirectory(config.workDir);
+await ensurePrivateDirectory(`${config.openclawHome}/tmp`);
 
 const engine = new RunnerEngine(
   config,
@@ -37,4 +37,16 @@ while (!stopping) {
     ? config.pollSeconds
     : Math.min(15 * 60, config.pollSeconds * 2 ** Math.min(consecutiveFailures, 10));
   if (!stopping) await Bun.sleep(delaySeconds * 1000);
+}
+
+async function ensurePrivateDirectory(path: string): Promise<void> {
+  await mkdir(path, { recursive: true, mode: 0o700 });
+  await chmod(path, 0o700);
+  const info = await stat(path);
+  if (!info.isDirectory() || (info.mode & 0o777) !== 0o700) {
+    throw new Error(`runner private directory has unsafe mode: ${path}`);
+  }
+  if (typeof process.getuid === "function" && info.uid !== process.getuid()) {
+    throw new Error(`runner private directory has wrong owner: ${path}`);
+  }
 }
