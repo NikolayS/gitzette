@@ -16,6 +16,7 @@ export function parseIsoWeekKey(value: string): IsoWeek {
   if (!match) throw new Error("invalid ISO week");
   const year = Number(match[1]);
   const week = Number(match[2]);
+  if (week > isoWeeksInYear(year)) throw new Error("ISO week does not exist");
   const januaryFourth = new Date(Date.UTC(year, 0, 4));
   const weekOneMonday = new Date(januaryFourth);
   weekOneMonday.setUTCDate(januaryFourth.getUTCDate() - ((januaryFourth.getUTCDay() + 6) % 7));
@@ -25,6 +26,13 @@ export function parseIsoWeekKey(value: string): IsoWeek {
   const nextMonday = new Date(monday.getTime() + WEEK_MS);
   const sunday = new Date(nextMonday.getTime() - 24 * 60 * 60 * 1000);
   return { key: value, year, week, monday, nextMonday, sunday };
+}
+
+function isoWeeksInYear(year: number): 52 | 53 {
+  const januaryFirst = new Date(Date.UTC(year, 0, 1));
+  const weekday = januaryFirst.getUTCDay() || 7;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  return weekday === 4 || (weekday === 3 && leapYear) ? 53 : 52;
 }
 
 export function isCompletedIsoWeekKey(value: string, now = new Date()): boolean {

@@ -87,7 +87,7 @@ runnerRoutes.put("/jobs/:id/artifacts/:name", async (c) => {
   if (job.status !== "illustrating" && job.status !== "validating") return c.json({ error: "job is not accepting artifacts" }, 409);
   if (c.req.header("content-type")?.split(";")[0] !== "image/webp") return c.json({ error: "artifact must be image/webp" }, 415);
   const declared = Number(c.req.header("content-length") || 0);
-  if (declared > MAX_ARTIFACT_BYTES) return c.json({ error: "artifact too large" }, 413);
+  if (isArtifactTooLarge(declared)) return c.json({ error: "artifact too large" }, 413);
   const bytes = await c.req.arrayBuffer();
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_ARTIFACT_BYTES) return c.json({ error: "invalid artifact size" }, 413);
   const dimensions = webpDimensions(new Uint8Array(bytes));
@@ -209,4 +209,8 @@ function leaseSeconds(env: Env): number {
 
 export function isForwardStage(current: string, requested: string): boolean {
   return NEXT_STAGE[current] === requested;
+}
+
+export function isArtifactTooLarge(bytes: number): boolean {
+  return bytes > MAX_ARTIFACT_BYTES;
 }

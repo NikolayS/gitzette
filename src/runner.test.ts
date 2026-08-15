@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import { isForwardStage, runnerRoutes } from "./runner";
+import { isArtifactTooLarge, isForwardStage, runnerRoutes } from "./runner";
 
 describe("runner route boundary", () => {
   test("rejects missing and incorrect bearer credentials before database access", async () => {
@@ -8,6 +8,8 @@ describe("runner route boundary", () => {
     const env = { RUNNER_SECRET: "expected" } as never;
     expect((await app.request("/runner/jobs/claim", { method: "POST" }, env)).status).toBe(401);
     expect((await app.request("/runner/jobs/claim", { method: "POST", headers: { authorization: "Bearer wrong" } }, env)).status).toBe(401);
+    expect((await app.request("/runner/jobs/claim", { method: "POST", headers: { authorization: "Bearer anything" } }, {} as never)).status).toBe(401);
+    expect((await app.request("/runner/jobs/claim", { method: "POST", headers: { authorization: "Bearer anything" } }, { RUNNER_SECRET: "" } as never)).status).toBe(401);
   });
 
   test("allows only the explicit forward stage graph", () => {
@@ -17,5 +19,10 @@ describe("runner route boundary", () => {
     for (const transition of [["writing", "collecting"], ["collecting", "validating"], ["validating", "validating"], ["validating", "published"]]) {
       expect(isForwardStage(transition[0], transition[1])).toBe(false);
     }
+  });
+
+  test("enforces the artifact byte boundary exactly", () => {
+    expect(isArtifactTooLarge(5 * 1024 * 1024)).toBe(false);
+    expect(isArtifactTooLarge(5 * 1024 * 1024 + 1)).toBe(true);
   });
 });

@@ -4,5 +4,5 @@
     "types": ["bun", "@cloudflare/workers-types"]
   },
   "include": ["src/**/*.ts", "scripts/**/*.test.ts"],
-  "exclude": []
+  "exclude": ["node_modules"]
 }
