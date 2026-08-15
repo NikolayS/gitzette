@@ -6,6 +6,7 @@ import { RunnerEngine } from "./run";
 import { ensurePrivateDirectory } from "./fs";
 
 const config = loadConfig();
+await ensurePrivateDirectory(config.openclawHome);
 await ensurePrivateDirectory(config.workDir);
 await ensurePrivateDirectory(`${config.openclawHome}/tmp`);
 
