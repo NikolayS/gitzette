@@ -12,7 +12,6 @@ export type RunnerConfig = {
   generatorVersion: string;
   imageMagickBin: string;
   imageMagickCompareBin: string;
-  imageMagickPolicyDir: string;
 };
 
 const FORBIDDEN_AI_ENV = /(?:API|AUTH|ACCESS|OAUTH)[-_]?(?:KEY|TOKEN|SECRET)|(?:KEY|TOKEN|SECRET)[-_]?(?:API|AUTH|ACCESS|OAUTH)|_API_BASE|_BASE_URL|BEDROCK|VERTEX|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_AI|AZURE_OPENAI_ENDPOINT|OPENAI|ANTHROPIC|CLAUDE|GEMINI|REPLICATE|HUGGINGFACE|HF_TOKEN/i;
@@ -49,9 +48,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   const imageMagickBin = env.GITZETTE_IMAGEMAGICK_BIN ?? "/usr/bin/convert";
   const imageMagickCompareBin = env.GITZETTE_IMAGEMAGICK_COMPARE_BIN ?? "/usr/bin/compare";
-  const imageMagickPolicyDir = env.GITZETTE_IMAGEMAGICK_POLICY_DIR ?? "/opt/gitzette-runner/runner/imagemagick";
   if (!existsSync(imageMagickBin) || !existsSync(imageMagickCompareBin)) throw new Error("ImageMagick runtime is missing");
-  if (!existsSync(imageMagickPolicyDir)) throw new Error("ImageMagick policy directory is missing");
 
   return {
     controlPlaneOrigin: origin.origin,
@@ -65,7 +62,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     generatorVersion: required(env, "GITZETTE_GENERATOR_VERSION"),
     imageMagickBin,
     imageMagickCompareBin,
-    imageMagickPolicyDir,
   };
 }
 

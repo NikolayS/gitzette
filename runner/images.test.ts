@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { perceptualDistance, postProcessImage, sha256, validateVisual, type ImageRuntime } from "./images";
+import { imageEnv, perceptualDistance, postProcessImage, sha256, validateVisual, type ImageRuntime } from "./images";
 
 const directories: string[] = [];
 afterEach(async () => Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -13,6 +13,20 @@ describe("isolated image pipeline", () => {
     const output = await new Response(child.stdout).text();
     expect(await child.exited).toBe(0);
     expect(output).toMatch(/ImageMagick (6|7)\./);
+  });
+
+  test("enforces the shipped coder policy in the real ImageMagick process", async () => {
+    const directory = await workspace();
+    const input = join(directory, "hostile.svg");
+    const output = join(directory, "forbidden.png");
+    await writeFile(input, '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>');
+    const actual = runtime();
+    const child = actual.spawn([actual.convertBin, `svg:${input}`, `png:${output}`], {
+      stdin: "ignore", stdout: "ignore", stderr: "pipe", env: imageEnv(actual),
+    });
+    const stderr = new Response(child.stderr).text();
+    expect(await child.exited).not.toBe(0);
+    expect((await stderr).toLowerCase()).toMatch(/policy|not authorized/);
   });
 
   test("normalizes PNG to bounded transparent WebP and validates visual metrics", async () => {
@@ -84,5 +98,5 @@ async function command(argv: string[]): Promise<void> {
 }
 
 function runtime(spawn: typeof Bun.spawn = Bun.spawn): ImageRuntime {
-  return { spawn, convertBin: "/usr/bin/convert", compareBin: "/usr/bin/compare", policyDir: `${import.meta.dir}/imagemagick` };
+  return { spawn, convertBin: "/usr/bin/convert", compareBin: "/usr/bin/compare" };
 }

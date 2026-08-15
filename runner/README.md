@@ -34,6 +34,7 @@ Provisioning must verify the credential boundary before enabling the service:
 ```bash
 install -d -o gitzette-runner -g gitzette-runner -m 0700 /var/lib/gitzette-runner
 install -o root -g root -m 0600 /dev/null /etc/gitzette-runner/environment
+install -o root -g root -m 0644 runner/imagemagick/policy.xml /etc/ImageMagick-6/policy.xml
 stat -c '%U:%G %a %n' /var/lib/gitzette-runner /etc/gitzette-runner/environment
 ```
 
@@ -43,6 +44,10 @@ a person's primary ChatGPT identity. Account-policy approval and a tested
 revocation response are production activation gates; if OAuth is revoked or
 limited, generation intentionally fails closed and operators disable the runner
 while existing editions remain available.
+
+The ImageMagick major version and policy path are pinned by provisioning. The
+integration suite bind-mounts the shipped policy onto the real ImageMagick 6
+configuration path and proves that a forbidden SVG coder invocation fails.
 
 `ROLLING_7D_USER_GENERATION_LIMIT` is per requester and
 `ROLLING_7D_GLOBAL_GENERATION_LIMIT` protects the shared OAuth identity across

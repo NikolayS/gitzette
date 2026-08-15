@@ -95,6 +95,6 @@ function config(directory: string): RunnerConfig {
     controlPlaneOrigin: "https://gitzette.online", runnerSecret: "x", githubToken: "x",
     openclawBin: "/usr/local/bin/openclaw", openclawHome: directory, pollSeconds: 10, heartbeatSeconds: 60,
     workDir: directory, generatorVersion: "test", imageMagickBin: "/usr/bin/convert",
-    imageMagickCompareBin: "/usr/bin/compare", imageMagickPolicyDir: `${import.meta.dir}/imagemagick`,
+    imageMagickCompareBin: "/usr/bin/compare",
   };
 }

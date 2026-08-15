@@ -6,7 +6,6 @@ const base = {
   GITZETTE_RUNNER_SECRET: "runner-secret",
   GITZETTE_GITHUB_TOKEN: "github-token",
   GITZETTE_GENERATOR_VERSION: "test-commit",
-  GITZETTE_IMAGEMAGICK_POLICY_DIR: `${import.meta.dir}/imagemagick`,
 };
 
 describe("runner configuration boundary", () => {

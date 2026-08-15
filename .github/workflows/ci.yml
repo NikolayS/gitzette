@@ -14,7 +14,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install image validation runtime
-        run: sudo apt-get update && sudo apt-get install -y imagemagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          sudo install -o root -g root -m 0644 runner/imagemagick/policy.xml /etc/ImageMagick-6/policy.xml
       - run: bun install --frozen-lockfile
       - name: Verify systemd Bun invocation flag
         run: bun --no-env-file --version
@@ -22,7 +25,8 @@ jobs:
         run: >-
           jq -e '.required_status_checks.strict == true and
           (.required_status_checks.contexts | sort) == ["samorev","samorev-gate","typecheck"] and
-          .enforce_admins == true and .required_conversation_resolution == true'
+          .enforce_admins == true and .required_conversation_resolution == true and
+          .allow_force_pushes == false and .allow_deletions == false'
           config/main-branch-protection.json
       - run: bun run test:all
       # High/critical advisories block merges. Lower severities stay visible in

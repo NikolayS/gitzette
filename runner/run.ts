@@ -82,7 +82,6 @@ export class RunnerEngine {
       spawn: Bun.spawn,
       convertBin: this.config.imageMagickBin,
       compareBin: this.config.imageMagickCompareBin,
-      policyDir: this.config.imageMagickPolicyDir,
     };
     for (const key of ["image-1.webp", "image-2.webp"] as const) {
       const story = edition.stories.find((candidate) => candidate.illustrationKey === key);

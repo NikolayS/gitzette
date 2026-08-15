@@ -41,6 +41,5 @@ function config(directory: string): RunnerConfig {
     generatorVersion: "test",
     imageMagickBin: "/usr/bin/convert",
     imageMagickCompareBin: "/usr/bin/compare",
-    imageMagickPolicyDir: `${import.meta.dir}/imagemagick`,
   };
 }

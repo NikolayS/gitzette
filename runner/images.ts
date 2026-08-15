@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { hasPublicationDimensions, webpDimensions } from "../src/image";
 
 type SpawnFn = typeof Bun.spawn;
-export type ImageRuntime = { spawn: SpawnFn; convertBin: string; compareBin: string; policyDir: string };
+export type ImageRuntime = { spawn: SpawnFn; convertBin: string; compareBin: string };
 
 export async function postProcessImage(input: string, output: string, runtime = defaultRuntime()): Promise<Uint8Array> {
   const handle = await open(input, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -76,10 +76,9 @@ export function defaultRuntime(): ImageRuntime {
     spawn: Bun.spawn,
     convertBin: process.env.GITZETTE_IMAGEMAGICK_BIN ?? "/usr/bin/convert",
     compareBin: process.env.GITZETTE_IMAGEMAGICK_COMPARE_BIN ?? "/usr/bin/compare",
-    policyDir: process.env.GITZETTE_IMAGEMAGICK_POLICY_DIR ?? `${import.meta.dir}/imagemagick`,
   };
 }
 
-function imageEnv(runtime: ImageRuntime): Record<string, string> {
-  return { PATH: "/usr/bin:/bin", MAGICK_CONFIGURE_PATH: runtime.policyDir };
+export function imageEnv(_runtime: ImageRuntime): Record<string, string> {
+  return { PATH: "/usr/bin:/bin" };
 }
