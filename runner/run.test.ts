@@ -59,6 +59,7 @@ describe("runner engine", () => {
     expect(result, publisher.failure).toBe("processed");
     expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp"]);
     expect(publisher.published?.images).toHaveLength(2);
+    expect(publisher.published?.promptVersion).toBe("gitzette-editor-v1");
     expect(publisher.failure).toBeUndefined();
   });
 
@@ -74,5 +75,10 @@ describe("runner engine", () => {
 });
 
 function config(directory: string): RunnerConfig {
-  return { controlPlaneOrigin: "https://gitzette.online", runnerSecret: "x", githubToken: "x", openclawBin: "/usr/local/bin/openclaw", openclawHome: directory, pollSeconds: 10, workDir: directory, generatorVersion: "test" };
+  return {
+    controlPlaneOrigin: "https://gitzette.online", runnerSecret: "x", githubToken: "x",
+    openclawBin: "/usr/local/bin/openclaw", openclawHome: directory, pollSeconds: 10,
+    workDir: directory, generatorVersion: "test", imageMagickBin: "/usr/bin/convert",
+    imageMagickCompareBin: "/usr/bin/compare", imageMagickPolicyDir: `${import.meta.dir}/imagemagick`,
+  };
 }

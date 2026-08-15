@@ -53,3 +53,4 @@ for (const row of rows) {
 }
 
 console.log("Migration complete.");
+export {};

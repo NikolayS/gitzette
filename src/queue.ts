@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { getUser } from "./auth";
 import type { Env } from "./index";
+import { isCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
-const WEEK_KEY = /^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/;
 const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"];
 const MAX_GENERATE_BODY_BYTES = 2048;
 
@@ -23,17 +23,7 @@ type JobRow = {
 export const queueRoutes = new Hono<{ Bindings: Env }>();
 
 function defaultCompletedWeek(now = new Date()): string {
-  const utc = new Date(now.getTime() - 12 * 60 * 60 * 1000);
-  const day = (utc.getUTCDay() + 6) % 7;
-  const monday = new Date(Date.UTC(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate() - day));
-  monday.setUTCDate(monday.getUTCDate() - 7);
-  const thursday = new Date(monday);
-  thursday.setUTCDate(monday.getUTCDate() + 3);
-  const jan4 = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4));
-  const week1 = new Date(jan4);
-  week1.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7));
-  const week = Math.floor((monday.getTime() - week1.getTime()) / 604800000) + 1;
-  return `${thursday.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+  return previousCompletedIsoWeekKey(now);
 }
 
 function publicJob(row: JobRow) {
@@ -63,7 +53,7 @@ queueRoutes.post("/generate", async (c) => {
   const unknownFields = Object.keys(body).filter((key) => key !== "weekKey" && key !== "forUsername");
   if (unknownFields.length > 0) return c.json({ error: `unknown request field: ${unknownFields[0]}` }, 400);
   const weekKey = body.weekKey === undefined ? defaultCompletedWeek() : body.weekKey;
-  if (typeof weekKey !== "string" || !WEEK_KEY.test(weekKey)) return c.json({ error: "invalid weekKey" }, 400);
+  if (typeof weekKey !== "string" || !isCompletedIsoWeekKey(weekKey)) return c.json({ error: "invalid or incomplete weekKey" }, 400);
 
   let target = requester;
   if (body.forUsername !== undefined) {

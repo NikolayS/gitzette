@@ -18,7 +18,6 @@ bucket_name = "gitzette-dispatches"
 
 [vars]
 WEEKLY_REGEN_LIMIT = "3"
-MONTHLY_LLM_BUDGET_USD = "50"
 NEWSPAPERIFY_URL = "https://test-callbot.samo.team/newspaperify"
 
 # secrets (set via: wrangler secret put GITHUB_CLIENT_SECRET etc.)

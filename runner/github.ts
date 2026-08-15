@@ -1,5 +1,6 @@
 import type { EvidenceBundle, EvidenceItem } from "../src/edition";
 import type { Collector } from "./types";
+import { parseIsoWeekKey } from "../src/week";
 
 type RequestFn = typeof fetch;
 type SearchItem = {
@@ -13,7 +14,6 @@ type SearchItem = {
 };
 
 const USERNAME = /^(?!-)[A-Za-z0-9-]{1,39}(?<!-)$/;
-const WEEK = /^(20\d{2})-W(0[1-9]|[1-4]\d|5[0-3])$/;
 
 export class GitHubCollector implements Collector {
   constructor(private readonly token: string, private readonly request: RequestFn = fetch) {}
@@ -175,18 +175,7 @@ function validRepo(value: string): boolean {
 }
 
 export function isoWeek(weekKey: string): { from: string; toExclusive: string; toInclusive: string } {
-  const match = WEEK.exec(weekKey);
-  if (!match) throw new Error("invalid ISO week");
-  const year = Number(match[1]);
-  const week = Number(match[2]);
-  const januaryFourth = new Date(Date.UTC(year, 0, 4));
-  const monday = new Date(januaryFourth);
-  monday.setUTCDate(januaryFourth.getUTCDate() - ((januaryFourth.getUTCDay() + 6) % 7) + (week - 1) * 7);
-  const nextMonday = new Date(monday);
-  nextMonday.setUTCDate(monday.getUTCDate() + 7);
-  if (monday.getUTCFullYear() > year + 1 || nextMonday <= monday) throw new Error("invalid ISO week");
-  const sunday = new Date(nextMonday);
-  sunday.setUTCDate(nextMonday.getUTCDate() - 1);
+  const { monday, nextMonday, sunday } = parseIsoWeekKey(weekKey);
   const date = (value: Date) => value.toISOString().slice(0, 10);
   return { from: date(monday), toExclusive: date(nextMonday), toInclusive: date(sunday) };
 }

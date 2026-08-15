@@ -6,7 +6,7 @@ import { inferenceEnv } from "./config";
 
 type SpawnFn = typeof Bun.spawn;
 
-const EDITOR_PROMPT_VERSION = "gitzette-editor-v1";
+export const EDITOR_PROMPT_VERSION = "gitzette-editor-v1";
 
 export class OpenClawInference implements Inference {
   constructor(private readonly config: RunnerConfig, private readonly spawn: SpawnFn = Bun.spawn) {}
@@ -124,5 +124,3 @@ function exact(value: unknown, field: string, keys: string[]): asserts value is 
 function boundedString(value: unknown, field: string, max: number): asserts value is string {
   if (typeof value !== "string" || !value.trim() || value.length > max) throw new Error(`invalid ${field}`);
 }
-
-export { EDITOR_PROMPT_VERSION };

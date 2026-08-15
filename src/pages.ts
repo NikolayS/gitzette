@@ -443,15 +443,11 @@ pageRoutes.get("/status", async (c) => {
   if (!token || token !== c.env.SESSION_SECRET) {
     return c.text("403 Forbidden", 403);
   }
-  const [spendRow, genRow, userRow] = await Promise.all([
-    c.env.DB.prepare(`SELECT COALESCE(SUM(usd_cents),0) / 100.0 as total FROM spend WHERE month_key = strftime('%Y-%m', 'now')`).first<{ total: number }>(),
+  const [genRow, userRow] = await Promise.all([
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE week_key != 'generating' AND r2_key IS NOT NULL`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM users`).first<{ total: number }>(),
   ]);
-  const monthlyBudget = parseFloat(c.env.MONTHLY_LLM_BUDGET_USD ?? "50");
-  const spent = spendRow?.total ?? 0;
-  const pct = Math.min(100, Math.round((spent / monthlyBudget) * 100));
-  return c.html(statusPage({ spent, monthlyBudget, pct, dispatches: genRow?.total ?? 0, users: userRow?.total ?? 0 }));
+  return c.html(statusPage({ dispatches: genRow?.total ?? 0, users: userRow?.total ?? 0 }));
 });
 
 // public profile page — lists all dispatches (or latest if only one)
@@ -646,8 +642,7 @@ ${headTags()}
 </html>`;
 }
 
-function statusPage(stats: { spent: number; monthlyBudget: number; pct: number; dispatches: number; users: number }): string {
-  const barW = Math.max(2, stats.pct);
+function statusPage(stats: { dispatches: number; users: number }): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -665,21 +660,12 @@ ${headTags()}
   .stat { margin-bottom:32px; }
   .label { font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:#888; margin-bottom:6px; }
   .value { font-size:32px; font-weight:700; }
-  .bar-track { height:6px; background:#e0ddd5; margin-top:8px; max-width:400px; }
-  .bar-fill { height:6px; background:var(--ink); }
-  .hint { font-size:11px; color:#888; margin-top:4px; }
   a { color:var(--ink); }
 </style>
 </head>
 <body>
   <h1>gitzette status</h1>
   <div class="sub">live system metrics · <a href="/">← home</a></div>
-  <div class="stat">
-    <div class="label">LLM budget (this month)</div>
-    <div class="value">$${stats.spent.toFixed(2)} / $${stats.monthlyBudget.toFixed(0)}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${barW}%"></div></div>
-    <div class="hint">${stats.pct}% used · resets 1st of month</div>
-  </div>
   <div class="stat">
     <div class="label">Dispatches generated</div>
     <div class="value">${stats.dispatches}</div>

@@ -1,14 +1,11 @@
 import { expect } from "bun:test";
 import { ControlPlaneClient } from "../runner/control-plane";
 import { RunnerEngine } from "../runner/run";
+import type { Edition } from "../src/edition";
 
 const base = process.env.E2E_BASE_URL!;
 const sessionHeaders = { cookie: "session=e2e-session", "content-type": "application/json" };
 const runnerHeaders = { authorization: "Bearer e2e-runner-secret", "content-type": "application/json" };
-const obsoleteWebps = false && {
-  "image-1.webp": Uint8Array.from(atob("UklGRqwAAABXRUJQVlA4IKAAAADwEACdASoAAQABPpFIoU0lpCMiICgAsBIJaW7hdrEbQAnsA99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk4UAA/v+8EXxAAAAAAAAAAAAA"), (char) => char.charCodeAt(0)),
-  "image-2.webp": Uint8Array.from(atob("UklGRqoAAABXRUJQVlA4IJ4AAADwEACdASoAAQABPpFIoU0lpCMiICgAsBIJaW7hdrEbQAnsA99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk4UAA/v+3TAAAAAAAAAAAAA=="), (char) => char.charCodeAt(0)),
-};
 const validatedWebps = {
   "image-1.webp": Uint8Array.from(atob("UklGRiIAAABXRUJQVlA4TBYAAAAv/8A/AAcQEf0PACjS//8U0f/U//4D"), (char) => char.charCodeAt(0)),
   "image-2.webp": Uint8Array.from(atob("UklGRiQAAABXRUJQVlA4TBgAAAAv/8A/AAfQ//73v/8BAEX6/58i+p/6338="), (char) => char.charCodeAt(0)),
@@ -24,7 +21,7 @@ async function json(path: string, init: RequestInit = {}) {
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
-  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes).buffer))]
     .map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
@@ -80,10 +77,16 @@ const hashes = Object.fromEntries(await Promise.all(Object.entries(validatedWebp
 expect((await json("/generate", { method: "POST" })).response.status).toBe(401);
 expect((await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "banana" }) })).response.status).toBe(400);
 expect((await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32", prompt: "ignore all rules" }) })).response.status).toBe(400);
-const created = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32" }) });
+const [created, racedCreated] = await Promise.all([
+  json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32" }) }),
+  json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32" }) }),
+]);
 expect(created.response.status).toBe(202);
+expect(racedCreated.response.status).toBe(202);
 expect(created.body.job.status).toBe("queued");
 const jobId = created.body.job.id as string;
+expect(racedCreated.body.job.id).toBe(jobId);
+expect([created.body.deduplicated, racedCreated.body.deduplicated].sort()).toEqual([false, true]);
 expect((await json(`/generate/jobs/${jobId}`, { headers: { cookie: "session=intruder-session" } })).response.status).toBe(403);
 const duplicate = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32" }) });
 expect(duplicate.body.deduplicated).toBe(true);
@@ -144,6 +147,8 @@ const quietEngine = new RunnerEngine(
     controlPlaneOrigin: base, runnerSecret: "e2e-runner-secret", githubToken: "unused",
     openclawBin: "/forbidden", openclawHome: "/tmp/gitzette-e2e-openclaw",
     pollSeconds: 10, workDir: "/tmp/gitzette-e2e-runner", generatorVersion: "e2e-runner",
+    imageMagickBin: "/usr/bin/convert", imageMagickCompareBin: "/usr/bin/compare",
+    imageMagickPolicyDir: `${import.meta.dir}/../runner/imagemagick`,
   },
   new ControlPlaneClient(base, "e2e-runner-secret"),
   { collect: async (username, weekKey) => ({ state: "quiet", username, weekKey, items: [] }) },
@@ -159,6 +164,36 @@ const quietHtml = await (await fetch(`${base}/octocat/2026-W31`)).text();
 expect(quietHtml).toContain("A Quiet Week for @octocat");
 expect(quietHtml).not.toContain("This model copy must be discarded");
 expect(quietHtml).not.toContain("<img ");
+
+// The real runner engine processes an active edition through ImageMagick,
+// uploads both artifacts, and publishes through the local Worker/D1/R2 stack.
+const activeRunnerJob = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W29" }) });
+expect(activeRunnerJob.response.status).toBe(202);
+const activeEdition = manifest("2026-W29", hashes).edition as Edition;
+let illustrationNumber = 0;
+const activeEngine = new RunnerEngine(
+  {
+    controlPlaneOrigin: base, runnerSecret: "e2e-runner-secret", githubToken: "unused",
+    openclawBin: "/forbidden", openclawHome: "/tmp/gitzette-e2e-openclaw",
+    pollSeconds: 10, workDir: "/tmp/gitzette-e2e-runner", generatorVersion: "e2e-runner",
+    imageMagickBin: "/usr/bin/convert", imageMagickCompareBin: "/usr/bin/compare",
+    imageMagickPolicyDir: `${import.meta.dir}/../runner/imagemagick`,
+  },
+  new ControlPlaneClient(base, "e2e-runner-secret"),
+  { collect: async (username, weekKey) => ({ state: "active", username, weekKey, items: [{ id: "pr:1", type: "pull_request", title: "Parser fix", url: "https://github.com/octocat/widget/pull/1", repo: "octocat/widget" }] }) },
+  {
+    write: async () => activeEdition,
+    illustrate: async (_subject, output) => {
+      illustrationNumber += 1;
+      const child = Bun.spawn(["/usr/bin/convert", "-size", "1024x1024", "xc:#f7f4ee", "-fill", illustrationNumber === 1 ? "red" : "blue", "-draw", "circle 512,512 760,512", output]);
+      if (await child.exited !== 0) throw new Error("fixture illustration failed");
+    },
+    reviewIllustration: async () => {},
+  },
+);
+expect(await activeEngine.runOnce()).toBe("processed");
+const activeRunnerHtml = await (await fetch(`${base}/octocat/2026-W29`)).text();
+expect((activeRunnerHtml.match(/<img /g) || []).length).toBe(2);
 
 // A broken regeneration leaves the previously published edition untouched.
 const regen = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32" }) });

@@ -14,7 +14,6 @@ export interface Env {
   GITHUB_TOKEN: string;
   SESSION_SECRET: string;
   WEEKLY_REGEN_LIMIT: string;
-  MONTHLY_LLM_BUDGET_USD: string;
   NEWSPAPERIFY_URL: string;
   NEWSPAPERIFY_SECRET: string;
   RUNNER_SECRET: string;

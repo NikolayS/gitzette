@@ -38,5 +38,8 @@ function config(directory: string): RunnerConfig {
     pollSeconds: 10,
     workDir: directory,
     generatorVersion: "test",
+    imageMagickBin: "/usr/bin/convert",
+    imageMagickCompareBin: "/usr/bin/compare",
+    imageMagickPolicyDir: `${import.meta.dir}/imagemagick`,
   };
 }

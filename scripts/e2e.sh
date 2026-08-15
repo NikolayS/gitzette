@@ -2,9 +2,7 @@
 set -euo pipefail
 
 state_dir="$(mktemp -d)"
-# Do not use OpenClaw's 18789/18790 gateway ports. Pick a high, per-run port
-# so parallel CI jobs and local services cannot turn this into a false E2E.
-port=$((38000 + RANDOM % 20000))
+port=""
 server_pid=""
 
 cleanup() {
@@ -12,7 +10,7 @@ cleanup() {
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
   fi
-  rm -r "$state_dir"
+  rm -rf "$state_dir"
 }
 trap cleanup EXIT
 
@@ -20,24 +18,37 @@ bunx wrangler d1 migrations apply gitzette-db --local --persist-to "$state_dir" 
 bunx wrangler d1 execute gitzette-db --local --persist-to "$state_dir" --command \
   "INSERT INTO users(id,username,avatar_url) VALUES('1','octocat',''),('2','intruder',''); INSERT INTO sessions(token,user_id,expires_at) VALUES('e2e-session','1',unixepoch()+3600),('intruder-session','2',unixepoch()+3600);" >/dev/null
 
-bunx wrangler dev --local --port "$port" --persist-to "$state_dir" \
-  --var RUNNER_SECRET:e2e-runner-secret \
-  --var SESSION_SECRET:e2e-session-secret \
-  --show-interactive-dev-session=false >"$state_dir/wrangler.log" 2>&1 &
-server_pid=$!
-
 ready=false
-for _ in $(seq 1 60); do
-  response="$(curl --silent --fail "http://127.0.0.1:$port/" || true)"
-  if [[ "$response" == *gitzette* ]]; then
-    ready=true
-    break
+for attempt in $(seq 1 5); do
+  # Ask the kernel for a free loopback port, then retry if another process wins
+  # the small close-to-bind race before Wrangler starts.
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+  bunx wrangler dev --local --port "$port" --persist-to "$state_dir" \
+    --var RUNNER_SECRET:e2e-runner-secret \
+    --var SESSION_SECRET:e2e-session-secret \
+    --var WEEKLY_REGEN_LIMIT:4 \
+    --show-interactive-dev-session=false >"$state_dir/wrangler.log" 2>&1 &
+  server_pid=$!
+
+  for _ in $(seq 1 60); do
+    response="$(curl --silent --fail "http://127.0.0.1:$port/" || true)"
+    if [[ "$response" == *gitzette* ]]; then
+      ready=true
+      break 2
+    fi
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+      wait "$server_pid" 2>/dev/null || true
+      server_pid=""
+      break
+    fi
+    sleep 0.25
+  done
+
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+    server_pid=""
   fi
-  if ! kill -0 "$server_pid" 2>/dev/null; then
-    cat "$state_dir/wrangler.log"
-    exit 1
-  fi
-  sleep 0.25
 done
 
 if [[ "$ready" != true ]]; then

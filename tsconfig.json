@@ -16,8 +16,8 @@
     "src/image.ts",
     "src/index.ts",
     "src/pages.ts",
-    "src/quota.ts",
     "src/queue.ts",
-    "src/runner.ts"
+    "src/runner.ts",
+    "src/week.ts"
   ]
 }

@@ -24,6 +24,8 @@ jobs:
       pull-requests: read
       issues: read
       id-token: write
+    env:
+      CLAUDE_REVIEW_ENABLED: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
 
     steps:
       - name: Checkout repository
@@ -32,6 +34,7 @@ jobs:
           fetch-depth: 1
 
       - name: Run Claude Code Review
+        if: env.CLAUDE_REVIEW_ENABLED == 'true'
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
@@ -42,3 +45,6 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
+      - name: Explain disabled optional review
+        if: env.CLAUDE_REVIEW_ENABLED != 'true'
+        run: echo "Claude review skipped because CLAUDE_CODE_OAUTH_TOKEN is not configured; Tanya301/samorev is the required review gate."

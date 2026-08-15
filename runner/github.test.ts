@@ -5,6 +5,7 @@ describe("canonical GitHub collector", () => {
   test("computes exact ISO-week boundaries", () => {
     expect(isoWeek("2026-W01")).toEqual({ from: "2025-12-29", toExclusive: "2026-01-05", toInclusive: "2026-01-04" });
     expect(isoWeek("2026-W32")).toEqual({ from: "2026-08-03", toExclusive: "2026-08-10", toInclusive: "2026-08-09" });
+    expect(() => isoWeek("2027-W53")).toThrow("does not exist");
   });
 
   test("uses only api.github.com and freezes returned evidence", async () => {

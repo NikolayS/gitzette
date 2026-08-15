@@ -6,6 +6,7 @@ const base = {
   GITZETTE_RUNNER_SECRET: "runner-secret",
   GITZETTE_GITHUB_TOKEN: "github-token",
   GITZETTE_GENERATOR_VERSION: "test-commit",
+  GITZETTE_IMAGEMAGICK_POLICY_DIR: `${import.meta.dir}/imagemagick`,
 };
 
 describe("runner configuration boundary", () => {
@@ -21,6 +22,9 @@ describe("runner configuration boundary", () => {
 
   test("rejects AI API keys and non-origin control-plane values", () => {
     expect(() => loadConfig({ ...base, OPENAI_API_KEY: "forbidden" })).toThrow("OAuth-only");
+    expect(() => loadConfig({ ...base, ANTHROPIC_AUTH_TOKEN: "forbidden" })).toThrow("OAuth-only");
+    expect(() => loadConfig({ ...base, GOOGLE_APPLICATION_CREDENTIALS: "/tmp/forbidden.json" })).toThrow("OAuth-only");
+    expect(() => loadConfig({ ...base, OPENAI_BASE_URL: "https://proxy.example" })).toThrow("OAuth-only");
     expect(() => loadConfig({ ...base, GITZETTE_CONTROL_PLANE_ORIGIN: "https://gitzette.online/runner" })).toThrow("origin only");
     expect(() => loadConfig({ ...base, GITZETTE_CONTROL_PLANE_ORIGIN: "http://evil.example" })).toThrow("HTTPS");
   });

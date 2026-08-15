@@ -10,7 +10,8 @@ The AI subprocesses receive a deliberately rebuilt environment containing only
 OpenClaw's isolated state paths. They do not receive the GitHub token, runner
 secret, AI API keys, TARS state, messaging configuration, or a tool-capable
 agent session. The OpenClaw config denies every agent tool; text and images use
-the direct `openclaw infer` capability surface.
+the direct `openclaw infer` capability surface. It intentionally contains no
+Gateway block, and the systemd service never starts a Gateway process.
 
 Production layout:
 

@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 export type RunnerConfig = {
   controlPlaneOrigin: string;
   runnerSecret: string;
@@ -7,15 +9,12 @@ export type RunnerConfig = {
   pollSeconds: number;
   workDir: string;
   generatorVersion: string;
+  imageMagickBin: string;
+  imageMagickCompareBin: string;
+  imageMagickPolicyDir: string;
 };
 
-const FORBIDDEN_AI_KEYS = [
-  "OPENAI_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "OPENROUTER_API_KEY",
-  "GOOGLE_AI_KEY",
-  "GEMINI_API_KEY",
-] as const;
+const FORBIDDEN_AI_ENV = /(?:API_KEY|AUTH_TOKEN|_BASE_URL|_API_BASE|GOOGLE_APPLICATION_CREDENTIALS|AZURE_OPENAI_ENDPOINT)$/;
 
 function required(env: Record<string, string | undefined>, name: string): string {
   const value = env[name]?.trim();
@@ -24,8 +23,8 @@ function required(env: Record<string, string | undefined>, name: string): string
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): RunnerConfig {
-  for (const key of FORBIDDEN_AI_KEYS) {
-    if (env[key]) throw new Error(`${key} is forbidden; GitZette AI auth must be OAuth-only`);
+  for (const [key, value] of Object.entries(env)) {
+    if (value && FORBIDDEN_AI_ENV.test(key)) throw new Error(`${key} is forbidden; GitZette AI auth must be OAuth-only`);
   }
 
   const rawOrigin = required(env, "GITZETTE_CONTROL_PLANE_ORIGIN");
@@ -41,6 +40,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const pollSeconds = Number(env.GITZETTE_POLL_SECONDS ?? "10");
   if (!Number.isInteger(pollSeconds) || pollSeconds < 2 || pollSeconds > 300) throw new Error("invalid GITZETTE_POLL_SECONDS");
 
+  const imageMagickBin = env.GITZETTE_IMAGEMAGICK_BIN ?? "/usr/bin/convert";
+  const imageMagickCompareBin = env.GITZETTE_IMAGEMAGICK_COMPARE_BIN ?? "/usr/bin/compare";
+  const imageMagickPolicyDir = env.GITZETTE_IMAGEMAGICK_POLICY_DIR ?? "/opt/gitzette-runner/runner/imagemagick";
+  if (!existsSync(imageMagickBin) || !existsSync(imageMagickCompareBin)) throw new Error("ImageMagick runtime is missing");
+  if (!existsSync(imageMagickPolicyDir)) throw new Error("ImageMagick policy directory is missing");
+
   return {
     controlPlaneOrigin: origin.origin,
     runnerSecret: required(env, "GITZETTE_RUNNER_SECRET"),
@@ -50,6 +55,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     pollSeconds,
     workDir: env.GITZETTE_WORK_DIR ?? "/var/lib/gitzette-runner/work",
     generatorVersion: required(env, "GITZETTE_GENERATOR_VERSION"),
+    imageMagickBin,
+    imageMagickCompareBin,
+    imageMagickPolicyDir,
   };
 }
 

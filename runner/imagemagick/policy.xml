@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policymap>
+<policymap>
+  <policy domain="delegate" rights="none" pattern="*" />
+  <policy domain="coder" rights="none" pattern="*" />
+  <policy domain="coder" rights="read|write" pattern="{PNG,WEBP}" />
+  <policy domain="path" rights="none" pattern="@*" />
+  <policy domain="resource" name="memory" value="256MiB" />
+  <policy domain="resource" name="map" value="512MiB" />
+  <policy domain="resource" name="disk" value="1GiB" />
+  <policy domain="resource" name="time" value="120" />
+</policymap>

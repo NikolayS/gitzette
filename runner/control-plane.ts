@@ -1,10 +1,10 @@
 import type { ClaimedJob, Publisher, RunnerStage } from "./types";
 import type { PublicationManifest } from "../src/edition";
+import { isCompletedIsoWeekKey } from "../src/week";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LEASE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USERNAME = /^(?!-)[A-Za-z0-9-]{1,39}(?<!-)$/;
-const WEEK = /^20\d{2}-W(?:0[1-9]|[1-4]\d|5[0-3])$/;
 
 type RequestFn = typeof fetch;
 
@@ -80,7 +80,7 @@ function parseClaim(value: Record<string, unknown>): ClaimedJob {
   };
   if (typeof job.id !== "string" || !UUID.test(job.id)) throw new Error("invalid job id");
   if (typeof job.username !== "string" || !USERNAME.test(job.username)) throw new Error("invalid job username");
-  if (typeof job.weekKey !== "string" || !WEEK.test(job.weekKey)) throw new Error("invalid job week");
+  if (typeof job.weekKey !== "string" || !isCompletedIsoWeekKey(job.weekKey)) throw new Error("invalid job week");
   if (typeof job.leaseToken !== "string" || !LEASE.test(job.leaseToken)) throw new Error("invalid lease token");
   if (!Number.isInteger(job.leaseExpiresAt) || !Number.isInteger(job.attempt)) throw new Error("invalid job lease metadata");
   return job as ClaimedJob;

@@ -2,6 +2,19 @@
 
 This is the source of truth for the queued generation pipeline.
 
+## Design rationale and retired constraints
+
+These choices are safety and reliability constraints, not incidental implementation details:
+
+- Generation used to run synchronously inside the public Worker. That made long AI calls vulnerable to Worker lifetime limits, so the synchronous path is retired in favor of durable D1 jobs, leases, and an outbound-only runner.
+- The previous OpenRouter/Opus path is retired because production generation must use the dedicated ChatGPT OAuth identity. Provider fallbacks would silently cross the credential boundary.
+- "30 recent repositories" is not a valid historical collector: repository recency today does not prove activity in a requested past week. The canonical collector instead freezes events whose timestamps fall inside the exact ISO week.
+- `gpt-image-2` OAuth output is normalized locally because transparent output is not guaranteed. The runner removes the background, validates the result, and stores WebP at quality 82; publishing the raw model file is forbidden.
+- Illustrations are story-level editorial art, not one logo per repository. Active editions need at least two perceptually distinct images so a low-quality or duplicated image cannot satisfy the visual contract.
+- The 1024-pixel generation target preserves enough detail for cleanup and responsive rendering. Publication still enforces bounded dimensions and bytes.
+
+Do not "simplify" these constraints without replacing the failure mode they address and updating this rationale.
+
 ## Trust boundary
 
 - Cloudflare is the public control plane: GitHub login, request quota, D1 queue/status, validation, R2, and serving.

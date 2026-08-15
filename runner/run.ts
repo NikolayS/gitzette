@@ -56,17 +56,23 @@ export class RunnerEngine {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const images: PublicationManifest["images"] = [];
     const hashes = new Set<string>();
+    const imageRuntime = {
+      spawn: Bun.spawn,
+      convertBin: this.config.imageMagickBin,
+      compareBin: this.config.imageMagickCompareBin,
+      policyDir: this.config.imageMagickPolicyDir,
+    };
     for (const key of ["image-1.webp", "image-2.webp"] as const) {
       const story = edition.stories.find((candidate) => candidate.illustrationKey === key);
       if (!story) throw new Error(`edition omitted ${key}`);
       const input = join(directory, `${key}.png`);
       const output = join(directory, key);
       await this.inference.illustrate(`${story.headline}. ${story.deck}`, input);
-      const bytes = await postProcessImage(input, output);
-      await validateVisual(output);
+      const bytes = await postProcessImage(input, output, imageRuntime);
+      await validateVisual(output, imageRuntime);
       await this.inference.reviewIllustration(`${story.headline}. ${story.deck}`, output);
       if (images.length > 0) {
-        const distance = await perceptualDistance(join(directory, images[0].key), output);
+        const distance = await perceptualDistance(join(directory, images[0].key), output, imageRuntime);
         if (distance < 0.08) throw new Error(`illustrations are too visually similar: ${distance}`);
       }
       const digest = await sha256(bytes);
