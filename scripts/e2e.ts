@@ -129,6 +129,7 @@ incomplete.images.pop();
 incomplete.edition.stories.pop();
 expect((await json(`/runner/jobs/${jobId}/publish`, { method: "POST", headers: runnerHeaders, body: JSON.stringify({ leaseToken: lease, manifest: incomplete }) })).response.status).toBe(409);
 expect((await json(`/runner/jobs/${jobId}/stage`, { method: "PATCH", headers: runnerHeaders, body: JSON.stringify({ leaseToken: lease, stage: "validating" }) })).response.status).toBe(200);
+expect((await json(`/runner/jobs/${jobId}/stage`, { method: "PATCH", headers: runnerHeaders, body: JSON.stringify({ leaseToken: lease, stage: "validating" }) })).response.status).toBe(409);
 const refused = await json(`/runner/jobs/${jobId}/publish`, { method: "POST", headers: runnerHeaders, body: JSON.stringify({ leaseToken: lease, manifest: incomplete }) });
 expect(refused.response.status).toBe(422);
 const injectedManifest = manifest("2026-W32", hashes) as any;
@@ -231,8 +232,18 @@ const reclaimed = await json("/runner/jobs/claim", { method: "POST", headers: ru
 expect(reclaimed.body.job.id).toBe(regenId);
 expect(reclaimed.body.job.attempt).toBe(2);
 
-// The public request budget is enforced even when callers vary week keys.
-const limited = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W30" }) });
+// Jobs age out even when the runner is entirely down, releasing dedupe and
+// changing browser polling from an endless spinner to a retryable failure.
+const stale = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W30" }) });
+expect(stale.response.status).toBe(202);
+await Bun.sleep(3_000);
+const staleStatus = await json("/generate/status", { headers: sessionHeaders });
+expect(staleStatus.body.job.id).toBe(stale.body.job.id);
+expect(staleStatus.body.status).toBe("failed");
+expect(staleStatus.body.stage).toBe("permanent_failed");
+
+// The shared OAuth account also has an aggregate ceiling across users.
+const limited = await json("/generate", { method: "POST", headers: { cookie: "session=intruder-session", "content-type": "application/json" }, body: JSON.stringify({ weekKey: "2026-W30" }) });
 expect(limited.response.status).toBe(429);
 
-console.log("E2E OK: queue, authz, quota, dedupe, lease/stages, artifacts, active+quiet invariants, atomic publish, XSS, retry");
+console.log("E2E OK: queue, authz, per-user+global quota, stale-job expiry, dedupe, lease/stages, artifacts, active+quiet invariants, atomic publish, XSS, retry");

@@ -8,6 +8,13 @@ const directories: string[] = [];
 afterEach(async () => Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
 
 describe("isolated image pipeline", () => {
+  test("runs against an explicitly supported ImageMagick major", async () => {
+    const child = Bun.spawn(["/usr/bin/convert", "-version"], { stdout: "pipe", stderr: "pipe" });
+    const output = await new Response(child.stdout).text();
+    expect(await child.exited).toBe(0);
+    expect(output).toMatch(/ImageMagick (6|7)\./);
+  });
+
   test("normalizes PNG to bounded transparent WebP and validates visual metrics", async () => {
     const directory = await workspace();
     const input = join(directory, "input.png");

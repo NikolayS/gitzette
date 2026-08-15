@@ -14,6 +14,8 @@ export interface Env {
   GITHUB_TOKEN: string;
   SESSION_SECRET: string;
   WEEKLY_REGEN_LIMIT: string;
+  GLOBAL_WEEKLY_GENERATION_LIMIT?: string;
+  MAX_QUEUE_AGE_SECONDS?: string;
   NEWSPAPERIFY_URL: string;
   NEWSPAPERIFY_SECRET: string;
   RUNNER_SECRET: string;

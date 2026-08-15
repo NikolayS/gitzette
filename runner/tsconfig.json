@@ -2,7 +2,7 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["bun"],
+    "types": ["bun", "@cloudflare/workers-types"],
     "noEmit": true
   },
   "include": ["./**/*.ts", "../src/**/*.test.ts", "../src/edition.ts", "../src/image.ts", "../src/week.ts", "../scripts/**/*.ts"]

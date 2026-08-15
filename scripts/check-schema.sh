@@ -11,7 +11,7 @@ trap cleanup EXIT
 bunx wrangler d1 migrations apply gitzette-db --local --persist-to "$migration_state" >/dev/null
 bunx wrangler d1 execute gitzette-db --local --persist-to "$schema_state" --file schema.sql >/dev/null
 
-query="SELECT type,name,replace(replace(replace(trim(sql),char(10),' '),char(13),' '),'  ',' ') AS sql FROM sqlite_master WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY type,name"
+query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY type,name"
 bunx wrangler d1 execute gitzette-db --local --persist-to "$migration_state" --command "$query" --json >"$migration_state/schema.json"
 bunx wrangler d1 execute gitzette-db --local --persist-to "$schema_state" --command "$query" --json >"$schema_state/schema.json"
 

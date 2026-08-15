@@ -72,7 +72,7 @@ runnerRoutes.patch("/jobs/:id/stage", async (c) => {
   if (!body.leaseToken || !body.stage || !STAGES.has(body.stage)) return c.json({ error: "invalid stage" }, 400);
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
-  if (NEXT_STAGE[job.status] !== body.stage) return c.json({ error: `invalid transition: ${job.status} -> ${body.stage}` }, 409);
+  if (!isForwardStage(job.status, body.stage)) return c.json({ error: `invalid transition: ${job.status} -> ${body.stage}` }, 409);
   const result = await updateLeasedJob(c.env.DB, job.id, body.leaseToken, job.status, body.stage, leaseSeconds(c.env));
   if (!result) return c.json({ error: "lease changed" }, 409);
   return c.json({ status: body.stage });
@@ -205,4 +205,8 @@ function leaseSeconds(env: Env): number {
   return Number.isInteger(configured) && configured >= 2 && configured <= 3600
     ? configured
     : DEFAULT_LEASE_SECONDS;
+}
+
+export function isForwardStage(current: string, requested: string): boolean {
+  return NEXT_STAGE[current] === requested;
 }

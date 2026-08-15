@@ -17,6 +17,7 @@ const engine = new RunnerEngine(
 );
 
 let stopping = false;
+let consecutiveFailures = 0;
 process.on("SIGTERM", () => { stopping = true; });
 process.on("SIGINT", () => { stopping = true; });
 
@@ -24,8 +25,16 @@ while (!stopping) {
   try {
     const result = await engine.runOnce();
     if (result !== "idle") console.log(JSON.stringify({ at: new Date().toISOString(), result }));
+    consecutiveFailures = result === "failed" ? consecutiveFailures + 1 : 0;
   } catch (error) {
+    consecutiveFailures += 1;
     console.error(JSON.stringify({ at: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) }));
   }
-  if (!stopping) await Bun.sleep(config.pollSeconds * 1000);
+  // Fail closed under provider throttling or broad outages. Repeated failures
+  // exponentially pause claims, capped at 15 minutes, instead of rapidly
+  // consuming every queued attempt and the shared OAuth account's capacity.
+  const delaySeconds = consecutiveFailures === 0
+    ? config.pollSeconds
+    : Math.min(15 * 60, config.pollSeconds * 2 ** Math.min(consecutiveFailures, 10));
+  if (!stopping) await Bun.sleep(delaySeconds * 1000);
 }

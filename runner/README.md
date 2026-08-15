@@ -28,3 +28,18 @@ The service must remain disabled until the Worker migration is deployed and the
 narrow `RUNNER_SECRET` is configured on both sides. Never put an AI API key in
 the environment file; startup rejects broad credential patterns and known AI
 provider variables. `bun.lock` is the sole dependency lockfile used by CI.
+
+Provisioning must verify the credential boundary before enabling the service:
+
+```bash
+install -d -o gitzette-runner -g gitzette-runner -m 0700 /var/lib/gitzette-runner
+install -o root -g root -m 0600 /dev/null /etc/gitzette-runner/environment
+stat -c '%U:%G %a %n' /var/lib/gitzette-runner /etc/gitzette-runner/environment
+```
+
+Expected ownership/modes are `gitzette-runner:gitzette-runner 700` and
+`root:root 600`. The OAuth identity must be a dedicated GitZette account, never
+a person's primary ChatGPT identity. Account-policy approval and a tested
+revocation response are production activation gates; if OAuth is revoked or
+limited, generation intentionally fails closed and operators disable the runner
+while existing editions remain available.

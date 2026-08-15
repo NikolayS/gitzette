@@ -1,6 +1,6 @@
--- Baseline snapshot of the pre-migration production schema. These statements
--- intentionally no-op on existing production tables; all new durable-runner
--- objects are created independently by 0001_generation_queue.sql.
+-- Baseline snapshot verified read-only against production D1 on 2026-08-15.
+-- These statements intentionally no-op on existing production tables; all new
+-- durable-runner objects are created independently by 0001_generation_queue.sql.
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS generations (
 CREATE TABLE IF NOT EXISTS dispatches (
   user_id TEXT NOT NULL REFERENCES users(id),
   week_key TEXT NOT NULL,
+  html TEXT NOT NULL DEFAULT "",
   r2_key TEXT,
   generated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   PRIMARY KEY(user_id, week_key)
@@ -36,3 +37,18 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   expires_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS article_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL,
+  week_key TEXT NOT NULL,
+  headline TEXT NOT NULL,
+  body TEXT NOT NULL,
+  rating INTEGER NOT NULL CHECK(rating IN (-1, 1)),
+  complaint TEXT,
+  source TEXT NOT NULL DEFAULT 'human',
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_rating
+  ON article_feedback(rating, source);

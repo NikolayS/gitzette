@@ -1,10 +1,13 @@
 import { Hono } from "hono";
 import { getUser } from "./auth";
 import type { Env } from "./index";
+import { isGitHubUsername } from "./identifiers";
 import { isCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
 const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"];
 const MAX_GENERATE_BODY_BYTES = 2048;
+const DEFAULT_GLOBAL_WEEKLY_LIMIT = 100;
+const DEFAULT_MAX_QUEUE_AGE_SECONDS = 6 * 60 * 60;
 
 type JobRow = {
   id: string;
@@ -58,7 +61,7 @@ queueRoutes.post("/generate", async (c) => {
   let target = requester;
   if (body.forUsername !== undefined) {
     if (requester.username !== "NikolayS") return c.json({ error: "forbidden" }, 403);
-    if (typeof body.forUsername !== "string" || !/^[a-zA-Z0-9-]{1,39}$/.test(body.forUsername)) {
+    if (typeof body.forUsername !== "string" || !isGitHubUsername(body.forUsername)) {
       return c.json({ error: "invalid forUsername" }, 400);
     }
     const existing = await c.env.DB.prepare("SELECT id, username, avatar_url FROM users WHERE username = ? COLLATE NOCASE")
@@ -66,6 +69,8 @@ queueRoutes.post("/generate", async (c) => {
     if (!existing) return c.json({ error: "target user must exist before enqueue" }, 404);
     target = existing;
   }
+
+  await expireStaleJobs(c.env.DB, maxQueueAgeSeconds(c.env));
 
   const live = await c.env.DB.prepare(
     `SELECT j.*, u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id
@@ -75,17 +80,23 @@ queueRoutes.post("/generate", async (c) => {
 
   const id = crypto.randomUUID();
   const requestLimit = Math.max(1, Number.parseInt(c.env.WEEKLY_REGEN_LIMIT || "3", 10) || 3);
+  const globalLimit = positiveInteger(c.env.GLOBAL_WEEKLY_GENERATION_LIMIT, DEFAULT_GLOBAL_WEEKLY_LIMIT);
   try {
     const inserted = await c.env.DB.prepare(
       `INSERT INTO generation_jobs (id,user_id,requested_by,week_key,status)
        SELECT ?,?,?,?,'queued'
-       WHERE ? OR (
+       WHERE (
+         ? OR (
+           SELECT COUNT(*) FROM generation_jobs
+           WHERE requested_by=? AND created_at>=unixepoch('now','-7 days')
+         ) < ?
+       ) AND (
          SELECT COUNT(*) FROM generation_jobs
-         WHERE requested_by=? AND created_at>=unixepoch('now','-7 days')
+         WHERE created_at>=unixepoch('now','-7 days')
        ) < ?`
-    ).bind(id, target.id, requester.id, weekKey, requester.username === "NikolayS" ? 1 : 0, requester.id, requestLimit).run();
+    ).bind(id, target.id, requester.id, weekKey, requester.username === "NikolayS" ? 1 : 0, requester.id, requestLimit, globalLimit).run();
     if ((inserted.meta.changes ?? 0) !== 1) {
-      return c.json({ error: "weekly request limit reached", limit: requestLimit }, 429);
+      return c.json({ error: "generation capacity reached", weeklyUserLimit: requestLimit, weeklyGlobalLimit: globalLimit }, 429);
     }
   } catch (error) {
     const raced = await c.env.DB.prepare(
@@ -113,9 +124,10 @@ queueRoutes.get("/generate/jobs/:id", async (c) => {
 queueRoutes.get("/generate/status", async (c) => {
   const requester = await getUser(c);
   if (!requester) return c.json({ error: "not authenticated" }, 401);
+  await expireStaleJobs(c.env.DB, maxQueueAgeSeconds(c.env));
   const row = await c.env.DB.prepare(
     `SELECT j.*, u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id
-     WHERE j.user_id=? ORDER BY j.created_at DESC LIMIT 1`
+     WHERE j.user_id=? ORDER BY j.created_at DESC, j.rowid DESC LIMIT 1`
   ).bind(requester.id).first<JobRow>();
   if (!row) return c.json({ status: "none" });
   const job = publicJob(row);
@@ -130,4 +142,21 @@ async function getJob(db: D1Database, id: string): Promise<JobRow | null> {
   return db.prepare(
     "SELECT j.*, u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id WHERE j.id=?"
   ).bind(id).first<JobRow>();
+}
+
+async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<void> {
+  await db.prepare(
+    `UPDATE generation_jobs
+     SET status='permanent_failed', last_error='generation runner unavailable; please retry', updated_at=unixepoch()
+     WHERE status IN ('queued','retryable_failed') AND created_at < unixepoch()-?`
+  ).bind(maxAgeSeconds).run();
+}
+
+function maxQueueAgeSeconds(env: Env): number {
+  return positiveInteger(env.MAX_QUEUE_AGE_SECONDS, DEFAULT_MAX_QUEUE_AGE_SECONDS);
+}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

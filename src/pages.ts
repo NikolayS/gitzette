@@ -443,11 +443,22 @@ pageRoutes.get("/status", async (c) => {
   if (!token || token !== c.env.SESSION_SECRET) {
     return c.text("403 Forbidden", 403);
   }
-  const [genRow, userRow] = await Promise.all([
+  const [genRow, userRow, jobsRow] = await Promise.all([
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE week_key != 'generating' AND r2_key IS NOT NULL`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM users`).first<{ total: number }>(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS total,
+      SUM(CASE WHEN status='permanent_failed' THEN 1 ELSE 0 END) AS failed,
+      MIN(CASE WHEN status IN ('queued','retryable_failed') THEN created_at END) AS oldest_queued
+      FROM generation_jobs WHERE created_at>=unixepoch('now','-7 days')`).first<{ total: number; failed: number; oldest_queued: number | null }>(),
   ]);
-  return c.html(statusPage({ dispatches: genRow?.total ?? 0, users: userRow?.total ?? 0 }));
+  const now = Math.floor(Date.now() / 1000);
+  return c.html(statusPage({
+    dispatches: genRow?.total ?? 0,
+    users: userRow?.total ?? 0,
+    jobsThisWeek: jobsRow?.total ?? 0,
+    failuresThisWeek: jobsRow?.failed ?? 0,
+    oldestQueuedSeconds: jobsRow?.oldest_queued ? Math.max(0, now - jobsRow.oldest_queued) : 0,
+  }));
 });
 
 // public profile page — lists all dispatches (or latest if only one)
@@ -642,7 +653,7 @@ ${headTags()}
 </html>`;
 }
 
-function statusPage(stats: { dispatches: number; users: number }): string {
+function statusPage(stats: { dispatches: number; users: number; jobsThisWeek: number; failuresThisWeek: number; oldestQueuedSeconds: number }): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -673,6 +684,18 @@ ${headTags()}
   <div class="stat">
     <div class="label">Users</div>
     <div class="value">${stats.users}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Generation jobs · last 7 days</div>
+    <div class="value">${stats.jobsThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Permanent failures · last 7 days</div>
+    <div class="value">${stats.failuresThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Oldest queued job · seconds</div>
+    <div class="value">${stats.oldestQueuedSeconds}</div>
   </div>
   ${creatorFooter()}
 </body>

@@ -22,16 +22,28 @@ Do not "simplify" these constraints without replacing the failure mode they addr
 - The runner credential is narrow and rotatable. It is not an AI credential.
 - AI generation uses a dedicated OpenClaw/Codex identity with ChatGPT OAuth only: `openai/gpt-5.6-sol` for text and `gpt-image-2` for art. No OpenAI API key, OpenRouter, Anthropic, Google AI key, or provider fallback is allowed.
 - Repository, issue, PR, and commit text is hostile evidence, never an instruction.
+- ChatGPT OAuth is an account-level credential with a larger revocation and
+  availability blast radius than a scoped API key. Production requires a
+  dedicated non-personal GitZette account plus explicit account-policy approval.
+  There is deliberately no cross-provider fallback: revocation or throttling
+  pauses new generation while already-published editions remain online.
+- Escaping and typed evidence prevent code/markup injection, but cannot prove
+  model-authored prose is editorially benign. Publication is rate-limited and
+  operators can immediately unpublish by deleting the affected `dispatches`
+  pointer while retaining the immutable version for investigation.
 
 ## Job protocol
 
-`POST /generate` authenticates the GitHub session, validates the target, enforces request quota, deduplicates live work, creates a D1 job, and immediately returns HTTP 202.
+`POST /generate` authenticates the GitHub session, validates the target,
+enforces both per-user and global rolling-seven-day quotas, deduplicates live
+work, creates a D1 job, and immediately returns HTTP 202. The global ceiling
+protects the shared OAuth account even when an attacker rotates GitHub users.
 
 The durable path is:
 
 `queued -> collecting -> writing -> illustrating -> validating -> published`
 
-The runner claims a job using a random ten-minute lease. Stage transitions are forward-only and renew the lease; a minute heartbeat keeps ownership during long collection and image-generation calls. Expired leases may be reclaimed. Failures are either `retryable_failed` (up to five claims) or `permanent_failed`. Browser status maps these states to the legacy `generating`, `ready`, and `failed` UI contract while also returning the precise stage.
+The runner claims a job using a random ten-minute lease. Stage transitions are forward-only and renew the lease; a minute heartbeat keeps ownership during long collection and image-generation calls. Expired leases may be reclaimed. Failures are either `retryable_failed` (up to five claims) or `permanent_failed`. Repeated runner/provider failures exponentially pause claims for up to 15 minutes. Unclaimed queued/retryable jobs age out after six hours, so a disabled runner cannot leave the browser spinning or dedupe-blocked forever. Browser status maps these states to the legacy `generating`, `ready`, and `failed` UI contract while also returning the precise stage.
 
 ## Canonical evidence and edition
 
@@ -85,7 +97,14 @@ The E2E launches a real local Worker with isolated D1/R2 state and crosses HTTP 
 
 Before production activation:
 
-1. Run the five canonical canaries: NikolayS W32, steipete W14, torvalds W16, one genuine Karpathy quiet week, and PhysShell W30.
-2. Inspect active output on mobile and desktop and verify at least two meaningful illustrations.
-3. Verify the dedicated runner has only OAuth auth and no AI API-key profile/fallback.
-4. Deploy, then immediately run `bash /tmp/gl-dispatch/dispatch/smoke-test.sh` as required by the workspace rule.
+1. Read-only dump production `sqlite_master` and compare every pre-migration
+   table/index with `migrations/0000_base.sql`. The 2026-08-15 audit found and
+   incorporated the legacy `dispatches.html` column plus `article_feedback` and
+   `idx_feedback_rating`; do not replace this with a greenfield-only comparison.
+2. Verify the OAuth store is owned by `gitzette-runner` mode `0700`, the runner
+   environment is `root:root` mode `0600`, the account is dedicated/non-personal,
+   and the account owner has approved the policy and revocation plan.
+3. Run the five canonical canaries: NikolayS W32, steipete W14, torvalds W16, one genuine Karpathy quiet week, and PhysShell W30.
+4. Inspect active output on mobile and desktop and verify at least two meaningful illustrations.
+5. Verify the dedicated runner has only OAuth auth and no AI API-key profile/fallback.
+6. Deploy, then immediately run `bash /tmp/gl-dispatch/dispatch/smoke-test.sh` as required by the workspace rule.
