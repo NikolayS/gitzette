@@ -46,6 +46,19 @@ describe("typed publication manifest", () => {
     expect(validateManifest(activeManifest(), "octocat", "2026-W32").edition.stories).toHaveLength(2);
   });
 
+  test("retains the legacy nonempty-publication and known-source guards", () => {
+    const empty = activeManifest();
+    empty.edition.stories = [];
+    expect(() => validateManifest(empty, "octocat", "2026-W32")).toThrow("active edition has no stories");
+
+    const unknown = activeManifest();
+    unknown.edition.stories[0].evidenceIds = ["invented-repository"];
+    expect(() => validateManifest(unknown, "octocat", "2026-W32")).toThrow("unknown evidence id");
+
+    const html = renderEdition(validateManifest(activeManifest(), "octocat", "2026-W32"), (key) => `/img/${key}`);
+    expect(html).toMatch(/<article>[\s\S]*<h2>[\s\S]*<p>/);
+  });
+
   test("rejects unsupported claims and non-GitHub evidence links", () => {
     const unsupported = activeManifest();
     unsupported.edition.stories[0].evidenceIds = ["pr:404"];

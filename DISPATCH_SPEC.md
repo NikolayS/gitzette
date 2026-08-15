@@ -78,6 +78,12 @@ Each evidence item has a stable ID, a typed kind, repository, title, and allowli
 
 The model returns typed edition JSON, never HTML. Every story cites one or more evidence IDs. Runtime validation rejects unknown evidence, unsupported enums, duplicate IDs, arbitrary URLs, excessive fields, or mismatched username/week. A deterministic renderer escapes all prose and builds links only from verified evidence.
 
+The legacy publication guards are retained by construction: an active edition
+must contain at least one nonempty typed story, every story must resolve to
+known collected evidence, and the deterministic renderer emits the required
+article headline and body elements. This supersedes filtering free-form LLM
+articles by repository name and scanning model-authored HTML after rendering.
+
 Quiet-week copy is server-owned and deterministic. Model-supplied quiet-week prose is discarded. Quiet editions have no generated images.
 
 ## Illustrations
@@ -129,9 +135,12 @@ Before production activation:
    `scripts/check-production-drift.sh` against live D1 immediately before the
    first remote migration and aborts on any difference. Once the D1 migration
    ledger exists, subsequent migrations use that ledger and the pre-cutover
-   fixture is intentionally skipped. Refresh the fixture only before cutover in
-   a reviewed commit after investigating drift. `bun run db:init` is local-only
-   and initializes an empty development database from the migration chain.
+   fixture is intentionally skipped. Every migration run then compares live D1
+   with a local replay of the complete reviewed chain and aborts deployment on
+   structural drift. Out-of-band production DDL is forbidden. Refresh the
+   fixture only before cutover in a reviewed commit after investigating drift.
+   `bun run db:init` is local-only and initializes an empty development database
+   from the migration chain.
 2. Verify the OAuth store is owned by `gitzette-runner` mode `0700`, the runner
    environment is `root:root` mode `0600`, the account is dedicated/non-personal,
    and the account owner has approved the policy and revocation plan.

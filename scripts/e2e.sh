@@ -9,10 +9,13 @@ cleanup() {
   if [[ -n "$server_pid" ]]; then
     kill -- -"$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
+    server_pid=""
   fi
   rm -rf "$state_dir"
 }
 trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT
+trap 'trap - EXIT; cleanup; exit 143' TERM
 
 bunx wrangler d1 migrations apply gitzette-db --local --persist-to "$state_dir" >/dev/null
 bunx wrangler d1 execute gitzette-db --local --persist-to "$state_dir" --command \
