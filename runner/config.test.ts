@@ -18,6 +18,21 @@ describe("runner configuration boundary", () => {
     expect(env.GITZETTE_GITHUB_TOKEN).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(Object.keys(env).sort()).toEqual(["HOME", "OPENCLAW_CONFIG_PATH", "OPENCLAW_STATE_DIR", "PATH", "TMPDIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"]);
+
+    const originalOpenAiKey = process.env.OPENAI_KEY;
+    const originalHfToken = process.env.HF_TOKEN;
+    try {
+      process.env.OPENAI_KEY = "parent-secret";
+      process.env.HF_TOKEN = "parent-secret";
+      const isolated = inferenceEnv(config);
+      expect(isolated.OPENAI_KEY).toBeUndefined();
+      expect(isolated.HF_TOKEN).toBeUndefined();
+    } finally {
+      if (originalOpenAiKey === undefined) delete process.env.OPENAI_KEY;
+      else process.env.OPENAI_KEY = originalOpenAiKey;
+      if (originalHfToken === undefined) delete process.env.HF_TOKEN;
+      else process.env.HF_TOKEN = originalHfToken;
+    }
   });
 
   test("rejects AI API keys and non-origin control-plane values", () => {

@@ -14,9 +14,10 @@ Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or il
 Run `bun run test:all`. The E2E must exercise the real local Worker, D1, R2, HTTP queue/runner APIs, and public read path. A mocked handler test is not a replacement.
 
 The former `claude-code-review.yml` workflow was removed because it could report
-green without an available reviewer credential. Review is now an explicit
-release gate: run the AI-analysis surface of `Tanya301/samorev` against the exact
-PR head after every post-review change, and record the verdict in the PR. Green
-CI alone is not a review.
+green without an available reviewer credential. The protected `main` branch now
+requires a `samorev` commit status on the exact head SHA. Run the AI-analysis
+surface of `Tanya301/samorev` after every post-review change and post its verdict
+as that status; a prior SHA cannot satisfy the gate. Green CI alone is not a
+review.
 
 Before production activation, complete the canaries and mandatory post-deploy smoke test listed in `DISPATCH_SPEC.md`.

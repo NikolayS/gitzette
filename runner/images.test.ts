@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { perceptualDistance, postProcessImage, sha256, validateVisual, type ImageRuntime } from "./images";
@@ -38,6 +38,15 @@ describe("isolated image pipeline", () => {
     await writeFile(output, new Uint8Array(2000));
     const noOp = runtime((() => Bun.spawn(["/usr/bin/true"], { stdin: "ignore", stdout: "ignore", stderr: "pipe" })) as typeof Bun.spawn);
     await expect(postProcessImage(input, output, noOp)).rejects.toThrow("invalid WebP dimensions");
+  });
+
+  test("rejects a symlink before ImageMagick can read it", async () => {
+    const directory = await workspace();
+    const target = join(directory, "target.png");
+    const link = join(directory, "link.png");
+    await fixture(target, "red");
+    await symlink(target, link);
+    await expect(postProcessImage(link, join(directory, "output.webp"), runtime())).rejects.toThrow();
   });
 
   test("rejects opaque/flat art and detects perceptually distinct illustrations", async () => {

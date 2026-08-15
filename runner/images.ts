@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { hasPublicationDimensions, webpDimensions } from "../src/image";
 
@@ -6,24 +7,28 @@ type SpawnFn = typeof Bun.spawn;
 export type ImageRuntime = { spawn: SpawnFn; convertBin: string; compareBin: string; policyDir: string };
 
 export async function postProcessImage(input: string, output: string, runtime = defaultRuntime()): Promise<Uint8Array> {
-  const source = await lstat(input);
-  // lstat + isFile rejects symlinks, including links to otherwise regular files.
-  if (!source.isFile() || source.size < 1000 || source.size > 20 * 1024 * 1024) {
-    throw new Error("input image is not a bounded regular file");
+  const handle = await open(input, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const source = await handle.stat();
+    if (!source.isFile() || source.size < 1000 || source.size > 20 * 1024 * 1024) {
+      throw new Error("input image is not a bounded regular file");
+    }
+    await mkdir(dirname(output), { recursive: true, mode: 0o700 });
+    const child = runtime.spawn([
+      runtime.convertBin,
+      "-limit", "memory", "256MiB", "-limit", "map", "512MiB", "-limit", "disk", "1GiB", "-limit", "time", "120",
+      "png:-",
+      "-fuzz", "10%", "-transparent", "#f7f4ee",
+      "-trim", "+repage", "-resize", "896x896>",
+      "-gravity", "center", "-background", "none", "-extent", "1024x1024",
+      "-strip", "-quality", "82", `webp:${output}`,
+    ], { stdin: handle.fd, stdout: "ignore", stderr: "pipe", env: imageEnv(runtime) });
+    const stderr = new Response(child.stderr).text();
+    const exitCode = await child.exited;
+    if (exitCode !== 0) throw new Error(`image post-processing failed: ${(await stderr).slice(-500)}`);
+  } finally {
+    await handle.close();
   }
-  await mkdir(dirname(output), { recursive: true, mode: 0o700 });
-  const child = runtime.spawn([
-    runtime.convertBin,
-    "-limit", "memory", "256MiB", "-limit", "map", "512MiB", "-limit", "disk", "1GiB", "-limit", "time", "120",
-    `png:${input}`,
-    "-fuzz", "10%", "-transparent", "#f7f4ee",
-    "-trim", "+repage", "-resize", "896x896>",
-    "-gravity", "center", "-background", "none", "-extent", "1024x1024",
-    "-strip", "-quality", "82", `webp:${output}`,
-  ], { stdin: "ignore", stdout: "ignore", stderr: "pipe", env: imageEnv(runtime) });
-  const stderr = new Response(child.stderr).text();
-  const exitCode = await child.exited;
-  if (exitCode !== 0) throw new Error(`image post-processing failed: ${(await stderr).slice(-500)}`);
   const bytes = new Uint8Array(await readFile(output));
   if (bytes.byteLength > 5 * 1024 * 1024) throw new Error("processed image exceeds 5 MiB");
   const dimensions = webpDimensions(bytes);

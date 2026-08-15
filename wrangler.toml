@@ -26,4 +26,5 @@ NEWSPAPERIFY_URL = "https://test-callbot.samo.team/newspaperify"
 # GITHUB_CLIENT_SECRET
 # GITHUB_TOKEN        (server-side token for scanning public repos)
 # SESSION_SECRET
+# STATUS_TOKEN       (separate bearer for the private operational dashboard)
 # RUNNER_SECRET      (narrowly scoped pull-runner credential; not an AI key)

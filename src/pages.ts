@@ -440,7 +440,7 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
 
 pageRoutes.get("/status", async (c) => {
   const token = c.req.query("token");
-  if (!token || token !== c.env.SESSION_SECRET) {
+  if (!token || !await secretMatches(token, c.env.STATUS_TOKEN)) {
     return c.text("403 Forbidden", 403);
   }
   const [genRow, userRow, jobsRow] = await Promise.all([
@@ -460,6 +460,20 @@ pageRoutes.get("/status", async (c) => {
     oldestQueuedSeconds: jobsRow?.oldest_queued ? Math.max(0, now - jobsRow.oldest_queued) : 0,
   }));
 });
+
+export async function secretMatches(supplied: string, expected: string | undefined): Promise<boolean> {
+  if (!expected) return false;
+  const encoder = new TextEncoder();
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(supplied)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+  const a = new Uint8Array(left);
+  const b = new Uint8Array(right);
+  let difference = 0;
+  for (let index = 0; index < a.length; index++) difference |= a[index] ^ b[index];
+  return difference === 0;
+}
 
 // public profile page — lists all dispatches (or latest if only one)
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {

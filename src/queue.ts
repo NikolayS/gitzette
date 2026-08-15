@@ -4,8 +4,8 @@ import type { Env } from "./index";
 import { isGitHubUsername } from "./identifiers";
 import { isCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
-const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"];
-const MAX_GENERATE_BODY_BYTES = 2048;
+export const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"] as const;
+export const MAX_GENERATE_BODY_BYTES = 2048;
 const DEFAULT_GLOBAL_WEEKLY_LIMIT = 100;
 const DEFAULT_MAX_QUEUE_AGE_SECONDS = 6 * 60 * 60;
 
@@ -48,7 +48,7 @@ queueRoutes.post("/generate", async (c) => {
   if (!requester) return c.json({ error: "not authenticated" }, 401);
 
   const declaredLength = Number(c.req.header("content-length") || 0);
-  if (declaredLength > MAX_GENERATE_BODY_BYTES) return c.json({ error: "request body too large" }, 413);
+  if (isGenerateBodyTooLarge(declaredLength)) return c.json({ error: "request body too large" }, 413);
 
   let body: { weekKey?: unknown; forUsername?: unknown } = {};
   try { body = await c.req.json(); } catch { /* empty body uses defaults */ }
@@ -152,11 +152,29 @@ async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<v
   ).bind(maxAgeSeconds).run();
 }
 
-function maxQueueAgeSeconds(env: Env): number {
+export function maxQueueAgeSeconds(env: Env): number {
   return positiveInteger(env.MAX_QUEUE_AGE_SECONDS, DEFAULT_MAX_QUEUE_AGE_SECONDS);
 }
 
-function positiveInteger(value: string | undefined, fallback: number): number {
+export function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function isGenerateBodyTooLarge(bytes: number): boolean {
+  return bytes > MAX_GENERATE_BODY_BYTES;
+}
+
+export function blocksDuplicate(status: string): boolean {
+  return (LIVE_STATUSES as readonly string[]).includes(status);
+}
+
+export function hasGenerationCapacity(
+  userCount: number,
+  globalCount: number,
+  userLimit: number,
+  globalLimit: number,
+  isAdmin = false,
+): boolean {
+  return (isAdmin || userCount < userLimit) && globalCount < globalLimit;
 }

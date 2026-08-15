@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS dispatches (
   user_id TEXT NOT NULL REFERENCES users(id),
   week_key TEXT NOT NULL,
   html TEXT NOT NULL DEFAULT "",
-  r2_key TEXT,
   generated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  r2_key TEXT,
   PRIMARY KEY(user_id, week_key)
 );
 

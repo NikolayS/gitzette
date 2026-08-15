@@ -13,6 +13,7 @@ export interface Env {
   GITHUB_CLIENT_SECRET: string;
   GITHUB_TOKEN: string;
   SESSION_SECRET: string;
+  STATUS_TOKEN: string;
   WEEKLY_REGEN_LIMIT: string;
   GLOBAL_WEEKLY_GENERATION_LIMIT?: string;
   MAX_QUEUE_AGE_SECONDS?: string;

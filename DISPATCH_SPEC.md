@@ -15,6 +15,25 @@ These choices are safety and reliability constraints, not incidental implementat
 
 Do not "simplify" these constraints without replacing the failure mode they address and updating this rationale.
 
+### Legacy invariants: retained or explicitly superseded
+
+- **Opus, not Sonnet** is superseded by the OAuth-only isolation boundary. The
+  dedicated account uses GPT-5.6 Sol; editorial quality is enforced by typed
+  evidence plus the five human-inspected canaries, not a silent provider fallback.
+- **`gpt-image-1`, quality low, WebP compression 60** is superseded by
+  `gpt-image-2` OAuth output followed by deterministic local cleanup and WebP
+  quality 82. Raw model files are never published.
+- **Illustrations per article, never per repository** is retained as story-level
+  `illustrationKey` values. Keys and hashes must be unique, and active editions
+  still require at least two illustrations.
+- **`shape-outside: circle()`, never alpha-derived `url()`** remains the rule for
+  legacy inlined editions. The new typed renderer intentionally uses a bounded
+  fixed float instead of either shape function, eliminating the cross-hatch
+  alpha-hole failure mode altogether.
+- **Historical discovery must include external contributions and exact dates**
+  is retained by the canonical evidence collector; current repository recency
+  is not accepted as evidence for a past week.
+
 ## Trust boundary
 
 - Cloudflare is the public control plane: GitHub login, request quota, D1 queue/status, validation, R2, and serving.
@@ -97,10 +116,13 @@ The E2E launches a real local Worker with isolated D1/R2 state and crosses HTTP 
 
 Before production activation:
 
-1. Read-only dump production `sqlite_master` and compare every pre-migration
-   table/index with `migrations/0000_base.sql`. The 2026-08-15 audit found and
+1. Run `scripts/check-production-baseline.sh`, which compares
+   `migrations/0000_base.sql` with the committed read-only D1 fixture
+   `fixtures/production-baseline-2026-08-15.sql`. The audit found and
    incorporated the legacy `dispatches.html` column plus `article_feedback` and
-   `idx_feedback_rating`; do not replace this with a greenfield-only comparison.
+   `idx_feedback_rating`. Refresh that fixture from a new read-only remote
+   `sqlite_master` dump before applying migrations; do not substitute the
+   greenfield `schema.sql` equivalence check.
 2. Verify the OAuth store is owned by `gitzette-runner` mode `0700`, the runner
    environment is `root:root` mode `0600`, the account is dedicated/non-personal,
    and the account owner has approved the policy and revocation plan.
