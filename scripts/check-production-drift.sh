@@ -21,7 +21,7 @@ trap cleanup EXIT
 # not compare the expanded schema with the old fixture.
 bunx wrangler d1 execute gitzette-db --remote --command \
   "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name='d1_migrations'" --json >"$cutover_json"
-if [[ "$(bun -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(x[0].results[0].total))' "$cutover_json")" != "0" ]]; then
+if [[ "$(bun scripts/cutover-state.ts "$cutover_json")" == "migrated" ]]; then
   echo "Production cutover gate skipped: D1 migration ledger already exists"
   exit 0
 fi

@@ -111,6 +111,7 @@ for (let tick = 0; tick < 3; tick++) {
   })).response.status).toBe(200);
 }
 expect((await json("/runner/jobs/claim", { method: "POST", headers: runnerHeaders })).response.status).toBe(204);
+expect((await json(`/generate/jobs/${jobId}`, { headers: sessionHeaders })).body.job.status).toBe("illustrating");
 expect((await json(`/runner/jobs/${jobId}/heartbeat`, {
   method: "PATCH", headers: runnerHeaders, body: JSON.stringify({ leaseToken: "00000000-0000-4000-8000-000000000000" }),
 })).response.status).toBe(409);

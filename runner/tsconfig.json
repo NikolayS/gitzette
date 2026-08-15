@@ -1,10 +1,10 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["bun", "@cloudflare/workers-types"],
+    "lib": ["ES2022"],
+    "types": ["bun"],
     "noEmit": true
   },
-  "include": ["./**/*.ts", "../src/**/*.test.ts", "../src/edition.ts", "../src/image.ts", "../src/week.ts", "../scripts/**/*.ts"],
+  "include": ["./**/*.ts", "../src/edition.ts", "../src/image.ts", "../src/identifiers.ts", "../src/week.ts"],
   "exclude": []
 }
