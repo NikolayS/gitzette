@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This is a one-time pre-cutover baseline gate. After cutover, Wrangler's D1
+# migration ledger records and applies reviewed migrations; this script does not
+# continuously compare the live schema with the full applied migration chain.
+
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required for the read-only production drift gate" >&2
   exit 1
