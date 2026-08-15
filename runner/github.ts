@@ -1,4 +1,5 @@
 import type { EvidenceBundle, EvidenceItem } from "../src/edition";
+import { isGitHubUsername } from "../src/identifiers";
 import type { Collector } from "./types";
 import { parseIsoWeekKey } from "../src/week";
 
@@ -13,13 +14,11 @@ type SearchItem = {
   repository?: { full_name?: string };
 };
 
-const USERNAME = /^(?!-)[A-Za-z0-9-]{1,39}(?<!-)$/;
-
 export class GitHubCollector implements Collector {
   constructor(private readonly token: string, private readonly request: RequestFn = fetch) {}
 
   async collect(username: string, weekKey: string): Promise<EvidenceBundle> {
-    if (!USERNAME.test(username)) throw new Error("invalid GitHub username");
+    if (!isGitHubUsername(username)) throw new Error("invalid GitHub username");
     const { from, toInclusive } = isoWeek(weekKey);
     const repositories = await this.contributionRepositories(username, from, toInclusive);
     if (repositories.length > 30) throw new Error("GitHub repository set exceeds bounded collector capacity");

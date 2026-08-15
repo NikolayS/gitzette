@@ -1,10 +1,8 @@
 import type { ClaimedJob, Publisher, RunnerStage } from "./types";
 import type { PublicationManifest } from "../src/edition";
+import { isGitHubUsername, isUuid } from "../src/identifiers";
 import { isCompletedIsoWeekKey } from "../src/week";
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const LEASE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const USERNAME = /^(?!-)[A-Za-z0-9-]{1,39}(?<!-)$/;
 
 type RequestFn = typeof fetch;
 
@@ -28,6 +26,14 @@ export class ControlPlaneClient implements Publisher {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ leaseToken: job.leaseToken, stage }),
+    });
+  }
+
+  async heartbeat(job: ClaimedJob): Promise<void> {
+    await this.expectOk(`/runner/jobs/${job.id}/heartbeat`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ leaseToken: job.leaseToken }),
     });
   }
 
@@ -78,10 +84,10 @@ function parseClaim(value: Record<string, unknown>): ClaimedJob {
     leaseExpiresAt: value.leaseExpiresAt,
     attempt: value.attempt,
   };
-  if (typeof job.id !== "string" || !UUID.test(job.id)) throw new Error("invalid job id");
-  if (typeof job.username !== "string" || !USERNAME.test(job.username)) throw new Error("invalid job username");
+  if (typeof job.id !== "string" || !isUuid(job.id)) throw new Error("invalid job id");
+  if (typeof job.username !== "string" || !isGitHubUsername(job.username)) throw new Error("invalid job username");
   if (typeof job.weekKey !== "string" || !isCompletedIsoWeekKey(job.weekKey)) throw new Error("invalid job week");
-  if (typeof job.leaseToken !== "string" || !LEASE.test(job.leaseToken)) throw new Error("invalid lease token");
+  if (typeof job.leaseToken !== "string" || !isUuid(job.leaseToken)) throw new Error("invalid lease token");
   if (!Number.isInteger(job.leaseExpiresAt) || !Number.isInteger(job.attempt)) throw new Error("invalid job lease metadata");
   return job as ClaimedJob;
 }

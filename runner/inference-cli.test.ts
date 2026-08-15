@@ -36,6 +36,7 @@ function config(directory: string): RunnerConfig {
     openclawBin: "/sealed/openclaw",
     openclawHome: directory,
     pollSeconds: 10,
+    heartbeatSeconds: 60,
     workDir: directory,
     generatorVersion: "test",
     imageMagickBin: "/usr/bin/convert",

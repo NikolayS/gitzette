@@ -11,11 +11,13 @@ const job: ClaimedJob = { id: "2bb65583-b570-4a55-b4e4-5de336b10664", username: 
 
 class FakePublisher implements Publisher {
   stages: RunnerStage[] = [];
+  heartbeats = 0;
   uploads: string[] = [];
   published?: PublicationManifest;
   failure?: string;
   constructor(private queued: ClaimedJob | null = job) {}
   async claim() { const value = this.queued; this.queued = null; return value; }
+  async heartbeat() { this.heartbeats++; }
   async stage(_job: ClaimedJob, stage: RunnerStage) { this.stages.push(stage); }
   async upload(_job: ClaimedJob, key: string) { this.uploads.push(key); }
   async publish(_job: ClaimedJob, manifest: PublicationManifest) { this.published = manifest; }
@@ -72,12 +74,26 @@ describe("runner engine", () => {
     expect(publisher.published).toBeUndefined();
     expect(publisher.failure).toContain("prompt");
   });
+
+  test("renews the lease while a model call is still running", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const slowConfig = config(directory);
+    slowConfig.heartbeatSeconds = 0.01;
+    const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
+    const inference: Inference = {
+      write: async () => { await Bun.sleep(35); throw new Error("stop after heartbeat proof"); },
+      illustrate: async () => {}, reviewIllustration: async () => {},
+    };
+    expect(await new RunnerEngine(slowConfig, publisher, collector, inference).runOnce()).toBe("failed");
+    expect(publisher.heartbeats).toBeGreaterThanOrEqual(2);
+  });
 });
 
 function config(directory: string): RunnerConfig {
   return {
     controlPlaneOrigin: "https://gitzette.online", runnerSecret: "x", githubToken: "x",
-    openclawBin: "/usr/local/bin/openclaw", openclawHome: directory, pollSeconds: 10,
+    openclawBin: "/usr/local/bin/openclaw", openclawHome: directory, pollSeconds: 10, heartbeatSeconds: 60,
     workDir: directory, generatorVersion: "test", imageMagickBin: "/usr/bin/convert",
     imageMagickCompareBin: "/usr/bin/compare", imageMagickPolicyDir: `${import.meta.dir}/imagemagick`,
   };

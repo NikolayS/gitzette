@@ -7,6 +7,7 @@ export type RunnerConfig = {
   openclawBin: string;
   openclawHome: string;
   pollSeconds: number;
+  heartbeatSeconds: number;
   workDir: string;
   generatorVersion: string;
   imageMagickBin: string;
@@ -14,7 +15,7 @@ export type RunnerConfig = {
   imageMagickPolicyDir: string;
 };
 
-const FORBIDDEN_AI_ENV = /(?:API_KEY|AUTH_TOKEN|_BASE_URL|_API_BASE|GOOGLE_APPLICATION_CREDENTIALS|AZURE_OPENAI_ENDPOINT)$/;
+const FORBIDDEN_AI_ENV = /(?:API|AUTH|ACCESS|OAUTH)[-_]?(?:KEY|TOKEN|SECRET)|(?:KEY|TOKEN|SECRET)[-_]?(?:API|AUTH|ACCESS|OAUTH)|_API_BASE|_BASE_URL|BEDROCK|VERTEX|GOOGLE_APPLICATION_CREDENTIALS|AZURE_OPENAI_ENDPOINT|OPENAI|ANTHROPIC|CLAUDE|GEMINI|REPLICATE|HUGGINGFACE|HF_TOKEN/i;
 
 function required(env: Record<string, string | undefined>, name: string): string {
   const value = env[name]?.trim();
@@ -39,6 +40,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   const pollSeconds = Number(env.GITZETTE_POLL_SECONDS ?? "10");
   if (!Number.isInteger(pollSeconds) || pollSeconds < 2 || pollSeconds > 300) throw new Error("invalid GITZETTE_POLL_SECONDS");
+  const heartbeatSeconds = Number(env.GITZETTE_HEARTBEAT_SECONDS ?? "60");
+  if (!Number.isInteger(heartbeatSeconds) || heartbeatSeconds < 1 || heartbeatSeconds > 300) throw new Error("invalid GITZETTE_HEARTBEAT_SECONDS");
 
   const imageMagickBin = env.GITZETTE_IMAGEMAGICK_BIN ?? "/usr/bin/convert";
   const imageMagickCompareBin = env.GITZETTE_IMAGEMAGICK_COMPARE_BIN ?? "/usr/bin/compare";
@@ -53,6 +56,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     openclawBin: env.GITZETTE_OPENCLAW_BIN ?? "/var/lib/gitzette-runner/.bun/bin/openclaw",
     openclawHome: env.GITZETTE_OPENCLAW_HOME ?? "/var/lib/gitzette-runner",
     pollSeconds,
+    heartbeatSeconds,
     workDir: env.GITZETTE_WORK_DIR ?? "/var/lib/gitzette-runner/work",
     generatorVersion: required(env, "GITZETTE_GENERATOR_VERSION"),
     imageMagickBin,

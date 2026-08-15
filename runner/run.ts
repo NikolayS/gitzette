@@ -30,7 +30,28 @@ export class RunnerEngine {
   }
 
   private async process(job: ClaimedJob): Promise<void> {
+    let heartbeatError: unknown;
+    let heartbeatInFlight: Promise<void> | undefined;
+    const heartbeat = () => {
+      if (heartbeatInFlight) return;
+      heartbeatInFlight = this.publisher.heartbeat(job)
+        .catch((error) => { heartbeatError = error; })
+        .finally(() => { heartbeatInFlight = undefined; });
+    };
+    const timer = setInterval(heartbeat, this.config.heartbeatSeconds * 1000);
+    try {
+      await this.processWithLease(job, () => {
+        if (heartbeatError) throw new Error(`lease heartbeat failed: ${String(heartbeatError)}`);
+      });
+    } finally {
+      clearInterval(timer);
+      if (heartbeatInFlight) await heartbeatInFlight;
+    }
+  }
+
+  private async processWithLease(job: ClaimedJob, assertLease: () => void): Promise<void> {
     const evidence = await this.collector.collect(job.username, job.weekKey);
+    assertLease();
     if (evidence.state === "collection_failed") throw new Error("collection failed");
     await this.publisher.stage(job, "writing");
 
@@ -51,6 +72,7 @@ export class RunnerEngine {
     }
 
     const edition = await this.inference.write(evidence);
+    assertLease();
     await this.publisher.stage(job, "illustrating");
     const directory = jobDir(this.config, job);
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -68,9 +90,11 @@ export class RunnerEngine {
       const input = join(directory, `${key}.png`);
       const output = join(directory, key);
       await this.inference.illustrate(`${story.headline}. ${story.deck}`, input);
+      assertLease();
       const bytes = await postProcessImage(input, output, imageRuntime);
       await validateVisual(output, imageRuntime);
       await this.inference.reviewIllustration(`${story.headline}. ${story.deck}`, output);
+      assertLease();
       if (images.length > 0) {
         const distance = await perceptualDistance(join(directory, images[0].key), output, imageRuntime);
         if (distance < 0.08) throw new Error(`illustrations are too visually similar: ${distance}`);

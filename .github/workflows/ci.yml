@@ -14,4 +14,4 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y imagemagick
       - run: bun install --frozen-lockfile
       - run: bun run test:all
-      - run: bun audit --audit-level=high
+      - run: bun audit

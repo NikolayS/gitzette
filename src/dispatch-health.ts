@@ -51,3 +51,6 @@ export function slowNewsFragment(username: string): string {
     <div style="clear:both;border-top:1px solid #c8c2b4;margin-top:32px;padding-top:12px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#666;">${copy.closingNote}</div>
   </section>`;
 }
+// Legacy compatibility for dispatch HTML created before typed editions. The
+// new runner's quiet-week copy lives in edition.ts; this module only repairs
+// already-published legacy payloads at read time.

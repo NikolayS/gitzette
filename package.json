@@ -9,7 +9,8 @@
     "test": "bun test",
     "test:runner": "bunx tsc -p runner/tsconfig.json --noEmit && bun test runner",
     "test:e2e": "bash scripts/e2e.sh",
-    "test:all": "bunx tsc --noEmit && bun run test:runner && bun test src && bash scripts/e2e.sh"
+    "test:schema": "bash scripts/check-schema.sh",
+    "test:all": "bunx tsc --noEmit && bun run test:runner && bun test src && bun run test:schema && bash scripts/e2e.sh"
   },
   "dependencies": {
     "hono": "^4.13.2"

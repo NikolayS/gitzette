@@ -3,7 +3,7 @@ import { renderEdition, validateManifest, type PublicationManifest } from "./edi
 import { hasPublicationDimensions, webpDimensions } from "./image";
 import type { Env } from "./index";
 
-const LEASE_SECONDS = 10 * 60;
+const DEFAULT_LEASE_SECONDS = 10 * 60;
 const MAX_ATTEMPTS = 5;
 const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024;
 const STAGES = new Set(["collecting", "writing", "illustrating", "validating"]);
@@ -36,7 +36,7 @@ runnerRoutes.use("*", async (c, next) => {
 runnerRoutes.post("/jobs/claim", async (c) => {
   const leaseToken = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
-  const leaseExpires = now + LEASE_SECONDS;
+  const leaseExpires = now + leaseSeconds(c.env);
   const row = await c.env.DB.prepare(
     `UPDATE generation_jobs
        SET status='collecting', attempt=attempt+1, lease_token=?, lease_expires_at=?, last_error=NULL, updated_at=?
@@ -55,13 +55,25 @@ runnerRoutes.post("/jobs/claim", async (c) => {
   return c.json({ job: { ...row, username: user!.username, weekKey: row.week_key, leaseToken: row.lease_token, leaseExpiresAt: row.lease_expires_at } });
 });
 
+runnerRoutes.patch("/jobs/:id/heartbeat", async (c) => {
+  const body = await c.req.json<{ leaseToken?: string }>();
+  if (!body.leaseToken) return c.json({ error: "invalid heartbeat" }, 400);
+  const result = await c.env.DB.prepare(
+    `UPDATE generation_jobs SET updated_at=unixepoch(),lease_expires_at=unixepoch()+?
+     WHERE id=? AND lease_token=? AND lease_expires_at>=unixepoch()
+       AND status IN ('collecting','writing','illustrating','validating')`
+  ).bind(leaseSeconds(c.env), c.req.param("id"), body.leaseToken).run();
+  if ((result.meta.changes ?? 0) !== 1) return c.json({ error: "lease not held" }, 409);
+  return c.json({ status: "extended" });
+});
+
 runnerRoutes.patch("/jobs/:id/stage", async (c) => {
   const body = await c.req.json<{ leaseToken?: string; stage?: string }>();
   if (!body.leaseToken || !body.stage || !STAGES.has(body.stage)) return c.json({ error: "invalid stage" }, 400);
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
   if (NEXT_STAGE[job.status] !== body.stage) return c.json({ error: `invalid transition: ${job.status} -> ${body.stage}` }, 409);
-  const result = await updateLeasedJob(c.env.DB, job.id, body.leaseToken, job.status, body.stage);
+  const result = await updateLeasedJob(c.env.DB, job.id, body.leaseToken, job.status, body.stage, leaseSeconds(c.env));
   if (!result) return c.json({ error: "lease changed" }, 409);
   return c.json({ status: body.stage });
 });
@@ -179,11 +191,18 @@ async function heldJob(db: D1Database, id: string, leaseToken: string): Promise<
   ).bind(id, leaseToken).first<ClaimedJob>();
 }
 
-async function updateLeasedJob(db: D1Database, id: string, leaseToken: string, fromStage: string, stage: string): Promise<boolean> {
+async function updateLeasedJob(db: D1Database, id: string, leaseToken: string, fromStage: string, stage: string, leaseDurationSeconds: number): Promise<boolean> {
   const result = await db.prepare(
     `UPDATE generation_jobs SET status=?,updated_at=unixepoch(),lease_expires_at=unixepoch()+?
      WHERE id=? AND lease_token=? AND lease_expires_at>=unixepoch()
        AND status=?`
-  ).bind(stage, LEASE_SECONDS, id, leaseToken, fromStage).run();
+  ).bind(stage, leaseDurationSeconds, id, leaseToken, fromStage).run();
   return (result.meta.changes ?? 0) === 1;
+}
+
+function leaseSeconds(env: Env): number {
+  const configured = Number(env.RUNNER_LEASE_SECONDS ?? DEFAULT_LEASE_SECONDS);
+  return Number.isInteger(configured) && configured >= 2 && configured <= 3600
+    ? configured
+    : DEFAULT_LEASE_SECONDS;
 }

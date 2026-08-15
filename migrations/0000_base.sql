@@ -1,3 +1,6 @@
+-- Baseline snapshot of the pre-migration production schema. These statements
+-- intentionally no-op on existing production tables; all new durable-runner
+-- objects are created independently by 0001_generation_queue.sql.
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
@@ -33,4 +36,3 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   expires_at INTEGER NOT NULL
 );
-

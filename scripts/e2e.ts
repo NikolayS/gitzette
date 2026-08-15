@@ -102,6 +102,19 @@ expect((await json(`/runner/jobs/${jobId}/stage`, { method: "PATCH", headers: ru
 expect((await json(`/runner/jobs/${jobId}/stage`, { method: "PATCH", headers: runnerHeaders, body: JSON.stringify({ leaseToken: lease, stage: "writing" }) })).response.status).toBe(200);
 expect((await json(`/runner/jobs/${jobId}/stage`, { method: "PATCH", headers: runnerHeaders, body: JSON.stringify({ leaseToken: lease, stage: "illustrating" }) })).response.status).toBe(200);
 
+// A long stage remains exclusively leased when the runner heartbeats. The E2E
+// lease is two seconds so this proves renewal without a ten-minute test.
+for (let tick = 0; tick < 3; tick++) {
+  await Bun.sleep(1_000);
+  expect((await json(`/runner/jobs/${jobId}/heartbeat`, {
+    method: "PATCH", headers: runnerHeaders, body: JSON.stringify({ leaseToken: lease }),
+  })).response.status).toBe(200);
+}
+expect((await json("/runner/jobs/claim", { method: "POST", headers: runnerHeaders })).response.status).toBe(204);
+expect((await json(`/runner/jobs/${jobId}/heartbeat`, {
+  method: "PATCH", headers: runnerHeaders, body: JSON.stringify({ leaseToken: "00000000-0000-4000-8000-000000000000" }),
+})).response.status).toBe(409);
+
 // Invalid images and incomplete manifests cannot publish anything.
 const fakeImage = await fetch(`${base}/runner/jobs/${jobId}/artifacts/image-1.webp`, {
   method: "PUT",
@@ -146,7 +159,7 @@ const quietEngine = new RunnerEngine(
   {
     controlPlaneOrigin: base, runnerSecret: "e2e-runner-secret", githubToken: "unused",
     openclawBin: "/forbidden", openclawHome: "/tmp/gitzette-e2e-openclaw",
-    pollSeconds: 10, workDir: "/tmp/gitzette-e2e-runner", generatorVersion: "e2e-runner",
+    pollSeconds: 10, heartbeatSeconds: 1, workDir: "/tmp/gitzette-e2e-runner", generatorVersion: "e2e-runner",
     imageMagickBin: "/usr/bin/convert", imageMagickCompareBin: "/usr/bin/compare",
     imageMagickPolicyDir: `${import.meta.dir}/../runner/imagemagick`,
   },
@@ -175,7 +188,7 @@ const activeEngine = new RunnerEngine(
   {
     controlPlaneOrigin: base, runnerSecret: "e2e-runner-secret", githubToken: "unused",
     openclawBin: "/forbidden", openclawHome: "/tmp/gitzette-e2e-openclaw",
-    pollSeconds: 10, workDir: "/tmp/gitzette-e2e-runner", generatorVersion: "e2e-runner",
+    pollSeconds: 10, heartbeatSeconds: 1, workDir: "/tmp/gitzette-e2e-runner", generatorVersion: "e2e-runner",
     imageMagickBin: "/usr/bin/convert", imageMagickCompareBin: "/usr/bin/compare",
     imageMagickPolicyDir: `${import.meta.dir}/../runner/imagemagick`,
   },

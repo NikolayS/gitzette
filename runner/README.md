@@ -5,6 +5,8 @@ human prompts. It claims validated `username + ISO week` jobs, collects public
 GitHub evidence through constructed `api.github.com` URLs, invokes one-shot
 OpenClaw model/image capabilities through ChatGPT OAuth, validates the exact
 typed result, and submits it under the current lease.
+It renews the lease every 60 seconds while collection or inference is running;
+the Worker rejects stale heartbeats and all writes from an expired lease.
 
 The AI subprocesses receive a deliberately rebuilt environment containing only
 OpenClaw's isolated state paths. They do not receive the GitHub token, runner
@@ -24,4 +26,5 @@ Production layout:
 
 The service must remain disabled until the Worker migration is deployed and the
 narrow `RUNNER_SECRET` is configured on both sides. Never put an AI API key in
-the environment file; startup rejects the known provider key names.
+the environment file; startup rejects broad credential patterns and known AI
+provider variables. `bun.lock` is the sole dependency lockfile used by CI.

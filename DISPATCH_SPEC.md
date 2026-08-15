@@ -31,7 +31,7 @@ The durable path is:
 
 `queued -> collecting -> writing -> illustrating -> validating -> published`
 
-The runner claims a job using a random ten-minute lease. Stage transitions are forward-only and renew the lease. Expired leases may be reclaimed. Failures are either `retryable_failed` (up to five claims) or `permanent_failed`. Browser status maps these states to the legacy `generating`, `ready`, and `failed` UI contract while also returning the precise stage.
+The runner claims a job using a random ten-minute lease. Stage transitions are forward-only and renew the lease; a minute heartbeat keeps ownership during long collection and image-generation calls. Expired leases may be reclaimed. Failures are either `retryable_failed` (up to five claims) or `permanent_failed`. Browser status maps these states to the legacy `generating`, `ready`, and `failed` UI contract while also returning the precise stage.
 
 ## Canonical evidence and edition
 

@@ -25,6 +25,9 @@ describe("runner configuration boundary", () => {
     expect(() => loadConfig({ ...base, ANTHROPIC_AUTH_TOKEN: "forbidden" })).toThrow("OAuth-only");
     expect(() => loadConfig({ ...base, GOOGLE_APPLICATION_CREDENTIALS: "/tmp/forbidden.json" })).toThrow("OAuth-only");
     expect(() => loadConfig({ ...base, OPENAI_BASE_URL: "https://proxy.example" })).toThrow("OAuth-only");
+    for (const key of ["REPLICATE_API_TOKEN", "HF_TOKEN", "OPENAI_KEY", "GEMINI_KEY", "AWS_BEARER_TOKEN_BEDROCK", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY_2"]) {
+      expect(() => loadConfig({ ...base, [key]: "forbidden" })).toThrow("OAuth-only");
+    }
     expect(() => loadConfig({ ...base, GITZETTE_CONTROL_PLANE_ORIGIN: "https://gitzette.online/runner" })).toThrow("origin only");
     expect(() => loadConfig({ ...base, GITZETTE_CONTROL_PLANE_ORIGIN: "http://evil.example" })).toThrow("HTTPS");
   });

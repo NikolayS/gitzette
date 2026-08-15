@@ -16,6 +16,8 @@ describe("control-plane client", () => {
     expect(calls[0].url).toBe("https://gitzette.online/runner/jobs/claim");
     expect(new Headers(calls[0].init?.headers).get("authorization")).toBe("Bearer secret");
     expect(calls[0].init?.redirect).toBe("error");
+    await client.heartbeat((await client.claim())!);
+    expect(calls[2].url).toContain("/heartbeat");
   });
 
   test("rejects prompt-shaped or path-shaped claim data before another request", async () => {

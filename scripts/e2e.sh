@@ -27,6 +27,7 @@ for attempt in $(seq 1 5); do
     --var RUNNER_SECRET:e2e-runner-secret \
     --var SESSION_SECRET:e2e-session-secret \
     --var WEEKLY_REGEN_LIMIT:4 \
+    --var RUNNER_LEASE_SECONDS:2 \
     --show-interactive-dev-session=false >"$state_dir/wrangler.log" 2>&1 &
   server_pid=$!
 

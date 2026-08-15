@@ -19,6 +19,7 @@ export type Inference = {
 
 export type Publisher = {
   claim(): Promise<ClaimedJob | null>;
+  heartbeat(job: ClaimedJob): Promise<void>;
   stage(job: ClaimedJob, stage: RunnerStage): Promise<void>;
   upload(job: ClaimedJob, key: string, bytes: Uint8Array): Promise<void>;
   publish(job: ClaimedJob, manifest: PublicationManifest): Promise<void>;

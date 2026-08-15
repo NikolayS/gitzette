@@ -7,7 +7,8 @@ export type ImageRuntime = { spawn: SpawnFn; convertBin: string; compareBin: str
 
 export async function postProcessImage(input: string, output: string, runtime = defaultRuntime()): Promise<Uint8Array> {
   const source = await lstat(input);
-  if (!source.isFile() || source.isSymbolicLink() || source.size < 1000 || source.size > 20 * 1024 * 1024) {
+  // lstat + isFile rejects symlinks, including links to otherwise regular files.
+  if (!source.isFile() || source.size < 1000 || source.size > 20 * 1024 * 1024) {
     throw new Error("input image is not a bounded regular file");
   }
   await mkdir(dirname(output), { recursive: true, mode: 0o700 });

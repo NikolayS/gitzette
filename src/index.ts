@@ -17,6 +17,7 @@ export interface Env {
   NEWSPAPERIFY_URL: string;
   NEWSPAPERIFY_SECRET: string;
   RUNNER_SECRET: string;
+  RUNNER_LEASE_SECONDS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
