@@ -176,5 +176,8 @@ export function hasGenerationCapacity(
   globalLimit: number,
   isAdmin = false,
 ): boolean {
+  // This mirrors the policy for boundary tests only. Production enforcement is
+  // the single conditional INSERT ... SELECT above; dedupe is additionally
+  // protected by generation_jobs_one_live_job in migration 0001.
   return (isAdmin || userCount < userLimit) && globalCount < globalLimit;
 }

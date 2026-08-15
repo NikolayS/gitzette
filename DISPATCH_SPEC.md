@@ -123,9 +123,15 @@ Before production activation:
    `idx_feedback_rating`. Refresh that fixture from a new read-only remote
    `sqlite_master` dump before applying migrations; do not substitute the
    greenfield `schema.sql` equivalence check.
+   `bun run db:migrate` enforces this: it runs
+   `scripts/check-production-drift.sh` against live D1 immediately before the
+   remote migration and aborts on any difference. Refresh the fixture only in a
+   reviewed commit after investigating the drift.
 2. Verify the OAuth store is owned by `gitzette-runner` mode `0700`, the runner
    environment is `root:root` mode `0600`, the account is dedicated/non-personal,
    and the account owner has approved the policy and revocation plan.
+   Rotate `STATUS_TOKEN` independently with `wrangler secret put STATUS_TOKEN`;
+   the dashboard accepts it only as `Authorization: Bearer ...`, never in URLs.
 3. Run the five canonical canaries: NikolayS W32, steipete W14, torvalds W16, one genuine Karpathy quiet week, and PhysShell W30.
 4. Inspect active output on mobile and desktop and verify at least two meaningful illustrations.
 5. Verify the dedicated runner has only OAuth auth and no AI API-key profile/fallback.
