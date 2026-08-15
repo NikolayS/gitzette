@@ -11,7 +11,6 @@ export interface Env {
   DISPATCHES: R2Bucket;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
-  GITHUB_TOKEN: string;
   SESSION_SECRET: string;
   STATUS_TOKEN: string;
   WEEKLY_REGEN_LIMIT: string;

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:init": "bun run db:migrate",
+    "db:init": "wrangler d1 migrations apply gitzette-db --local",
     "db:migrate": "bash scripts/check-production-drift.sh && wrangler d1 migrations apply gitzette-db --remote",
     "test": "bun test",
     "test:runner": "bunx tsc -p runner/tsconfig.json --noEmit && bun test runner",

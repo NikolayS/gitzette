@@ -440,7 +440,7 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
 
 pageRoutes.get("/status", async (c) => {
   const authorization = c.req.header("authorization") || "";
-  const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const token = /^Bearer +(.+)$/i.exec(authorization)?.[1] ?? "";
   if (!token || !await secretMatches(token, c.env.STATUS_TOKEN)) {
     return c.text("403 Forbidden", 403);
   }

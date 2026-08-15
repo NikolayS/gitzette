@@ -8,11 +8,23 @@ fi
 
 fixture_state="$(mktemp -d)"
 remote_json="$(mktemp)"
+cutover_json="$(mktemp)"
 cleanup() {
   rm -rf "$fixture_state"
-  rm -f "$remote_json"
+  rm -f "$remote_json" "$cutover_json"
 }
 trap cleanup EXIT
+
+# The captured fixture is the pre-migration production state and therefore is
+# only valid for the 0000/0001 cutover. Once D1 records any migration, Wrangler's
+# migration ledger owns subsequent changes and this one-time baseline gate must
+# not compare the expanded schema with the old fixture.
+bunx wrangler d1 execute gitzette-db --remote --command \
+  "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name='d1_migrations'" --json >"$cutover_json"
+if [[ "$(bun -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(x[0].results[0].total))' "$cutover_json")" != "0" ]]; then
+  echo "Production cutover gate skipped: D1 migration ledger already exists"
+  exit 0
+fi
 
 bunx wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --file fixtures/production-baseline-2026-08-15.sql >/dev/null
 query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY type,name"
@@ -34,4 +46,4 @@ bun -e '
   }
 ' "$fixture_state/schema.json" "$remote_json"
 
-echo "Production drift gate OK: live D1 matches the reviewed baseline"
+echo "Production cutover gate OK: unmigrated live D1 matches the reviewed baseline"

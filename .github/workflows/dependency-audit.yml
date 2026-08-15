@@ -2,6 +2,7 @@ name: Scheduled dependency audit
 
 permissions:
   contents: read
+  issues: write
 
 on:
   schedule:
@@ -17,3 +18,16 @@ jobs:
       - run: bun install --frozen-lockfile
       # A red weekly run means maintainers must triage moderate-or-higher findings.
       - run: bun audit --audit-level=moderate
+      - name: Open or update dependency-audit issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Scheduled dependency audit requires triage"
+          existing="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          body="The weekly moderate-or-higher dependency audit failed. Inspect run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

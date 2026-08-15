@@ -1,6 +1,8 @@
 # GitZette generation and publication spec
 
-This is the source of truth for the queued generation pipeline.
+This is the source of truth for the queued generation pipeline. Every retained
+constraint records why it exists; do not "optimize" a rule without first
+replacing the failure mode documented here.
 
 ## Design rationale and retired constraints
 
@@ -123,10 +125,13 @@ Before production activation:
    `idx_feedback_rating`. Refresh that fixture from a new read-only remote
    `sqlite_master` dump before applying migrations; do not substitute the
    greenfield `schema.sql` equivalence check.
-   `bun run db:migrate` enforces this: it runs
+   `bun run db:migrate` enforces this for the one-time 0000/0001 cutover: it runs
    `scripts/check-production-drift.sh` against live D1 immediately before the
-   remote migration and aborts on any difference. Refresh the fixture only in a
-   reviewed commit after investigating the drift.
+   first remote migration and aborts on any difference. Once the D1 migration
+   ledger exists, subsequent migrations use that ledger and the pre-cutover
+   fixture is intentionally skipped. Refresh the fixture only before cutover in
+   a reviewed commit after investigating drift. `bun run db:init` is local-only
+   and initializes an empty development database from the migration chain.
 2. Verify the OAuth store is owned by `gitzette-runner` mode `0700`, the runner
    environment is `root:root` mode `0600`, the account is dedicated/non-personal,
    and the account owner has approved the policy and revocation plan.

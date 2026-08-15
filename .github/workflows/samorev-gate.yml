@@ -13,16 +13,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Require exact-head samorev success
+      - name: Require an exact-head samorev status
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          for attempt in $(seq 1 28); do
+          # Branch protection independently requires this exact status to be
+          # success. This PR-triggered check verifies the status is attached to
+          # the current head without creating a circular wait during review.
+          for attempt in $(seq 1 4); do
             state="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/status" --jq '.statuses[] | select(.context == "samorev") | .state' | head -1)"
-            if [ "$state" = success ]; then
-              echo "samorev passed on exact head $HEAD_SHA"
+            if [ "$state" = pending ] || [ "$state" = success ]; then
+              echo "samorev status exists on exact head $HEAD_SHA ($state)"
               exit 0
             fi
             if [ "$state" = failure ] || [ "$state" = error ]; then
@@ -31,5 +34,5 @@ jobs:
             fi
             sleep 30
           done
-          echo "samorev did not pass on exact head $HEAD_SHA within 14 minutes"
+          echo "samorev status was not attached to exact head $HEAD_SHA"
           exit 1
