@@ -1,4 +1,5 @@
 {
+  "audit_command": "bash scripts/check-branch-protection.sh",
   "required_status_checks": {
     "strict": true,
     "contexts": ["samorev", "samorev-gate", "typecheck"]

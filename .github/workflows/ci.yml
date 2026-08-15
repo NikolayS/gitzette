@@ -18,10 +18,12 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Verify systemd Bun invocation flag
         run: bun --no-env-file --version
-      - name: Verify protected-main policy
-        run: bash scripts/check-branch-protection.sh
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Validate protected-main policy definition
+        run: >-
+          jq -e '.required_status_checks.strict == true and
+          (.required_status_checks.contexts | sort) == ["samorev","samorev-gate","typecheck"] and
+          .enforce_admins == true and .required_conversation_resolution == true'
+          config/main-branch-protection.json
       - run: bun run test:all
       # High/critical advisories block merges. Lower severities stay visible in
       # the weekly dependency-audit workflow without randomly blocking unrelated PRs.

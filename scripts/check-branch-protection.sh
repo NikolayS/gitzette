@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository="${GITHUB_REPOSITORY:-NikolayS/gitzette}"
-expected="$(jq -Sc '.required_status_checks.contexts |= sort' config/main-branch-protection.json)"
+expected="$(jq -Sc 'del(.audit_command) | .required_status_checks.contexts |= sort' config/main-branch-protection.json)"
 actual="$(gh api "repos/$repository/branches/main/protection" | jq -Sc '{required_status_checks:{strict:.required_status_checks.strict,contexts:(.required_status_checks.contexts|sort)},enforce_admins:.enforce_admins.enabled,required_conversation_resolution:.required_conversation_resolution.enabled}')"
 
 if [[ "$actual" != "$expected" ]]; then
