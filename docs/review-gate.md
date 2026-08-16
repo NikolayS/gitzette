@@ -6,8 +6,9 @@ Protected `main` requires three independent signals:
   identity boundary by itself);
 - `samorev`, the final exact-head Tanya301/samorev verdict published by the
   owner-authorized external runner;
-- `samorev-gate`, emitted by a `pull_request_target` workflow loaded from
-  protected `main`, never from the pull-request head.
+- `samorev-gate`, explicitly published on the PR head by a
+  `pull_request_target` workflow loaded from protected `main`, never from the
+  pull-request head's workflow definition.
 
 Classic branch protection also requires one approval from an identity other
 than the author/last pusher, dismisses stale approvals after every push, applies
@@ -19,10 +20,12 @@ their own change.
 
 The external runner attaches `samorev: pending` before review and replaces it
 with `success`, `failure`, or `error` after parsing the blocking report. The
-base-controlled gate reads the combined status for the PR head, compares the
+base-controlled publisher reads the combined status for the PR head, compares the
 publisher's immutable GitHub user ID (`1345402`, login `NikolayS`, verified via
 `gh api users/NikolayS --jq .id`), and passes only on final success. It never
-checks out or executes PR-controlled code.
+checks out or executes PR-controlled code. Its own Actions check run belongs to
+the base SHA and is deliberately not required; the `samorev-gate` commit status
+it publishes belongs to the exact PR head SHA.
 
 The gate retries transient GitHub API failures every 30 seconds and aborts after
 three consecutive API failures. It otherwise waits up to 30 minutes for the
@@ -48,9 +51,9 @@ resolves its policy relative to itself.
 
 The base-controlled workflow must exist on `main` before it can govern another
 PR. Merge the small foundation PR only after its own exact-head typecheck and
-samorev verdict pass. Then apply the committed three-check protection policy
-and verify it with:
+samorev verdict pass. Then apply and verify the committed policy with:
 
 ```bash
+bash scripts/apply-branch-protection.sh
 bash scripts/check-branch-protection.sh
 ```

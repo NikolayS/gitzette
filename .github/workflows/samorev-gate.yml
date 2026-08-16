@@ -5,7 +5,7 @@ name: samorev gate
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, synchronize, ready_for_review, reopened, edited]
 
 concurrency:
   group: samorev-gate-${{ github.event.pull_request.number }}
@@ -13,11 +13,11 @@ concurrency:
 
 permissions:
   contents: read
-  statuses: read
+  statuses: write
 
 jobs:
-  samorev-gate:
-    if: github.event.pull_request.draft == false
+  publish-samorev-gate:
+    name: base-controlled samorev publisher
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -28,7 +28,18 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           # NikolayS; verified with: gh api users/NikolayS --jq .id
           REVIEWER_ID: "1345402"
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
+          publish_gate() {
+            gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
+              -f state="$1" -f context=samorev-gate \
+              -f description="$2" \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          }
+          if [ "$IS_DRAFT" = true ]; then
+            publish_gate failure "Draft PRs are not eligible for review"
+            exit 1
+          fi
           api_failures=0
           for attempt in $(seq 1 60); do
             echo "samorev verdict poll $attempt/60"
@@ -37,6 +48,7 @@ jobs:
               api_failures=$((api_failures + 1))
               if [ "$api_failures" -ge 3 ]; then
                 echo "GitHub status API failed three consecutive times; aborting" >&2
+                publish_gate error "GitHub status API failed three consecutive times"
                 exit 1
               fi
               sleep 30
@@ -48,17 +60,21 @@ jobs:
             creator="$(jq -r '.creator.login // empty' <<<"$status")"
             if [ -n "$state" ] && [ "$creator_id" != "$REVIEWER_ID" ]; then
               echo "samorev status has unexpected creator: $creator ($creator_id)"
+              publish_gate failure "samorev verdict has an unexpected publisher"
               exit 1
             fi
             if [ "$state" = success ]; then
               echo "samorev passed on exact head $HEAD_SHA by $creator"
+              publish_gate success "Owner-published samorev verdict passed"
               exit 0
             fi
             if [ "$state" = failure ] || [ "$state" = error ]; then
               echo "samorev failed on exact head $HEAD_SHA"
+              publish_gate failure "Owner-published samorev verdict failed"
               exit 1
             fi
             sleep 30
           done
           echo "samorev did not reach a final verdict on exact head $HEAD_SHA"
+          publish_gate failure "samorev did not finish within 30 minutes"
           exit 1
