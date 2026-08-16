@@ -1,4 +1,4 @@
-export function cutoverState(document: unknown, ledgerDocument?: unknown): "cutover" | "migrated" {
+export function cutoverState(document: unknown, ledgerDocument: unknown): "cutover" | "migrated" {
   const total = (document as any)?.[0]?.results?.[0]?.total;
   if (total === 0) return "cutover";
   if (typeof total !== "number" || total < 1) throw new Error("invalid D1 migration-ledger query result");
