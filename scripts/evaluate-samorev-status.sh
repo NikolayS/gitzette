@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# NikolayS; verified with: gh api users/NikolayS --jq .id
-reviewer_id="1345402"
+# samo-agent; verified with: gh api users/samo-agent --jq .id
+reviewer_id="280144521"
+not_before="${SAMOREV_NOT_BEFORE:-}"
 statuses="$(cat)"
 if ! status="$(jq -ce '
   if type != "array" then error("expected an array") else . end
@@ -17,6 +18,7 @@ fi
 state="$(jq -r '.state // empty' <<<"$status")"
 creator_id="$(jq -r '.creator.id // empty' <<<"$status")"
 creator="$(jq -r '.creator.login // empty' <<<"$status")"
+created_at="$(jq -r '.created_at // empty' <<<"$status")"
 
 if [[ -z "$state" || "$state" == pending ]]; then
   exit 2
@@ -24,6 +26,9 @@ fi
 if [[ -z "$creator_id" || "$creator_id" != "$reviewer_id" ]]; then
   echo "samorev status has unexpected creator: $creator ($creator_id)" >&2
   exit 3
+fi
+if [[ -n "$not_before" && ( -z "$created_at" || "$created_at" < "$not_before" ) ]]; then
+  exit 2
 fi
 if [[ "$state" == success ]]; then
   echo "samorev passed by $creator ($creator_id)"

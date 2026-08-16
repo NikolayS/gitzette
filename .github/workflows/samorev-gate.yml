@@ -1,11 +1,11 @@
 name: samorev gate
 
-# pull_request_target loads this workflow from protected main, never from the
-# untrusted PR head. PR code executes only in the read-only, ephemeral test job.
+# pull_request_target loads and executes this workflow from protected main. It
+# never checks out or executes untrusted PR-head code.
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, ready_for_review, converted_to_draft, reopened]
+    types: [opened, synchronize, ready_for_review, converted_to_draft, reopened, edited]
 
 concurrency:
   group: samorev-gate-${{ github.event.pull_request.number }}
@@ -16,43 +16,23 @@ permissions:
   statuses: write
 
 jobs:
-  test-pr-head:
-    name: base-defined exact-head tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install --frozen-lockfile
-      - run: bunx tsc --noEmit
-      - run: bun test
-      - run: bash scripts/evaluate-samorev-status.test.sh
-      - run: shellcheck scripts/*.sh
-      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
-
   publish-samorev-gate:
     name: base-controlled samorev publisher
-    needs: test-pr-head
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: main
           persist-credentials: false
-      - name: Require the owner-published exact-head verdict
+      - name: Require the CODEOWNER-published exact-head verdict
+        id: verdict
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
           IS_DRAFT: ${{ github.event.pull_request.draft }}
-          TEST_RESULT: ${{ needs.test-pr-head.result }}
         run: |
           publish_gate() {
             gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
@@ -60,28 +40,20 @@ jobs:
               -f description="$2" \
               -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
           }
-          if [ "$TEST_RESULT" = success ]; then
-            gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
-              -f state=success -f context=typecheck-gate \
-              -f description="Base-defined exact-head tests passed" \
-              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-          else
-            gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
-              -f state=failure -f context=typecheck-gate \
-              -f description="Base-defined exact-head tests did not pass" \
-              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-            publish_gate failure "Base-defined exact-head tests did not pass"
-            exit 1
-          fi
+          publish_terminal() {
+            publish_gate "$1" "$2"
+            echo "published=1" >>"$GITHUB_OUTPUT"
+          }
           publish_gate pending "Waiting for the exact-head samorev verdict"
           if [ "$IS_DRAFT" = true ]; then
-            publish_gate failure "Draft PRs are not eligible for review"
+            publish_terminal failure "Draft PRs are not eligible for review"
             exit 1
           fi
           if [ ! -f scripts/evaluate-samorev-status.sh ]; then
-            publish_gate error "Base-branch samorev evaluator is missing"
+            publish_terminal error "Base-branch samorev evaluator is missing"
             exit 1
           fi
+          not_before="$(gh api "repos/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .run_started_at)"
           api_failures=0
           for attempt in $(seq 1 60); do
             echo "samorev verdict poll $attempt/60"
@@ -90,7 +62,7 @@ jobs:
               api_failures=$((api_failures + 1))
               if [ "$api_failures" -ge 3 ]; then
                 echo "GitHub status API failed three consecutive times; aborting" >&2
-                publish_gate error "GitHub status API failed three consecutive times"
+                publish_terminal error "GitHub status API failed three consecutive times"
                 exit 1
               fi
               if [ "$attempt" -lt 60 ]; then
@@ -100,19 +72,26 @@ jobs:
             fi
             api_failures=0
             verdict_rc=0
-            bash scripts/evaluate-samorev-status.sh <<<"$statuses" || verdict_rc=$?
+            SAMOREV_NOT_BEFORE="$not_before" bash scripts/evaluate-samorev-status.sh <<<"$statuses" || verdict_rc=$?
             case "$verdict_rc" in
               0)
-                publish_gate success "Owner-published samorev verdict passed"
+                publish_terminal success "CODEOWNER-published samorev verdict passed"
                 exit 0
                 ;;
               1|3)
-                publish_gate failure "samorev verdict failed identity or outcome validation"
+                publish_terminal failure "samorev verdict failed identity or outcome validation"
                 exit 1
                 ;;
               2) ;;
+              4)
+                api_failures=$((api_failures + 1))
+                if [ "$api_failures" -ge 3 ]; then
+                  publish_terminal error "samorev status response was malformed three times"
+                  exit 1
+                fi
+                ;;
               *)
-                publish_gate error "samorev verdict evaluator failed unexpectedly"
+                publish_terminal error "samorev verdict evaluator failed unexpectedly"
                 exit 1
                 ;;
             esac
@@ -121,10 +100,10 @@ jobs:
             fi
           done
           echo "samorev did not reach a final verdict on exact head $HEAD_SHA"
-          publish_gate failure "samorev did not finish within 30 minutes"
+          publish_terminal failure "samorev did not finish within 30 minutes"
           exit 1
       - name: Publish a terminal failure if the gate job did not complete
-        if: cancelled() || failure()
+        if: ${{ always() && steps.verdict.outputs.published != '1' }}
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
