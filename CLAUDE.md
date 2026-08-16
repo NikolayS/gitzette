@@ -2,7 +2,7 @@
 
 Before merging, follow [`docs/review-gate.md`](docs/review-gate.md). The former
 automatic PR workflow `claude-code-review.yml` was removed; the mention-driven
-`claude.yml` workflow remains. Exact-head Tanya301/samorev plus the
+`claude.yml` workflow remains. Exact-head `typecheck`, Tanya301/samorev, plus the
 base-controlled gate and a fresh `@samo-agent` CODEOWNER approval are required.
 
 Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or illustration rules.

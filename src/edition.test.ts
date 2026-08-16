@@ -59,6 +59,16 @@ describe("typed publication manifest", () => {
     expect(html).toMatch(/<article>[\s\S]*<h2>[\s\S]*<p>/);
   });
 
+  test("retains the legacy nonempty editorial-copy guards", () => {
+    const emptyHeadline = activeManifest();
+    emptyHeadline.edition.stories[0].headline = "   ";
+    expect(() => validateManifest(emptyHeadline, "octocat", "2026-W32")).toThrow("invalid story headline");
+
+    const emptyBody = activeManifest();
+    emptyBody.edition.stories[0].paragraphs = [""];
+    expect(() => validateManifest(emptyBody, "octocat", "2026-W32")).toThrow("invalid story paragraph");
+  });
+
   test("rejects unsupported claims and non-GitHub evidence links", () => {
     const unsupported = activeManifest();
     unsupported.edition.stories[0].evidenceIds = ["pr:404"];
