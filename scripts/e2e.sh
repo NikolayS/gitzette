@@ -22,7 +22,7 @@ bunx wrangler d1 execute gitzette-db --local --persist-to "$state_dir" --command
   "INSERT INTO users(id,username,avatar_url) VALUES('1','octocat',''),('2','intruder',''); INSERT INTO sessions(token,user_id,expires_at) VALUES('e2e-session','1',unixepoch()+3600),('intruder-session','2',unixepoch()+3600);" >/dev/null
 
 ready=false
-for attempt in $(seq 1 5); do
+for _attempt in $(seq 1 5); do
   # Ask the kernel for a free loopback port, then retry if another process wins
   # the small close-to-bind race before Wrangler starts.
   port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"

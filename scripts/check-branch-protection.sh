@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repository="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}"
-expected="$(jq -Sc 'del(.audit_command) | .required_status_checks.checks |= sort_by(.context)' config/main-branch-protection.json)"
-actual="$(gh api "repos/$repository/branches/main/protection" | jq -Sc '{required_status_checks:{strict:.required_status_checks.strict,checks:(.required_status_checks.checks|sort_by(.context))},enforce_admins:.enforce_admins.enabled,required_conversation_resolution:.required_conversation_resolution.enabled,allow_force_pushes:.allow_force_pushes.enabled,allow_deletions:.allow_deletions.enabled,required_linear_history:.required_linear_history.enabled}')"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
+expected="$(jq -Sc 'del(.audit_command) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
+protection="$(gh api "repos/$repository/branches/main/protection")"
+workflow_permissions="$(gh api "repos/$repository/actions/permissions/workflow")"
+ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=true&per_page=100" | jq -c 'add')"
+rulesets='[]'
+while IFS= read -r ruleset_url; do
+  ruleset="$(gh api "$ruleset_url")"
+  rulesets="$(jq -c --argjson ruleset "$ruleset" '. + [$ruleset]' <<<"$rulesets")"
+done < <(jq -r '.[]._links.self.href' <<<"$ruleset_summaries")
+actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
 
 if [[ "$actual" != "$expected" ]]; then
   echo "main branch protection differs from config/main-branch-protection.json" >&2
   echo "expected: $expected" >&2
   echo "actual:   $actual" >&2
+  if [[ "$(jq -c '.repository_rulesets' <<<"$actual")" != "$(jq -c '.repository_rulesets' <<<"$expected")" ]]; then
+    echo "effective repository rulesets differ; reconcile them manually before rerunning the audit" >&2
+  fi
   exit 1
 fi
 
-echo "Branch protection OK: exact-head CI and samorev are required for admins"
+echo "Branch protection OK: base-controlled gate, exact-head verdict, CI, and an independent fresh approval are required for admins"

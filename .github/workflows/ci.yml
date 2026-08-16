@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install image validation runtime
         run: |
@@ -27,9 +29,16 @@ jobs:
           (.required_status_checks.checks | sort_by(.context)) ==
           [{"context":"samorev","app_id":null},{"context":"samorev-gate","app_id":15368},{"context":"typecheck","app_id":15368}] and
           .enforce_admins == true and .required_conversation_resolution == true and
+          .required_pull_request_reviews.require_code_owner_reviews == true and
+          .required_pull_request_reviews.required_approving_review_count == 1 and
           .allow_force_pushes == false and .allow_deletions == false'
           config/main-branch-protection.json
       - run: bun run test:all
+      - run: bash scripts/evaluate-samorev-status.test.sh
+      - run: bash scripts/normalize-branch-protection.test.sh
+      - run: bash scripts/poll-samorev-gate.test.sh
+      - run: shellcheck scripts/*.sh
+      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
       # High/critical advisories block merges. Lower severities stay visible in
       # the weekly dependency-audit workflow without randomly blocking unrelated PRs.
       - run: bun audit --audit-level=high

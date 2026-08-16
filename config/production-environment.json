@@ -1,0 +1,15 @@
+{
+  "wait_timer": 0,
+  "prevent_self_review": true,
+  "reviewers": [
+    { "type": "User", "id": 1345402, "login": "NikolayS" },
+    { "type": "User", "id": 280144521, "login": "samo-agent" }
+  ],
+  "deployment_branch_policy": {
+    "protected_branches": false,
+    "custom_branch_policies": true
+  },
+  "branch_policies": [
+    { "name": "v*", "type": "tag" }
+  ]
+}

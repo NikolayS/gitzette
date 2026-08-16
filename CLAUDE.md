@@ -1,5 +1,10 @@
 # Agent notes — GitZette Worker
 
+Before merging, follow [`docs/review-gate.md`](docs/review-gate.md). The former
+automatic PR workflow `claude-code-review.yml` was removed; the mention-driven
+`claude.yml` workflow remains. Exact-head Tanya301/samorev plus the
+base-controlled gate and a fresh `@samo-agent` CODEOWNER approval are required.
+
 Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or illustration rules.
 
 ## Non-negotiable architecture
@@ -13,17 +18,7 @@ Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or il
 
 Run `bun run test:all`. The E2E must exercise the real local Worker, D1, R2, HTTP queue/runner APIs, and public read path. A mocked handler test is not a replacement.
 
-The former `claude-code-review.yml` workflow was removed because it could report
-green without an available reviewer credential. The protected `main` branch now
-requires a `samorev` commit status on the exact head SHA. Run the AI-analysis
-surface of `Tanya301/samorev` after every post-review change and post its verdict
-as that status; a prior SHA cannot satisfy the gate. Green CI alone is not a
-review.
-
-The status is published out-of-band by the owner-authorized TARS review runner:
-it runs `Tanya301/samorev --blocking --fetch`, then posts the parsed verdict to
-GitHub's commit-status API with context `samorev`, target URL set to the PR, and
-the exact reviewed SHA. `samorev-gate.yml` accepts that status only from
-`NikolayS`; branch protection requires the status itself to be `success`.
+Green CI alone is not a review. The separate `samo-agent` CODEOWNER runs
+Tanya301/samorev on every exact head and approves only after a clean exit.
 
 Before production activation, complete the canaries and mandatory post-deploy smoke test listed in `DISPATCH_SPEC.md`.

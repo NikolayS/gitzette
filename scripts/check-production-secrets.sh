@@ -9,6 +9,8 @@ fi
 secret_json="$(mktemp)"
 trap 'rm -f "$secret_json"' EXIT
 bunx wrangler secret list --format json >"$secret_json"
+# The Bun program intentionally receives shell values through argv.
+# shellcheck disable=SC2016
 bun -e '
   const secrets = JSON.parse(await Bun.file(process.argv[2]).text());
   if (!Array.isArray(secrets)) throw new Error("invalid Wrangler secret list");
