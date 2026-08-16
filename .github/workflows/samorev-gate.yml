@@ -1,0 +1,50 @@
+name: samorev gate
+
+# pull_request_target loads and executes this workflow from protected main. It
+# never checks out or executes untrusted PR-head code.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, ready_for_review, converted_to_draft, reopened, edited]
+
+concurrency:
+  group: samorev-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  publish-samorev-gate:
+    name: base-controlled samorev publisher
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Require the CODEOWNER-published exact-head verdict
+        id: verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          export SAMOREV_NOT_BEFORE
+          SAMOREV_NOT_BEFORE="$(gh api "repos/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .run_started_at)"
+          bash scripts/poll-samorev-gate.sh
+      - name: Publish a terminal failure if the gate job did not complete
+        if: ${{ always() && !cancelled() && steps.verdict.outputs.published != '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
+            -f state=failure -f context=samorev-gate \
+            -f description="Gate run did not complete; re-run required" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
