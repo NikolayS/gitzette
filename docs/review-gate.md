@@ -8,10 +8,13 @@ resolved.
 
 The CODEOWNER approval is the identity boundary. GitHub Actions status names
 are shared across workflows, and classic branch protection cannot bind a
-user-published commit status to one user. A same-repository workflow can
-therefore imitate any of the three required status names. Repository workflow
-tokens default to read-only and cannot approve pull requests, and the required
-CODEOWNER review prevents those imitated statuses from authorizing a merge.
+user-published commit status to one user. A same-repository PR workflow can
+request `statuses: write` even though the repository default is read-only, so it
+can imitate all three required status names. The `samo-agent` approver must never
+trust displayed check statuses: it approves only after its own exact-head
+samorev process exits zero and it has read any `.github/workflows/**` changes.
+Repository Actions cannot approve PRs, so a PR workflow cannot forge this
+CODEOWNER decision.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
@@ -38,7 +41,9 @@ environment; tag-triggered deploys require that environment's approval.
 This gate protects merges, not compromised administrator credentials, installed
 Apps, or secrets used by other event-triggered workflows. Actions holding
 secrets must be commit-SHA pinned and must not check out or execute untrusted PR
-code.
+code. The mention-driven Claude workflow is restricted to OWNER, MEMBER, or
+COLLABORATOR-authored comments/reviews/issues, so arbitrary public commenters
+cannot activate its OAuth credential.
 
 ## Requesting and approving a verdict
 
@@ -70,6 +75,7 @@ policy:
 
 ```bash
 bash scripts/apply-branch-protection.sh
+bash scripts/apply-production-environment.sh
 bash scripts/check-branch-protection.sh
 bash scripts/check-production-environment.sh
 ```

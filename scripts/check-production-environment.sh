@@ -7,8 +7,11 @@ if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
-expected="$(jq -Sc '.' "$root/config/production-environment.json")"
-environment="$(gh api "repos/$repository/environments/production")"
+expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$root/config/production-environment.json")"
+if ! environment="$(gh api "repos/$repository/environments/production" 2>/dev/null)"; then
+  echo "production environment is missing; run scripts/apply-production-environment.sh using config/production-environment.json" >&2
+  exit 1
+fi
 policies="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add')"
 actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$policies" '{
   wait_timer: ([ $environment.protection_rules[] | select(.type == "wait_timer") | .wait_timer ][0] // 0),

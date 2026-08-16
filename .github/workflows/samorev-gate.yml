@@ -34,76 +34,11 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           IS_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
-          publish_gate() {
-            gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
-              -f state="$1" -f context=samorev-gate \
-              -f description="$2" \
-              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-          }
-          publish_terminal() {
-            publish_gate "$1" "$2"
-            echo "published=1" >>"$GITHUB_OUTPUT"
-          }
-          publish_gate pending "Waiting for the exact-head samorev verdict"
-          if [ "$IS_DRAFT" = true ]; then
-            publish_terminal failure "Draft PRs are not eligible for review"
-            exit 1
-          fi
-          if [ ! -f scripts/evaluate-samorev-status.sh ]; then
-            publish_terminal error "Base-branch samorev evaluator is missing"
-            exit 1
-          fi
-          not_before="$(gh api "repos/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .run_started_at)"
-          api_failures=0
-          for attempt in $(seq 1 60); do
-            echo "samorev verdict poll $attempt/60"
-            if ! statuses="$(gh api --paginate --slurp "repos/$REPOSITORY/commits/$HEAD_SHA/statuses?per_page=100")"; then
-              echo "transient GitHub status API failure; retrying"
-              api_failures=$((api_failures + 1))
-              if [ "$api_failures" -ge 3 ]; then
-                echo "GitHub status API failed three consecutive times; aborting" >&2
-                publish_terminal error "GitHub status API failed three consecutive times"
-                exit 1
-              fi
-              if [ "$attempt" -lt 60 ]; then
-                sleep 30
-              fi
-              continue
-            fi
-            api_failures=0
-            verdict_rc=0
-            SAMOREV_NOT_BEFORE="$not_before" bash scripts/evaluate-samorev-status.sh <<<"$statuses" || verdict_rc=$?
-            case "$verdict_rc" in
-              0)
-                publish_terminal success "CODEOWNER-published samorev verdict passed"
-                exit 0
-                ;;
-              1|3)
-                publish_terminal failure "samorev verdict failed identity or outcome validation"
-                exit 1
-                ;;
-              2) ;;
-              4)
-                api_failures=$((api_failures + 1))
-                if [ "$api_failures" -ge 3 ]; then
-                  publish_terminal error "samorev status response was malformed three times"
-                  exit 1
-                fi
-                ;;
-              *)
-                publish_terminal error "samorev verdict evaluator failed unexpectedly"
-                exit 1
-                ;;
-            esac
-            if [ "$attempt" -lt 60 ]; then
-              sleep 30
-            fi
-          done
-          echo "samorev did not reach a final verdict on exact head $HEAD_SHA"
-          publish_terminal failure "samorev did not finish within 30 minutes"
-          exit 1
+          export SAMOREV_NOT_BEFORE
+          SAMOREV_NOT_BEFORE="$(gh api "repos/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .run_started_at)"
+          bash scripts/poll-samorev-gate.sh
       - name: Publish a terminal failure if the gate job did not complete
-        if: ${{ always() && steps.verdict.outputs.published != '1' }}
+        if: ${{ always() && !cancelled() && steps.verdict.outputs.published != '1' }}
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
