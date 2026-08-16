@@ -4,6 +4,7 @@ import {
   MAX_GENERATE_BODY_BYTES,
   blocksDuplicate,
   hasGenerationCapacity,
+  isAdmin,
   isGenerateBodyTooLarge,
   maxQueueAgeSeconds,
   positiveInteger,
@@ -32,6 +33,13 @@ describe("generation queue policy", () => {
     expect(hasGenerationCapacity(2, 101, 3, 100)).toBe(false);
     expect(hasGenerationCapacity(50, 99, 3, 100, true)).toBe(true);
     expect(hasGenerationCapacity(50, 100, 3, 100, true)).toBe(false);
+  });
+
+  test("fails closed when the immutable admin principal is unset or does not match", () => {
+    expect(isAdmin("1345402", undefined)).toBe(false);
+    expect(isAdmin("1345402", "")).toBe(false);
+    expect(isAdmin("intruder", "1345402")).toBe(false);
+    expect(isAdmin("1345402", "1345402")).toBe(true);
   });
 
   test("deduplicates every live status but not terminal states", () => {

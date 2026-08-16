@@ -66,7 +66,7 @@ queueRoutes.post("/generate", async (c) => {
 
   let target = requester;
   if (body.forUsername !== undefined) {
-    if (!isAdmin(requester.id, c.env)) return c.json({ error: "forbidden" }, 403);
+    if (!isAdmin(requester.id, c.env.ADMIN_USER_ID)) return c.json({ error: "forbidden" }, 403);
     if (typeof body.forUsername !== "string" || !isGitHubUsername(body.forUsername)) {
       return c.json({ error: "invalid forUsername" }, 400);
     }
@@ -100,7 +100,7 @@ queueRoutes.post("/generate", async (c) => {
          SELECT COUNT(*) FROM generation_jobs
          WHERE created_at>=unixepoch('now','-7 days')
        ) < ?`
-    ).bind(id, target.id, requester.id, weekKey, isAdmin(requester.id, c.env) ? 1 : 0, requester.id, requestLimit, globalLimit).run();
+    ).bind(id, target.id, requester.id, weekKey, isAdmin(requester.id, c.env.ADMIN_USER_ID) ? 1 : 0, requester.id, requestLimit, globalLimit).run();
     if ((inserted.meta.changes ?? 0) !== 1) {
       return c.json({ error: "generation capacity reached", weeklyUserLimit: requestLimit, weeklyGlobalLimit: globalLimit }, 429);
     }
@@ -121,7 +121,7 @@ queueRoutes.get("/generate/jobs/:id", async (c) => {
   if (!requester) return c.json({ error: "not authenticated" }, 401);
   const row = await getJob(c.env.DB, c.req.param("id"));
   if (!row) return c.json({ error: "not found" }, 404);
-  if (row.requested_by !== requester.id && row.user_id !== requester.id && !isAdmin(requester.id, c.env)) {
+  if (row.requested_by !== requester.id && row.user_id !== requester.id && !isAdmin(requester.id, c.env.ADMIN_USER_ID)) {
     return c.json({ error: "forbidden" }, 403);
   }
   return c.json({ job: publicJob(row) });
@@ -161,8 +161,8 @@ async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<v
   ).bind(maxAgeSeconds).run();
 }
 
-function isAdmin(userId: string, env: Env): boolean {
-  return Boolean(env.ADMIN_USER_ID) && userId === env.ADMIN_USER_ID;
+export function isAdmin(userId: string, adminUserId: string | undefined): boolean {
+  return Boolean(adminUserId) && userId === adminUserId;
 }
 
 function stalePublicRow(row: JobRow, maxAgeSeconds: number, now = Math.floor(Date.now() / 1000)): JobRow {

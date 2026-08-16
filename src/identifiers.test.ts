@@ -13,8 +13,9 @@ describe("external identifiers", () => {
     }
   });
 
-  test("accepts supported UUID versions and rejects invalid variants", () => {
+  test("accepts UUID v4 and rejects other versions or invalid variants", () => {
     expect(isUuid("00000000-0000-4000-8000-000000000000")).toBe(true);
+    expect(isUuid("00000000-0000-1000-8000-000000000000")).toBe(false);
     expect(isUuid("00000000-0000-9000-8000-000000000000")).toBe(false);
     expect(isUuid("00000000-0000-4000-7000-000000000000")).toBe(false);
     expect(isUuid("")).toBe(false);

@@ -1,4 +1,7 @@
 export function failureBackoffSeconds(consecutiveFailures: number, pollSeconds: number): number {
-  const failures = Math.max(0, Math.min(consecutiveFailures, 10));
-  return Math.min(15 * 60, pollSeconds * 2 ** failures);
+  const base = Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : 15 * 60;
+  const failures = Number.isFinite(consecutiveFailures)
+    ? Math.max(0, Math.min(Math.trunc(consecutiveFailures), 10))
+    : 10;
+  return Math.min(15 * 60, base * 2 ** failures);
 }
