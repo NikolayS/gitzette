@@ -16,7 +16,10 @@ to admins, and requires all conversations resolved. The owner-authorized agent
 submits that exact-commit approval through the installed Codex GitHub App only
 after independently classifying the final samorev report. A PR-authored Actions
 workflow cannot impersonate that App review, and the PR author cannot approve
-their own change.
+their own change. For same-repository agent branches, this independent fresh App
+approval is the load-bearing identity boundary; the three status contexts are
+required evidence and fail-closed orchestration, but GitHub Actions status
+contexts alone are not unique workflow identities.
 
 The external runner attaches `samorev: pending` before review and replaces it
 with `success`, `failure`, or `error` after parsing the blocking report. The
@@ -46,6 +49,10 @@ be reviewed and committed with its matching policy update.
 Reading live branch protection requires repository-administration read access.
 Run the audit from the repository root or any other directory; the script
 resolves its policy relative to itself.
+
+App ID `15368` is GitHub Actions (`gh api /apps/github-actions --jq .id`). It
+binds the expected status source to Actions but does not identify one particular
+workflow; the independent App review above supplies that separation.
 
 ## Bootstrap sequence
 

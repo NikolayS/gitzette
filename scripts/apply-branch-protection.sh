@@ -2,8 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-remote="$(git -C "$root" remote get-url origin)"
-repository="${GITHUB_REPOSITORY:-$(gh repo view "$remote" --json nameWithOwner --jq .nameWithOwner)}"
+repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 policy="$root/config/main-branch-protection.json"
 
 # The full endpoint establishes all classic controls. Its legacy contexts field

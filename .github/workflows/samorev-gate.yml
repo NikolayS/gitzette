@@ -5,10 +5,10 @@ name: samorev gate
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, ready_for_review, reopened, edited]
+    types: [opened, synchronize, ready_for_review, reopened]
 
 concurrency:
-  group: samorev-gate-${{ github.event.pull_request.number }}
+  group: samorev-gate-${{ github.event.pull_request.head.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -21,13 +21,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
       - name: Require the owner-published exact-head verdict
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
-          # NikolayS; verified with: gh api users/NikolayS --jq .id
-          REVIEWER_ID: "1345402"
           IS_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           publish_gate() {
@@ -43,7 +45,7 @@ jobs:
           api_failures=0
           for attempt in $(seq 1 60); do
             echo "samorev verdict poll $attempt/60"
-            if ! status="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/status" --jq '[.statuses[] | select(.context == "samorev")][0] // {}')"; then
+            if ! status="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/statuses?per_page=100" --jq '[.[] | select(.context == "samorev")][0] // {}')"; then
               echo "transient GitHub status API failure; retrying"
               api_failures=$((api_failures + 1))
               if [ "$api_failures" -ge 3 ]; then
@@ -55,24 +57,23 @@ jobs:
               continue
             fi
             api_failures=0
-            state="$(jq -r '.state // empty' <<<"$status")"
-            creator_id="$(jq -r '.creator.id // empty' <<<"$status")"
-            creator="$(jq -r '.creator.login // empty' <<<"$status")"
-            if [ -n "$state" ] && [ "$creator_id" != "$REVIEWER_ID" ]; then
-              echo "samorev status has unexpected creator: $creator ($creator_id)"
-              publish_gate failure "samorev verdict has an unexpected publisher"
-              exit 1
-            fi
-            if [ "$state" = success ]; then
-              echo "samorev passed on exact head $HEAD_SHA by $creator"
-              publish_gate success "Owner-published samorev verdict passed"
-              exit 0
-            fi
-            if [ "$state" = failure ] || [ "$state" = error ]; then
-              echo "samorev failed on exact head $HEAD_SHA"
-              publish_gate failure "Owner-published samorev verdict failed"
-              exit 1
-            fi
+            verdict_rc=0
+            bash scripts/evaluate-samorev-status.sh <<<"$status" || verdict_rc=$?
+            case "$verdict_rc" in
+              0)
+                publish_gate success "Owner-published samorev verdict passed"
+                exit 0
+                ;;
+              1|3)
+                publish_gate failure "samorev verdict failed identity or outcome validation"
+                exit 1
+                ;;
+              2) ;;
+              *)
+                publish_gate error "samorev verdict evaluator failed unexpectedly"
+                exit 1
+                ;;
+            esac
             sleep 30
           done
           echo "samorev did not reach a final verdict on exact head $HEAD_SHA"
