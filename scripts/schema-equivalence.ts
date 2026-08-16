@@ -14,6 +14,19 @@ function collapseSqlWhitespace(sql: string): string {
       }
       continue;
     }
+    if (char === "-" && sql[index + 1] === "-") {
+      index += 2;
+      while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") index += 1;
+      pendingSpace = true;
+      continue;
+    }
+    if (char === "/" && sql[index + 1] === "*") {
+      index += 2;
+      while (index < sql.length && !(sql[index] === "*" && sql[index + 1] === "/")) index += 1;
+      if (index < sql.length) index += 1;
+      pendingSpace = true;
+      continue;
+    }
     if (char === "'" || char === '"') {
       if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
       pendingSpace = false;

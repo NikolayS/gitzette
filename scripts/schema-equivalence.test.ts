@@ -31,6 +31,21 @@ describe("schema equivalence", () => {
     )).toBe(false);
   });
 
+  test("strips SQL comments without losing structural drift or doubled quotes", () => {
+    expect(schemasMatch(
+      schema("CREATE TABLE jobs(id TEXT /* user's immutable id */,state TEXT DEFAULT 'it''s ready')"),
+      schema("CREATE TABLE jobs(id TEXT,state TEXT DEFAULT 'it''s ready')"),
+    )).toBe(true);
+    expect(schemasMatch(
+      schema("CREATE TABLE jobs(id TEXT -- user's immutable id\n,state TEXT)"),
+      schema("CREATE TABLE jobs(id TEXT -- user's immutable id\n)"),
+    )).toBe(false);
+    expect(schemasMatch(
+      schema('CREATE TABLE jobs("id""quoted" TEXT,state TEXT)'),
+      schema('CREATE TABLE jobs("id""quoted" TEXT)'),
+    )).toBe(false);
+  });
+
   test("new-object migration fails closed on a pre-existing object", async () => {
     const migration = await Bun.file("migrations/0001_generation_queue.sql").text();
     expect(migration).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS/i);

@@ -41,6 +41,7 @@ bun run db:migrate
 wrangler secret put GITHUB_CLIENT_ID
 wrangler secret put GITHUB_CLIENT_SECRET
 wrangler secret put SESSION_SECRET
+wrangler secret put ADMIN_USER_ID
 wrangler secret put STATUS_TOKEN
 wrangler secret put RUNNER_SECRET
 

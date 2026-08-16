@@ -1,5 +1,4 @@
 import type { Edition, EvidenceBundle } from "../src/edition";
-import { lstat } from "node:fs/promises";
 import type { Inference } from "./types";
 import type { RunnerConfig } from "./config";
 import { inferenceEnv } from "./config";
@@ -37,10 +36,8 @@ export class OpenClawInference implements Inference {
       const parsed = JSON.parse(result) as { ok?: boolean; provider?: string; model?: string };
       if (!parsed.ok || parsed.provider !== "openai" || parsed.model !== "gpt-image-2") throw new Error("forbidden image transport or model");
     }
-    const artifact = await lstat(outputPath);
-    if (!artifact.isFile() || artifact.isSymbolicLink() || artifact.size < 1000 || artifact.size > 20 * 1024 * 1024) {
-      throw new Error("image inference produced no bounded regular file");
-    }
+    // RunnerEngine immediately hands this path to postProcessImage, whose
+    // descriptor-based O_NOFOLLOW open and fstat are the authoritative boundary.
   }
 
   async reviewIllustration(subject: string, imagePath: string): Promise<void> {
