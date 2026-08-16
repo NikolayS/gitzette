@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   samorev-gate:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -25,15 +26,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
+          # NikolayS; verified with: gh api users/NikolayS --jq .id
           REVIEWER_ID: "1345402"
         run: |
+          api_failures=0
           for attempt in $(seq 1 60); do
             echo "samorev verdict poll $attempt/60"
             if ! status="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/status" --jq '[.statuses[] | select(.context == "samorev")][0] // {}')"; then
               echo "transient GitHub status API failure; retrying"
+              api_failures=$((api_failures + 1))
+              if [ "$api_failures" -ge 3 ]; then
+                echo "GitHub status API failed three consecutive times; aborting" >&2
+                exit 1
+              fi
               sleep 30
               continue
             fi
+            api_failures=0
             state="$(jq -r '.state // empty' <<<"$status")"
             creator_id="$(jq -r '.creator.id // empty' <<<"$status")"
             creator="$(jq -r '.creator.login // empty' <<<"$status")"

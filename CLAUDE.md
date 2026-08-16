@@ -1,5 +1,9 @@
 # Claude notes — gitzette (Cloudflare Worker)
 
+Before merging, follow [`docs/review-gate.md`](docs/review-gate.md). The former
+optional Claude workflow was removed; exact-head Tanya301/samorev plus the
+base-controlled gate and an independent fresh App approval are required.
+
 **Before modifying `src/generate.ts`, the generation prompt, image budget, CSS layout, or anything to do with how a dispatch looks: read `DISPATCH_SPEC.md` first.** It encodes the specific choices (Opus not Sonnet, `shape-outside: circle()` not `url()`, webp + `output_compression: 60`, min 2 AI pics per dispatch, image-per-article not per-repo, etc.) that each took a painful debugging cycle to land on. The *why* for every rule is in that file.
 
 ## Running the worker
