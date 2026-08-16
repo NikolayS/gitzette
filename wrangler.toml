@@ -17,11 +17,13 @@ binding = "DISPATCHES"
 bucket_name = "gitzette-dispatches"
 
 [vars]
+ADMIN_USER_ID = "1345402"
 ROLLING_7D_USER_GENERATION_LIMIT = "3"
 ROLLING_7D_GLOBAL_GENERATION_LIMIT = "100"
 MAX_QUEUE_AGE_SECONDS = "21600"
 
-# secrets (set via: wrangler secret put GITHUB_CLIENT_SECRET etc.)
+# secrets (set via: wrangler secret put GITHUB_CLIENT_ID etc.)
+# GITHUB_CLIENT_ID
 # GITHUB_CLIENT_SECRET
 # SESSION_SECRET
 # STATUS_TOKEN       (rotatable Authorization bearer for the private operational dashboard)

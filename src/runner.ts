@@ -39,6 +39,11 @@ runnerRoutes.post("/jobs/claim", async (c) => {
   const leaseToken = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   const leaseExpires = now + leaseSeconds(c.env);
+  await c.env.DB.prepare(
+    `UPDATE generation_jobs
+     SET status='permanent_failed',last_error='generation attempts exhausted',lease_token=NULL,lease_expires_at=NULL,updated_at=?
+     WHERE attempt>=? AND status IN ('collecting','writing','illustrating','validating') AND lease_expires_at<?`
+  ).bind(now, MAX_ATTEMPTS, now).run();
   const row = await c.env.DB.prepare(
     `UPDATE generation_jobs
        SET status='collecting', attempt=attempt+1, lease_token=?, lease_expires_at=?, last_error=NULL, updated_at=?
@@ -53,12 +58,14 @@ runnerRoutes.post("/jobs/claim", async (c) => {
      RETURNING id,user_id,week_key,status,attempt,lease_token,lease_expires_at`
   ).bind(leaseToken, leaseExpires, now, MAX_ATTEMPTS, now).first<Omit<ClaimedJob, "username">>();
   if (!row) return c.body(null, 204);
+  await deleteStagingPrefix(c.env.DISPATCHES, `staging/${row.id}/`);
   const user = await c.env.DB.prepare("SELECT username FROM users WHERE id=?").bind(row.user_id).first<{ username: string }>();
   return c.json({ job: { ...row, username: user!.username, weekKey: row.week_key, leaseToken: row.lease_token, leaseExpiresAt: row.lease_expires_at } });
 });
 
 runnerRoutes.patch("/jobs/:id/heartbeat", async (c) => {
-  const body = await c.req.json<{ leaseToken?: string }>();
+  const body = await requestJson<{ leaseToken?: string }>(c);
+  if (!body) return c.json({ error: "invalid request body" }, 400);
   if (!body.leaseToken) return c.json({ error: "invalid heartbeat" }, 400);
   const result = await c.env.DB.prepare(
     `UPDATE generation_jobs SET updated_at=unixepoch(),lease_expires_at=unixepoch()+?
@@ -70,7 +77,8 @@ runnerRoutes.patch("/jobs/:id/heartbeat", async (c) => {
 });
 
 runnerRoutes.patch("/jobs/:id/stage", async (c) => {
-  const body = await c.req.json<{ leaseToken?: string; stage?: string }>();
+  const body = await requestJson<{ leaseToken?: string; stage?: string }>(c);
+  if (!body) return c.json({ error: "invalid request body" }, 400);
   if (!body.leaseToken || !body.stage || !STAGES.has(body.stage)) return c.json({ error: "invalid stage" }, 400);
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
@@ -104,7 +112,8 @@ runnerRoutes.put("/jobs/:id/artifacts/:name", async (c) => {
 });
 
 runnerRoutes.post("/jobs/:id/fail", async (c) => {
-  const body = await c.req.json<{ leaseToken?: string; error?: string; retryable?: boolean }>();
+  const body = await requestJson<{ leaseToken?: string; error?: string; retryable?: boolean }>(c);
+  if (!body) return c.json({ error: "invalid request body" }, 400);
   if (!body.leaseToken || typeof body.error !== "string") return c.json({ error: "invalid failure" }, 400);
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
@@ -112,11 +121,13 @@ runnerRoutes.post("/jobs/:id/fail", async (c) => {
   await c.env.DB.prepare(
     "UPDATE generation_jobs SET status=?,last_error=?,lease_token=NULL,lease_expires_at=NULL,updated_at=unixepoch() WHERE id=? AND lease_token=?"
   ).bind(status, body.error.slice(0, 1000), job.id, body.leaseToken).run();
+  await deleteStagingPrefix(c.env.DISPATCHES, `staging/${job.id}/${body.leaseToken}/`);
   return c.json({ status });
 });
 
 runnerRoutes.post("/jobs/:id/publish", async (c) => {
-  const body = await c.req.json<{ leaseToken?: string; manifest?: unknown }>();
+  const body = await requestJson<{ leaseToken?: string; manifest?: unknown }>(c);
+  if (!body) return c.json({ error: "invalid request body" }, 400);
   if (!body.leaseToken) return c.json({ error: "missing leaseToken" }, 400);
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
@@ -215,4 +226,22 @@ export function isForwardStage(current: string, requested: string): boolean {
 
 export function isArtifactTooLarge(bytes: number): boolean {
   return bytes > MAX_ARTIFACT_BYTES;
+}
+
+async function requestJson<T>(c: { req: { json<TValue>(): Promise<TValue> } }): Promise<T | null> {
+  try {
+    const body = await c.req.json<T>();
+    return body && typeof body === "object" && !Array.isArray(body) ? body : null;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteStagingPrefix(bucket: R2Bucket, prefix: string): Promise<void> {
+  let cursor: string | undefined;
+  do {
+    const page = await bucket.list({ prefix, cursor, limit: 1000 });
+    if (page.objects.length > 0) await bucket.delete(page.objects.map((object) => object.key));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
 }

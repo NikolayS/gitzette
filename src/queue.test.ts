@@ -7,6 +7,7 @@ import {
   isGenerateBodyTooLarge,
   maxQueueAgeSeconds,
   positiveInteger,
+  publicFailureCode,
 } from "./queue";
 import { isCompletedIsoWeekKey } from "./week";
 
@@ -43,5 +44,11 @@ describe("generation queue policy", () => {
     expect(maxQueueAgeSeconds({ MAX_QUEUE_AGE_SECONDS: "17" } as never)).toBe(17);
     expect(maxQueueAgeSeconds({ MAX_QUEUE_AGE_SECONDS: "0" } as never)).toBe(21_600);
     expect(positiveInteger("2.5", 9)).toBe(9);
+  });
+
+  test("maps private provider diagnostics to bounded public reason codes", () => {
+    expect(publicFailureCode("GitHub search incomplete: /secret/path")).toBe("evidence_incomplete");
+    expect(publicFailureCode("illustration validator failed: stderr token=secret")).toBe("validation_failed");
+    expect(publicFailureCode("OpenClaw failed: /home/runner/private")).toBe("provider_unavailable");
   });
 });

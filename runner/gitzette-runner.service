@@ -38,6 +38,7 @@ ReadWritePaths=/var/lib/gitzette-runner
 UMask=0077
 Restart=on-failure
 RestartSec=10s
+TimeoutStopSec=20s
 
 [Install]
 WantedBy=multi-user.target

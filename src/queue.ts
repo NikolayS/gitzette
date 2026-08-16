@@ -17,6 +17,7 @@ type JobRow = {
   week_key: string;
   status: string;
   attempt: number;
+  lease_expires_at: number | null;
   last_error: string | null;
   created_at: number;
   updated_at: number;
@@ -36,7 +37,7 @@ function publicJob(row: JobRow) {
     weekKey: row.week_key,
     status: row.status,
     attempt: row.attempt,
-    error: row.last_error,
+    error: publicError(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     publishedAt: row.published_at,
@@ -51,7 +52,12 @@ queueRoutes.post("/generate", async (c) => {
   if (isGenerateBodyTooLarge(declaredLength)) return c.json({ error: "request body too large" }, 413);
 
   let body: { weekKey?: unknown; forUsername?: unknown } = {};
-  try { body = await c.req.json(); } catch { /* empty body uses defaults */ }
+  const bytes = await c.req.arrayBuffer();
+  if (isGenerateBodyTooLarge(bytes.byteLength)) return c.json({ error: "request body too large" }, 413);
+  if (bytes.byteLength > 0) {
+    try { body = JSON.parse(new TextDecoder().decode(bytes)); }
+    catch { return c.json({ error: "invalid request body" }, 400); }
+  }
   if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "invalid request body" }, 400);
   const unknownFields = Object.keys(body).filter((key) => key !== "weekKey" && key !== "forUsername");
   if (unknownFields.length > 0) return c.json({ error: `unknown request field: ${unknownFields[0]}` }, 400);
@@ -60,7 +66,7 @@ queueRoutes.post("/generate", async (c) => {
 
   let target = requester;
   if (body.forUsername !== undefined) {
-    if (requester.username !== "NikolayS") return c.json({ error: "forbidden" }, 403);
+    if (!isAdmin(requester.id, c.env)) return c.json({ error: "forbidden" }, 403);
     if (typeof body.forUsername !== "string" || !isGitHubUsername(body.forUsername)) {
       return c.json({ error: "invalid forUsername" }, 400);
     }
@@ -94,7 +100,7 @@ queueRoutes.post("/generate", async (c) => {
          SELECT COUNT(*) FROM generation_jobs
          WHERE created_at>=unixepoch('now','-7 days')
        ) < ?`
-    ).bind(id, target.id, requester.id, weekKey, requester.username === "NikolayS" ? 1 : 0, requester.id, requestLimit, globalLimit).run();
+    ).bind(id, target.id, requester.id, weekKey, isAdmin(requester.id, c.env) ? 1 : 0, requester.id, requestLimit, globalLimit).run();
     if ((inserted.meta.changes ?? 0) !== 1) {
       return c.json({ error: "generation capacity reached", weeklyUserLimit: requestLimit, weeklyGlobalLimit: globalLimit }, 429);
     }
@@ -115,7 +121,7 @@ queueRoutes.get("/generate/jobs/:id", async (c) => {
   if (!requester) return c.json({ error: "not authenticated" }, 401);
   const row = await getJob(c.env.DB, c.req.param("id"));
   if (!row) return c.json({ error: "not found" }, 404);
-  if (row.requested_by !== requester.id && row.user_id !== requester.id && requester.username !== "NikolayS") {
+  if (row.requested_by !== requester.id && row.user_id !== requester.id && !isAdmin(requester.id, c.env)) {
     return c.json({ error: "forbidden" }, 403);
   }
   return c.json({ job: publicJob(row) });
@@ -124,18 +130,18 @@ queueRoutes.get("/generate/jobs/:id", async (c) => {
 queueRoutes.get("/generate/status", async (c) => {
   const requester = await getUser(c);
   if (!requester) return c.json({ error: "not authenticated" }, 401);
-  await expireStaleJobs(c.env.DB, maxQueueAgeSeconds(c.env));
   const row = await c.env.DB.prepare(
     `SELECT j.*, u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id
      WHERE j.user_id=? ORDER BY j.created_at DESC, j.rowid DESC LIMIT 1`
   ).bind(requester.id).first<JobRow>();
   if (!row) return c.json({ status: "none" });
-  const job = publicJob(row);
+  const effectiveRow = stalePublicRow(row, maxQueueAgeSeconds(c.env));
+  const job = publicJob(effectiveRow);
   // Keep the existing browser contract while exposing the precise durable
   // stage for new clients.
-  if (row.status === "published") return c.json({ job, status: "ready", stage: row.status, week_key: row.week_key });
-  if (row.status === "permanent_failed") return c.json({ job, status: "failed", stage: row.status, error: row.last_error });
-  return c.json({ job, status: "generating", stage: row.status, age: Math.max(0, Math.floor(Date.now() / 1000) - row.created_at) });
+  if (effectiveRow.status === "published") return c.json({ job, status: "ready", stage: effectiveRow.status, week_key: effectiveRow.week_key });
+  if (effectiveRow.status === "permanent_failed") return c.json({ job, status: "failed", stage: effectiveRow.status, error: job.error });
+  return c.json({ job, status: "generating", stage: effectiveRow.status, age: Math.max(0, Math.floor(Date.now() / 1000) - effectiveRow.created_at) });
 });
 
 async function getJob(db: D1Database, id: string): Promise<JobRow | null> {
@@ -148,8 +154,36 @@ async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<v
   await db.prepare(
     `UPDATE generation_jobs
      SET status='permanent_failed', last_error='generation runner unavailable; please retry', updated_at=unixepoch()
-     WHERE status IN ('queued','retryable_failed') AND created_at < unixepoch()-?`
+     WHERE (
+       status IN ('queued','retryable_failed') OR
+       (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
+     ) AND created_at < unixepoch()-?`
   ).bind(maxAgeSeconds).run();
+}
+
+function isAdmin(userId: string, env: Env): boolean {
+  return Boolean(env.ADMIN_USER_ID) && userId === env.ADMIN_USER_ID;
+}
+
+function stalePublicRow(row: JobRow, maxAgeSeconds: number, now = Math.floor(Date.now() / 1000)): JobRow {
+  const staleQueued = (row.status === "queued" || row.status === "retryable_failed") && row.created_at < now - maxAgeSeconds;
+  const staleLeased = ["collecting", "writing", "illustrating", "validating"].includes(row.status)
+    && row.created_at < now - maxAgeSeconds && (row.lease_expires_at ?? 0) < now;
+  return staleQueued || staleLeased
+    ? { ...row, status: "permanent_failed", last_error: "generation runner unavailable" }
+    : row;
+}
+
+function publicError(row: JobRow): string | null {
+  if (row.status !== "permanent_failed") return null;
+  return publicFailureCode(row.last_error);
+}
+
+export function publicFailureCode(internalMessage: string | null): string {
+  const message = (internalMessage || "").toLowerCase();
+  if (message.includes("collect") || message.includes("evidence") || message.includes("github")) return "evidence_incomplete";
+  if (message.includes("valid") || message.includes("illustr") || message.includes("editor")) return "validation_failed";
+  return "provider_unavailable";
 }
 
 export function maxQueueAgeSeconds(env: Env): number {

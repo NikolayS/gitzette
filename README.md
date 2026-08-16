@@ -38,6 +38,7 @@ wrangler d1 create gitzette-db
 bun run db:migrate
 
 # set secrets
+wrangler secret put GITHUB_CLIENT_ID
 wrangler secret put GITHUB_CLIENT_SECRET
 wrangler secret put SESSION_SECRET
 wrangler secret put STATUS_TOKEN

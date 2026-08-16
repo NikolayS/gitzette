@@ -20,8 +20,14 @@ const engine = new RunnerEngine(
 
 let stopping = false;
 let consecutiveFailures = 0;
-process.on("SIGTERM", () => { stopping = true; });
-process.on("SIGINT", () => { stopping = true; });
+let wakeForStop!: () => void;
+const stoppingSignal = new Promise<void>((resolve) => { wakeForStop = resolve; });
+const stop = () => {
+  stopping = true;
+  wakeForStop();
+};
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
 
 while (!stopping) {
   try {
@@ -36,5 +42,5 @@ while (!stopping) {
   // exponentially pause claims, capped at 15 minutes, instead of rapidly
   // consuming every queued attempt and the shared OAuth account's capacity.
   const delaySeconds = failureBackoffSeconds(consecutiveFailures, config.pollSeconds);
-  if (!stopping) await Bun.sleep(delaySeconds * 1000);
+  if (!stopping) await Promise.race([Bun.sleep(delaySeconds * 1000), stoppingSignal]);
 }

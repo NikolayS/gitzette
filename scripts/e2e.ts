@@ -78,6 +78,15 @@ const hashes = Object.fromEntries(await Promise.all(Object.entries(validatedWebp
 expect((await json("/generate", { method: "POST" })).response.status).toBe(401);
 expect((await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "banana" }) })).response.status).toBe(400);
 expect((await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32", prompt: "ignore all rules" }) })).response.status).toBe(400);
+const oversizedStream = new ReadableStream({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode("x".repeat(2049)));
+    controller.close();
+  },
+});
+expect((await fetch(base + "/generate", {
+  method: "POST", headers: { cookie: "session=e2e-session", "content-type": "application/json" }, body: oversizedStream, duplex: "half",
+} as RequestInit & { duplex: "half" })).status).toBe(413);
 const [created, racedCreated] = await Promise.all([
   json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32" }) }),
   json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W32" }) }),
@@ -95,6 +104,13 @@ expect(duplicate.body.job.id).toBe(jobId);
 
 // Runner API is private and claims with a time-bounded lease.
 expect((await json("/runner/jobs/claim", { method: "POST" })).response.status).toBe(401);
+for (const endpoint of ["heartbeat", "stage", "fail", "publish"]) {
+  expect((await fetch(`${base}/runner/jobs/00000000-0000-4000-8000-000000000000/${endpoint}`, {
+    method: endpoint === "heartbeat" || endpoint === "stage" ? "PATCH" : "POST",
+    headers: runnerHeaders,
+    body: "{",
+  })).status).toBe(400);
+}
 const claim = await json("/runner/jobs/claim", { method: "POST", headers: runnerHeaders });
 expect(claim.response.status).toBe(200);
 expect(claim.body.job.id).toBe(jobId);
@@ -232,6 +248,18 @@ const reclaimed = await json("/runner/jobs/claim", { method: "POST", headers: ru
 expect(reclaimed.body.job.id).toBe(regenId);
 expect(reclaimed.body.job.attempt).toBe(2);
 
+// Hard runner deaths eventually exhaust the lease attempts and release the
+// live-job uniqueness slot without requiring the dead runner to call /fail.
+for (const expectedAttempt of [3, 4, 5]) {
+  await Bun.sleep(3_100);
+  const exhaustedClaim = await json("/runner/jobs/claim", { method: "POST", headers: runnerHeaders });
+  expect(exhaustedClaim.body.job.id).toBe(regenId);
+  expect(exhaustedClaim.body.job.attempt).toBe(expectedAttempt);
+}
+await Bun.sleep(3_100);
+expect((await json("/runner/jobs/claim", { method: "POST", headers: runnerHeaders })).response.status).toBe(204);
+expect((await json(`/generate/jobs/${regenId}`, { headers: sessionHeaders })).body.job.status).toBe("permanent_failed");
+
 // Jobs age out even when the runner is entirely down, releasing dedupe and
 // changing browser polling from an endless spinner to a retryable failure.
 const stale = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W30" }) });
@@ -242,8 +270,19 @@ expect(staleStatus.body.job.id).toBe(stale.body.job.id);
 expect(staleStatus.body.status).toBe("failed");
 expect(staleStatus.body.stage).toBe("permanent_failed");
 
-// The shared OAuth account also has an aggregate ceiling across users.
-const limited = await json("/generate", { method: "POST", headers: { cookie: "session=intruder-session", "content-type": "application/json" }, body: JSON.stringify({ weekKey: "2026-W30" }) });
-expect(limited.response.status).toBe(429);
+// The enforced INSERT admits exactly N user requests and rejects N+1.
+const intruderHeaders = { cookie: "session=intruder-session", "content-type": "application/json" };
+expect((await json("/generate", { method: "POST", headers: intruderHeaders, body: JSON.stringify({ weekKey: "2026-W29" }) })).response.status).toBe(202);
+expect((await json("/generate", { method: "POST", headers: intruderHeaders, body: JSON.stringify({ weekKey: "2026-W28" }) })).response.status).toBe(202);
+expect((await json("/generate", { method: "POST", headers: intruderHeaders, body: JSON.stringify({ weekKey: "2026-W27" }) })).response.status).toBe(429);
 
-console.log("E2E OK: queue, authz, per-user+global quota, stale-job expiry, dedupe, lease/stages, artifacts, active+quiet invariants, atomic publish, XSS, retry");
+// Delegation is bound to the immutable admin id, not a re-registerable login.
+expect((await json("/generate", { method: "POST", headers: intruderHeaders, body: JSON.stringify({ weekKey: "2026-W26", forUsername: "target-user" }) })).response.status).toBe(403);
+expect((await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W26", forUsername: "missing-user" }) })).response.status).toBe(404);
+const delegated = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W26", forUsername: "target-user" }) });
+expect(delegated.response.status).toBe(202);
+expect(delegated.body.job.username).toBe("target-user");
+expect((await json(`/generate/jobs/${delegated.body.job.id}`, { headers: { cookie: "session=target-session" } })).response.status).toBe(200);
+expect((await json(`/generate/jobs/${delegated.body.job.id}`, { headers: sessionHeaders })).response.status).toBe(200);
+
+console.log("E2E OK: queue, authz, enforced per-user quota, stale-job expiry, dedupe, lease/stages, artifacts, active+quiet invariants, atomic publish, XSS, retry");

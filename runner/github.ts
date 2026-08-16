@@ -21,14 +21,13 @@ export class GitHubCollector implements Collector {
     if (!isGitHubUsername(username)) throw new Error("invalid GitHub username");
     const { from, toInclusive } = isoWeek(weekKey);
     const repositories = await this.contributionRepositories(username, from, toInclusive);
-    if (repositories.length > 30) throw new Error("GitHub repository set exceeds bounded collector capacity");
     const [commits, mergedPrs, createdPrs, issues, discussions, releases] = await Promise.all([
       this.search("commits", `author:${username} committer-date:${from}..${toInclusive}`),
       this.search("issues", `author:${username} is:pr is:merged merged:${from}..${toInclusive}`),
       this.search("issues", `author:${username} is:pr created:${from}..${toInclusive}`),
       this.search("issues", `author:${username} is:issue created:${from}..${toInclusive}`),
       this.discussions(username, from, toInclusive),
-      Promise.all(repositories.map((repo) => this.releases(repo, from, toInclusive))),
+      mapConcurrent(repositories, 5, (repo) => this.releases(repo, from, toInclusive)),
     ]);
 
     const items = new Map<string, EvidenceItem>();
@@ -68,24 +67,38 @@ export class GitHubCollector implements Collector {
   }
 
   private async search(kind: "commits" | "issues", query: string): Promise<SearchItem[]> {
-    const url = new URL(`https://api.github.com/search/${kind}`);
-    url.searchParams.set("q", query);
-    url.searchParams.set("sort", kind === "commits" ? "committer-date" : "updated");
-    url.searchParams.set("order", "desc");
-    url.searchParams.set("per_page", "100");
-    const body = await this.github(url.toString()) as { incomplete_results?: boolean; total_count?: number; items?: SearchItem[] };
-    if (body.incomplete_results || !Array.isArray(body.items) || (body.total_count ?? 0) > body.items.length) throw new Error(`GitHub ${kind} search incomplete`);
-    return body.items;
+    const items: SearchItem[] = [];
+    for (let page = 1; page <= 5; page++) {
+      const url = new URL(`https://api.github.com/search/${kind}`);
+      url.searchParams.set("q", query);
+      url.searchParams.set("sort", kind === "commits" ? "committer-date" : "updated");
+      url.searchParams.set("order", "desc");
+      url.searchParams.set("per_page", "100");
+      url.searchParams.set("page", String(page));
+      const body = await this.github(url.toString()) as { incomplete_results?: boolean; total_count?: number; items?: SearchItem[] };
+      if (body.incomplete_results || !Array.isArray(body.items)) throw new Error(`GitHub ${kind} search incomplete`);
+      items.push(...body.items);
+      if (body.items.length < 100 || items.length >= Math.min(body.total_count ?? items.length, 500)) break;
+    }
+    return items.slice(0, 500);
   }
 
   private async discussions(username: string, from: string, to: string): Promise<EvidenceItem[]> {
-    const query = `query($q:String!){search(query:$q,type:DISCUSSION,first:100){discussionCount nodes{... on Discussion{id title url repository{nameWithOwner}}}}}`;
-    const body = await this.github("https://api.github.com/graphql", {
-      method: "POST", body: JSON.stringify({ query, variables: { q: `author:${username} created:${from}..${to}` } }),
-    }) as any;
-    const search = body.data?.search;
-    if (body.errors || !search || search.discussionCount > search.nodes.length) throw new Error("GitHub discussion search incomplete");
-    return search.nodes.map((node: any) => ({
+    const query = `query($q:String!,$cursor:String){search(query:$q,type:DISCUSSION,first:100,after:$cursor){discussionCount pageInfo{hasNextPage endCursor} nodes{... on Discussion{id title url repository{nameWithOwner}}}}}`;
+    const nodes: any[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 5; page++) {
+      const body = await this.github("https://api.github.com/graphql", {
+        method: "POST", body: JSON.stringify({ query, variables: { q: `author:${username} created:${from}..${to}`, cursor } }),
+      }) as any;
+      const search = body.data?.search;
+      if (body.errors || !search || !Array.isArray(search.nodes)) throw new Error("GitHub discussion search incomplete");
+      nodes.push(...search.nodes);
+      if (!search.pageInfo?.hasNextPage || nodes.length >= 500) break;
+      if (typeof search.pageInfo.endCursor !== "string") throw new Error("GitHub discussion cursor missing");
+      cursor = search.pageInfo.endCursor;
+    }
+    return nodes.slice(0, 500).map((node: any) => ({
       id: `discussion:${node.id}`,
       type: "discussion" as const,
       title: String(node.title).slice(0, 500),
@@ -95,17 +108,19 @@ export class GitHubCollector implements Collector {
   }
 
   private async releases(repo: string, from: string, to: string): Promise<EvidenceItem[]> {
-    const response = await this.github(`https://api.github.com/repos/${repo}/releases?per_page=100`) as any[];
-    if (!Array.isArray(response)) throw new Error("GitHub releases response invalid");
-    const inRange = response.filter((release) => {
+    const response: any[] = [];
+    const encodedRepo = repo.split("/").map(encodeURIComponent).join("/");
+    for (let page = 1; page <= 5; page++) {
+      const batch = await this.github(`https://api.github.com/repos/${encodedRepo}/releases?per_page=100&page=${page}`) as any[];
+      if (!Array.isArray(batch)) throw new Error("GitHub releases response invalid");
+      response.push(...batch);
+      const oldest = String(batch.at(-1)?.published_at ?? batch.at(-1)?.created_at ?? "").slice(0, 10);
+      if (batch.length < 100 || oldest < from) break;
+    }
+    return response.filter((release) => {
       const date = String(release.published_at ?? release.created_at ?? "").slice(0, 10);
       return date >= from && date <= to;
-    });
-    if (response.length === 100) {
-      const oldest = String(response.at(-1)?.published_at ?? response.at(-1)?.created_at ?? "").slice(0, 10);
-      if (oldest >= from) throw new Error(`GitHub releases incomplete for ${repo}`);
-    }
-    return inRange.map((release) => ({
+    }).map((release) => ({
       id: `release:${repo}:${release.id}`,
       type: "release" as const,
       title: String(release.name ?? release.tag_name ?? "Release").slice(0, 500),
@@ -170,7 +185,20 @@ function isGitHubUrl(value: unknown): value is string {
 }
 
 function validRepo(value: string): boolean {
-  return /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(value);
+  if (!/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(value)) return false;
+  return value.split("/").every((segment) => segment !== "." && segment !== "..");
+}
+
+async function mapConcurrent<T, R>(items: readonly T[], limit: number, operation: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await operation(items[index]);
+    }
+  }));
+  return results;
 }
 
 export function isoWeek(weekKey: string): { from: string; toExclusive: string; toInclusive: string } {
