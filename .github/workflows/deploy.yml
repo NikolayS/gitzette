@@ -1,7 +1,10 @@
 name: Deploy
 
 permissions:
+  checks: read
   contents: read
+  pull-requests: read
+  statuses: read
 
 on:
   push:
@@ -13,6 +16,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Require the reviewed current main merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --no-tags origin main
+          main_sha="$(git rev-parse origin/main)"
+          if [ "$GITHUB_SHA" != "$main_sha" ]; then
+            echo "release tag must point to the current main tip" >&2
+            exit 1
+          fi
+
+          pulls="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls")"
+          reviewed_sha="$(jq -r --arg sha "$GITHUB_SHA" '[.[] | select(.base.ref == "main" and .merged_at != null and .merge_commit_sha == $sha)][0].head.sha // empty' <<<"$pulls")"
+          if [ -z "$reviewed_sha" ]; then
+            echo "release commit is not a merged, reviewed main PR" >&2
+            exit 1
+          fi
+
+          check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/check-runs?filter=latest&per_page=100")"
+          for name in typecheck samorev-gate; do
+            if ! jq -e --arg name "$name" 'any(.check_runs[]; .name == $name and .conclusion == "success" and .app.id == 15368)' <<<"$check_runs" >/dev/null; then
+              echo "reviewed head lacks successful app-bound $name" >&2
+              exit 1
+            fi
+          done
+
+          verdict="$(gh api "repos/$GITHUB_REPOSITORY/statuses/$reviewed_sha" --jq '[.[] | select(.context == "samorev")][0] // {}')"
+          if [ "$(jq -r '.state // empty' <<<"$verdict")" != success ] || [ "$(jq -r '.creator.login // empty' <<<"$verdict")" != NikolayS ]; then
+            echo "reviewed head lacks the final owner-published samorev success" >&2
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile
       - name: Verify required Worker secrets

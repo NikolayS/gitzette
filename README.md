@@ -84,4 +84,22 @@ The Worker contains no AI provider key or fallback. `RUNNER_SECRET` authenticate
 status. The owner-authorized TARS runner invokes Tanya301/samorev out of band,
 parses its blocking verdict, and posts the status through GitHub's statuses API.
 The PR-triggered gate verifies the status belongs to the current SHA and was
-created by `NikolayS`; branch protection requires `success`, including for admins.
+created by `NikolayS`. Branch protection requires both that GitHub-Actions-app-
+bound gate and the final external `samorev` status to succeed, including for
+admins; neither a pending verdict nor a rewritten proxy check is sufficient.
+Release tags are also fail closed: the deploy workflow accepts only a tag on
+the current `main` merge commit and re-verifies the associated PR head's two
+app-bound checks plus the final owner-published samorev status before touching
+production.
+
+If production canaries fail, disable `gitzette-runner.service` first. Existing
+immutable editions remain available. Deploy the last verified Worker tag if the
+control plane itself regressed; the additive D1 tables may remain unused and
+must not be dropped. Generation stays disabled until a reviewed forward repair
+and fresh canaries pass. Retired AI-provider credentials are not a rollback
+mechanism and must not be restored as a silent fallback.
+
+The scheduled moderate-or-higher dependency audit opens or updates a GitHub
+issue when it fails. GitHub may disable scheduled workflows after 60 days with
+no repository activity; operators must treat a missing weekly run as a failure
+and use `workflow_dispatch` to restore the cadence.

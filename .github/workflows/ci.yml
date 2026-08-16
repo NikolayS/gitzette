@@ -25,7 +25,7 @@ jobs:
         run: >-
           jq -e '.required_status_checks.strict == true and
           (.required_status_checks.checks | sort_by(.context)) ==
-          [{"context":"samorev-gate","app_id":15368},{"context":"typecheck","app_id":15368}] and
+          [{"context":"samorev","app_id":null},{"context":"samorev-gate","app_id":15368},{"context":"typecheck","app_id":15368}] and
           .enforce_admins == true and .required_conversation_resolution == true and
           .allow_force_pushes == false and .allow_deletions == false'
           config/main-branch-protection.json
