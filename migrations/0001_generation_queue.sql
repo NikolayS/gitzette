@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS generation_jobs (
+CREATE TABLE generation_jobs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   requested_by TEXT NOT NULL REFERENCES users(id),
@@ -16,14 +16,14 @@ CREATE TABLE IF NOT EXISTS generation_jobs (
   published_at INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS generation_jobs_claim
+CREATE INDEX generation_jobs_claim
   ON generation_jobs(status, lease_expires_at, created_at);
 
-CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_one_live_job
+CREATE UNIQUE INDEX generation_jobs_one_live_job
   ON generation_jobs(user_id, week_key)
   WHERE status IN ('queued', 'collecting', 'writing', 'illustrating', 'validating', 'retryable_failed');
 
-CREATE TABLE IF NOT EXISTS edition_versions (
+CREATE TABLE edition_versions (
   id TEXT PRIMARY KEY,
   job_id TEXT NOT NULL UNIQUE REFERENCES generation_jobs(id),
   user_id TEXT NOT NULL REFERENCES users(id),

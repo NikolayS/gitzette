@@ -30,4 +30,9 @@ describe("schema equivalence", () => {
       [{ results: [{ type: "index", name: "sqlite_autoindex_jobs_2", sql: null }] }],
     )).toBe(false);
   });
+
+  test("new-object migration fails closed on a pre-existing object", async () => {
+    const migration = await Bun.file("migrations/0001_generation_queue.sql").text();
+    expect(migration).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS/i);
+  });
 });
