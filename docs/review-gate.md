@@ -1,9 +1,9 @@
 # Exact-head review gate
 
-Protected `main` requires three independent signals:
+Protected `main` requires three exact-head status signals:
 
-- `typecheck`, the required correctness suite emitted by GitHub Actions (not an
-  identity boundary by itself);
+- `typecheck-gate`, emitted by the base-defined workflow after its separate,
+  read-only job checks out and tests the exact PR head;
 - `samorev`, the final exact-head Tanya301/samorev verdict published by the
   owner-authorized external runner;
 - `samorev-gate`, explicitly published on the PR head by a
@@ -18,8 +18,10 @@ a PR-authored workflow cannot manufacture that approval with `GITHUB_TOKEN`.
 The approval is an independent human-or-App trust decision, but classic branch
 protection cannot constrain it to one specific eligible collaborator or App;
 operator discipline still determines who may approve. The three status contexts
-are required evidence and fail-closed orchestration, but GitHub Actions status
-contexts alone are not unique workflow identities.
+are required evidence and fail-closed orchestration, but they are not three
+independent identities: GitHub Actions contexts are shared across workflows, and
+classic protection cannot bind a user-published status to one user. The fresh
+independent approval is the actual trust boundary.
 
 The external runner attaches `samorev: pending` before review and replaces it
 with `success`, `failure`, or `error` after parsing the blocking report. The
@@ -58,6 +60,30 @@ binds the expected status source to Actions but does not identify one particular
 workflow. The required independent approval and the audited prohibition on
 Actions-generated approvals supply the separate trust decision.
 
+The base-defined test job runs PR code only on a fresh GitHub-hosted runner with
+a read-only token and no declared secrets. The status-publisher job is separate
+and never executes PR-controlled code. The ordinary PR-defined `typecheck`
+workflow remains fast feedback, but it is not a protected trust signal.
+
+Draft PRs publish a failing `samorev-gate` and become eligible only after they
+are marked ready. Converting a reviewed PR back to draft re-runs the gate and
+invalidates that eligibility.
+
+## Requesting a verdict
+
+The owner-authorized operator starts a review from a clean checkout of the PR
+head with:
+
+```bash
+bun /home/tars/github/samorev/src/cli.ts review \
+  https://github.com/NikolayS/gitzette/pull/NUMBER --blocking --fetch
+```
+
+Start it after every push, including an "Update branch", while the base gate's
+30-minute polling window is active. The runner publishes `samorev: pending` and
+then the terminal exact-head verdict. A later verdict on an unchanged head
+requires re-running the failed gate job.
+
 ## Bootstrap sequence
 
 The base-controlled workflow must exist on `main` before it can govern another
@@ -68,3 +94,7 @@ samorev verdict pass. Then apply and verify the committed policy with:
 bash scripts/apply-branch-protection.sh
 bash scripts/check-branch-protection.sh
 ```
+
+The apply script deliberately does not delete repository rulesets. If the audit
+reports an unexpected effective ruleset, reconcile it manually and rerun the
+audit; silently deleting an organization or repository policy is unsafe.

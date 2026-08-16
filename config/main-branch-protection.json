@@ -9,7 +9,7 @@
     "checks": [
       { "context": "samorev", "app_id": null },
       { "context": "samorev-gate", "app_id": 15368 },
-      { "context": "typecheck", "app_id": 15368 }
+      { "context": "typecheck-gate", "app_id": 15368 }
     ]
   },
   "enforce_admins": true,

@@ -1,11 +1,11 @@
 name: samorev gate
 
-# Security boundary: pull_request_target loads this workflow from protected
-# main, never from the untrusted PR head. Keep permissions read-only.
+# pull_request_target loads this workflow from protected main, never from the
+# untrusted PR head. PR code executes only in the read-only, ephemeral test job.
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, synchronize, ready_for_review, converted_to_draft, reopened]
 
 concurrency:
   group: samorev-gate-${{ github.event.pull_request.number }}
@@ -16,8 +16,29 @@ permissions:
   statuses: write
 
 jobs:
+  test-pr-head:
+    name: base-defined exact-head tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+      - run: bun test
+      - run: bash scripts/evaluate-samorev-status.test.sh
+      - run: shellcheck scripts/*.sh
+      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
+
   publish-samorev-gate:
     name: base-controlled samorev publisher
+    needs: test-pr-head
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -31,6 +52,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
           IS_DRAFT: ${{ github.event.pull_request.draft }}
+          TEST_RESULT: ${{ needs.test-pr-head.result }}
         run: |
           publish_gate() {
             gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
@@ -38,6 +60,19 @@ jobs:
               -f description="$2" \
               -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
           }
+          if [ "$TEST_RESULT" = success ]; then
+            gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
+              -f state=success -f context=typecheck-gate \
+              -f description="Base-defined exact-head tests passed" \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          else
+            gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
+              -f state=failure -f context=typecheck-gate \
+              -f description="Base-defined exact-head tests did not pass" \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+            publish_gate failure "Base-defined exact-head tests did not pass"
+            exit 1
+          fi
           publish_gate pending "Waiting for the exact-head samorev verdict"
           if [ "$IS_DRAFT" = true ]; then
             publish_gate failure "Draft PRs are not eligible for review"
@@ -88,3 +123,14 @@ jobs:
           echo "samorev did not reach a final verdict on exact head $HEAD_SHA"
           publish_gate failure "samorev did not finish within 30 minutes"
           exit 1
+      - name: Publish a terminal failure if the gate job did not complete
+        if: cancelled() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
+            -f state=failure -f context=samorev-gate \
+            -f description="Gate run did not complete; re-run required" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null

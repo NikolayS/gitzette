@@ -46,5 +46,5 @@ else
   gh api --method DELETE "repos/$repository/branches/main/protection/required_signatures" --silent
 fi
 
-"$root/scripts/check-branch-protection.sh"
 trap - EXIT
+"$root/scripts/check-branch-protection.sh"
