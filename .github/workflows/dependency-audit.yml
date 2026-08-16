@@ -9,8 +9,10 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Keep dependency installation and auditing read-only. Issue writes happen
+  # only in the separate, failure-gated `notify` job below.
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -23,7 +25,7 @@ jobs:
   notify:
     if: ${{ always() && needs.audit.result == 'failure' }}
     needs: audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # The audit job remains read-only; only this failure notifier can write.
       issues: write
