@@ -25,6 +25,7 @@ jobs:
     needs: audit
     runs-on: ubuntu-latest
     permissions:
+      # The audit job remains read-only; only this failure notifier can write.
       issues: write
     steps:
       - name: Open or update dependency-audit issue

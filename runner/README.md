@@ -48,7 +48,15 @@ while existing editions remain available.
 The ImageMagick major version and policy path are pinned by provisioning. The
 integration suite bind-mounts the shipped policy onto the real ImageMagick 6
 configuration path and proves that a forbidden SVG coder invocation fails.
+CI runs on Ubuntu 24.04 with ImageMagick `6.9.12-98 Q16` packages pinned to
+`8:6.9.12.98+dfsg1-5.2build2`; production must use the same build and install
+`runner/imagemagick/policy.xml` at `/etc/ImageMagick-6/policy.xml` before the
+runner is enabled.
 
 `ROLLING_7D_USER_GENERATION_LIMIT` is per requester and
 `ROLLING_7D_GLOBAL_GENERATION_LIMIT` protects the shared OAuth identity across
-all requesters.
+all requesters. The dedicated ChatGPT OAuth subscription is not metered per
+model call, so the old API-dollar ledger does not represent its cost model;
+these count ceilings bound abuse and provider capacity instead. If the account
+ever moves to metered billing, disable the runner until a reviewed monetary
+budget gate is added.

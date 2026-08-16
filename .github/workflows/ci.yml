@@ -9,7 +9,7 @@ on:
 
 jobs:
   typecheck:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -18,7 +18,9 @@ jobs:
       - name: Install image validation runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y imagemagick
+          sudo apt-get install -y \
+            imagemagick=8:6.9.12.98+dfsg1-5.2build2 \
+            imagemagick-6.q16=8:6.9.12.98+dfsg1-5.2build2
           sudo install -o root -g root -m 0644 runner/imagemagick/policy.xml /etc/ImageMagick-6/policy.xml
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Verify systemd Bun invocation flag
