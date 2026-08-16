@@ -27,3 +27,16 @@ Operators invoke only `bun run db:migrate`. Its internal gates are
 the committed fixture and migration chain; they do not inspect or mutate live
 D1. All production schema checks are read-only. Only Wrangler's migration apply
 step mutates production.
+
+| Script | Pre-cutover database | Migrated database |
+| --- | --- | --- |
+| `check-production-baseline.sh` | Local/CI only: verifies the captured fixture matches `0000_base.sql`. | Same local/CI assertion; never contacts D1. |
+| `check-production-drift.sh` | Compares live D1 with the captured baseline and must print `Production cutover gate OK: unmigrated live D1 matches the reviewed baseline`. | Validates that the ledger contains `0000_base.sql`, then prints `Production cutover gate skipped: D1 migration ledger already exists`. |
+| `check-production-applied-schema.sh` | Must print `Applied-schema gate skipped: pre-cutover baseline gate owns the unmigrated database`. | Replays the exact ledger prefix locally and compares it with live D1 before mutation. |
+| `check-production-schema.sh` | Runs after the first remote apply and compares live D1 with the complete chain. | Runs after every remote apply and compares live D1 with the complete chain. |
+
+On the first successful `bun run db:migrate`, the operator must see the cutover
+gate OK line, the applied-schema skipped line, Wrangler's successful migration
+apply, and finally `Production schema OK: live D1 matches the complete reviewed
+migration chain`. Any missing or different gate line is a failed cutover; stop
+before deployment.
