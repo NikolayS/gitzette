@@ -58,7 +58,9 @@ jobs:
                 publish_gate error "GitHub status API failed three consecutive times"
                 exit 1
               fi
-              [ "$attempt" -lt 60 ] && sleep 30
+              if [ "$attempt" -lt 60 ]; then
+                sleep 30
+              fi
               continue
             fi
             api_failures=0
@@ -79,7 +81,9 @@ jobs:
                 exit 1
                 ;;
             esac
-            [ "$attempt" -lt 60 ] && sleep 30
+            if [ "$attempt" -lt 60 ]; then
+              sleep 30
+            fi
           done
           echo "samorev did not reach a final verdict on exact head $HEAD_SHA"
           publish_gate failure "samorev did not finish within 30 minutes"
