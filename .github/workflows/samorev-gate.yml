@@ -25,14 +25,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
+          REVIEWER_ID: "1345402"
         run: |
           for attempt in $(seq 1 60); do
             echo "samorev verdict poll $attempt/60"
-            status="$(gh api "repos/$REPOSITORY/statuses/$HEAD_SHA" --jq '[.[] | select(.context == "samorev")][0] // {}')"
+            if ! status="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/status" --jq '[.statuses[] | select(.context == "samorev")][0] // {}')"; then
+              echo "transient GitHub status API failure; retrying"
+              sleep 30
+              continue
+            fi
             state="$(jq -r '.state // empty' <<<"$status")"
+            creator_id="$(jq -r '.creator.id // empty' <<<"$status")"
             creator="$(jq -r '.creator.login // empty' <<<"$status")"
-            if [ -n "$state" ] && [ "$creator" != "NikolayS" ]; then
-              echo "samorev status has unexpected creator: $creator"
+            if [ -n "$state" ] && [ "$creator_id" != "$REVIEWER_ID" ]; then
+              echo "samorev status has unexpected creator: $creator ($creator_id)"
               exit 1
             fi
             if [ "$state" = success ]; then
