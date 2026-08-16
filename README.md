@@ -55,6 +55,20 @@ the wrapper also compares live D1 with a local replay of the complete reviewed
 migration chain and aborts deployment on any column, index, trigger, or view
 drift. Out-of-band production DDL is forbidden.
 
+If the post-migration live-schema assertion fails, do not deploy the Worker and
+do not edit the D1 migration ledger. Save the failed workflow URL and both
+schema dumps, identify whether the difference came from the reviewed migration
+or out-of-band DDL, and prepare a new forward-only repair migration. Re-run
+`bun run db:migrate`; only deploy after live D1 matches the complete local chain.
+Cloudflare D1 migrations have no automatic down path, so rollback means a
+reviewed forward repair or restoring a verified pre-migration backup.
+
+Before cutover, delete the retired Worker secrets `OPENROUTER_API_KEY`,
+`OPENAI_API_KEY`, `GITHUB_TOKEN`, and `NEWSPAPERIFY_SECRET` with
+`wrangler secret delete`, and revoke the corresponding provider-side keys.
+`scripts/check-production-secrets.sh` enforces the exact remaining Worker secret
+set and rejects any retired or unknown standing credential.
+
 ## Development
 
 ```bash

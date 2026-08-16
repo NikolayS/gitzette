@@ -2,7 +2,10 @@
   "audit_command": "bash scripts/check-branch-protection.sh",
   "required_status_checks": {
     "strict": true,
-    "contexts": ["samorev", "samorev-gate", "typecheck"]
+    "checks": [
+      { "context": "samorev-gate", "app_id": 15368 },
+      { "context": "typecheck", "app_id": 15368 }
+    ]
   },
   "enforce_admins": true,
   "required_conversation_resolution": true,

@@ -15,7 +15,7 @@ permissions:
 jobs:
   samorev-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 35
     steps:
       - name: Require an exact-head samorev status
         env:
@@ -23,10 +23,11 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          # Branch protection independently requires this exact status to be
-          # success. This PR-triggered check verifies the status is attached to
-          # the current head without creating a circular wait during review.
-          for attempt in $(seq 1 4); do
+          # This GitHub-Actions check is the protected gate. It waits for the
+          # external exact-head verdict and accepts success only when the latest
+          # status was created by the authorized owner account.
+          for attempt in $(seq 1 60); do
+            echo "samorev verdict poll $attempt/60"
             status="$(gh api "repos/$REPOSITORY/statuses/$HEAD_SHA" --jq '[.[] | select(.context == "samorev")][0] // {}')"
             state="$(jq -r '.state // empty' <<<"$status")"
             creator="$(jq -r '.creator.login // empty' <<<"$status")"
@@ -34,8 +35,8 @@ jobs:
               echo "samorev status has unexpected creator: $creator"
               exit 1
             fi
-            if [ "$state" = pending ] || [ "$state" = success ]; then
-              echo "samorev status exists on exact head $HEAD_SHA ($state by $creator)"
+            if [ "$state" = success ]; then
+              echo "samorev passed on exact head $HEAD_SHA by $creator"
               exit 0
             fi
             if [ "$state" = failure ] || [ "$state" = error ]; then
@@ -44,5 +45,5 @@ jobs:
             fi
             sleep 30
           done
-          echo "samorev status was not attached to exact head $HEAD_SHA"
+          echo "samorev did not reach a final verdict on exact head $HEAD_SHA"
           exit 1

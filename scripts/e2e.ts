@@ -3,7 +3,8 @@ import { ControlPlaneClient } from "../runner/control-plane";
 import { RunnerEngine } from "../runner/run";
 import type { Edition } from "../src/edition";
 
-const base = process.env.E2E_BASE_URL!;
+const base = process.env.E2E_BASE_URL;
+if (!base) throw new Error("E2E_BASE_URL is required; run via scripts/e2e.sh");
 const sessionHeaders = { cookie: "session=e2e-session", "content-type": "application/json" };
 const runnerHeaders = { authorization: "Bearer e2e-runner-secret", "content-type": "application/json" };
 const validatedWebps = {

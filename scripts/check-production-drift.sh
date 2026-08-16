@@ -13,9 +13,10 @@ fi
 fixture_state="$(mktemp -d)"
 remote_json="$(mktemp)"
 cutover_json="$(mktemp)"
+ledger_json="$(mktemp)"
 cleanup() {
   rm -rf "$fixture_state"
-  rm -f "$remote_json" "$cutover_json"
+  rm -f "$remote_json" "$cutover_json" "$ledger_json"
 }
 trap cleanup EXIT
 
@@ -25,9 +26,17 @@ trap cleanup EXIT
 # not compare the expanded schema with the old fixture.
 bunx wrangler d1 execute gitzette-db --remote --command \
   "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name='d1_migrations'" --json >"$cutover_json"
-if [[ "$(bun scripts/cutover-state.ts "$cutover_json")" == "migrated" ]]; then
+ledger_table_count="$(jq -r '.[0].results[0].total' "$cutover_json")"
+if [[ "$ledger_table_count" -gt 0 ]]; then
+  bunx wrangler d1 execute gitzette-db --remote --command \
+    "SELECT name FROM d1_migrations ORDER BY id" --json >"$ledger_json"
+  bun scripts/cutover-state.ts "$cutover_json" "$ledger_json" >/dev/null
   echo "Production cutover gate skipped: D1 migration ledger already exists"
   exit 0
+fi
+if [[ "$(bun scripts/cutover-state.ts "$cutover_json")" != "cutover" ]]; then
+  echo "unexpected cutover state" >&2
+  exit 1
 fi
 
 bunx wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --file fixtures/production-baseline-2026-08-15.sql >/dev/null

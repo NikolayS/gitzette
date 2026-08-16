@@ -7,7 +7,7 @@ server_pid=""
 
 cleanup() {
   if [[ -n "$server_pid" ]]; then
-    kill -- -"$server_pid" 2>/dev/null || true
+    kill -- -"$server_pid" 2>/dev/null || kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
     server_pid=""
   fi
@@ -51,7 +51,7 @@ for attempt in $(seq 1 5); do
   done
 
   if [[ -n "$server_pid" ]]; then
-    kill -- -"$server_pid" 2>/dev/null || true
+    kill -- -"$server_pid" 2>/dev/null || kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
     server_pid=""
   fi

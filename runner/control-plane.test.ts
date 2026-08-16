@@ -25,4 +25,16 @@ describe("control-plane client", () => {
     const client = new ControlPlaneClient("https://gitzette.online", "secret", request as unknown as typeof fetch);
     expect(client.claim()).rejects.toThrow("invalid job id");
   });
+
+  test("surfaces claim outages, lease rejection, and malformed payloads", async () => {
+    const unavailable = new ControlPlaneClient("https://gitzette.online", "secret", (async () => new Response("down", { status: 503 })) as unknown as typeof fetch);
+    await expect(unavailable.claim()).rejects.toThrow("claim returned 503");
+
+    const revoked = new ControlPlaneClient("https://gitzette.online", "secret", (async () => new Response("lease lost", { status: 409 })) as unknown as typeof fetch);
+    const job = { id, username: "octocat", weekKey: "2026-W32", leaseToken: lease, leaseExpiresAt: 1_800_000_000, attempt: 1 };
+    await expect(revoked.publish(job, {} as never)).rejects.toThrow("publish returned 409");
+
+    const malformed = new ControlPlaneClient("https://gitzette.online", "secret", (async () => Response.json({ job: { id, username: "octocat", weekKey: "2025-W53", leaseToken: lease, leaseExpiresAt: "later", attempt: 1 } })) as unknown as typeof fetch);
+    await expect(malformed.claim()).rejects.toThrow("invalid job week");
+  });
 });

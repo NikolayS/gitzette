@@ -4,6 +4,7 @@ import { GitHubCollector } from "./github";
 import { OpenClawInference } from "./inference";
 import { RunnerEngine } from "./run";
 import { ensurePrivateDirectory } from "./fs";
+import { failureBackoffSeconds } from "./backoff";
 
 const config = loadConfig();
 await ensurePrivateDirectory(config.openclawHome);
@@ -34,8 +35,6 @@ while (!stopping) {
   // Fail closed under provider throttling or broad outages. Repeated failures
   // exponentially pause claims, capped at 15 minutes, instead of rapidly
   // consuming every queued attempt and the shared OAuth account's capacity.
-  const delaySeconds = consecutiveFailures === 0
-    ? config.pollSeconds
-    : Math.min(15 * 60, config.pollSeconds * 2 ** Math.min(consecutiveFailures, 10));
+  const delaySeconds = failureBackoffSeconds(consecutiveFailures, config.pollSeconds);
   if (!stopping) await Bun.sleep(delaySeconds * 1000);
 }
