@@ -3,7 +3,17 @@ set -euo pipefail
 
 # NikolayS; verified with: gh api users/NikolayS --jq .id
 reviewer_id="1345402"
-status="$(cat)"
+statuses="$(cat)"
+if ! status="$(jq -ce '
+  if type != "array" then error("expected an array") else . end
+  | if length > 0 and (.[0] | type) == "array" then add else . end
+  | map(select(.context == "samorev"))
+  | sort_by(.created_at // "", .id // 0)
+  | last // {}
+' <<<"$statuses")"; then
+  echo "samorev status response is malformed" >&2
+  exit 4
+fi
 state="$(jq -r '.state // empty' <<<"$status")"
 creator_id="$(jq -r '.creator.id // empty' <<<"$status")"
 creator="$(jq -r '.creator.login // empty' <<<"$status")"

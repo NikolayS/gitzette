@@ -14,11 +14,15 @@ assert_exit() {
   fi
 }
 
-assert_exit 2 '{}'
-assert_exit 2 '{"state":"pending","creator":{"id":1345402,"login":"NikolayS"}}'
-assert_exit 0 '{"state":"success","creator":{"id":1345402,"login":"NikolayS"}}'
-assert_exit 3 '{"state":"success","creator":{"id":1,"login":"attacker"}}'
-assert_exit 3 '{"state":"success"}'
-assert_exit 1 '{"state":"failure","creator":{"id":1345402,"login":"NikolayS"}}'
+assert_exit 2 '[]'
+assert_exit 2 '[[{"context":"samorev","state":"pending","created_at":"2026-08-16T00:00:00Z","id":1,"creator":{"id":1345402,"login":"NikolayS"}}]]'
+assert_exit 0 '[{"context":"other","state":"failure","created_at":"2026-08-16T00:02:00Z","id":3},{"context":"samorev","state":"failure","created_at":"2026-08-16T00:00:00Z","id":1,"creator":{"id":1345402,"login":"NikolayS"}},{"context":"samorev","state":"success","created_at":"2026-08-16T00:01:00Z","id":2,"creator":{"id":1345402,"login":"NikolayS"}}]'
+assert_exit 3 '[{"context":"samorev","state":"success","creator":{"id":1,"login":"attacker"}}]'
+assert_exit 3 '[{"context":"samorev","state":"success"}]'
+assert_exit 1 '[{"context":"samorev","state":"failure","creator":{"id":1345402,"login":"NikolayS"}}]'
+assert_exit 1 '[{"context":"samorev","state":"error","creator":{"id":1345402,"login":"NikolayS"}}]'
+assert_exit 3 '[{"context":"samorev","state":"neutral","creator":{"id":1345402,"login":"NikolayS"}}]'
+assert_exit 4 'not-json'
+assert_exit 4 '{}'
 
 echo "samorev status evaluator tests passed"

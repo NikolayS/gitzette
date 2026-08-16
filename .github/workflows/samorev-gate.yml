@@ -8,7 +8,7 @@ on:
     types: [opened, synchronize, ready_for_review, reopened]
 
 concurrency:
-  group: samorev-gate-${{ github.event.pull_request.head.sha }}
+  group: samorev-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
@@ -19,11 +19,11 @@ jobs:
   publish-samorev-gate:
     name: base-controlled samorev publisher
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
       - name: Require the owner-published exact-head verdict
         env:
@@ -38,14 +38,19 @@ jobs:
               -f description="$2" \
               -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
           }
+          publish_gate pending "Waiting for the exact-head samorev verdict"
           if [ "$IS_DRAFT" = true ]; then
             publish_gate failure "Draft PRs are not eligible for review"
+            exit 1
+          fi
+          if [ ! -f scripts/evaluate-samorev-status.sh ]; then
+            publish_gate error "Base-branch samorev evaluator is missing"
             exit 1
           fi
           api_failures=0
           for attempt in $(seq 1 60); do
             echo "samorev verdict poll $attempt/60"
-            if ! status="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/statuses?per_page=100" --jq '[.[] | select(.context == "samorev")][0] // {}')"; then
+            if ! statuses="$(gh api --paginate --slurp "repos/$REPOSITORY/commits/$HEAD_SHA/statuses?per_page=100")"; then
               echo "transient GitHub status API failure; retrying"
               api_failures=$((api_failures + 1))
               if [ "$api_failures" -ge 3 ]; then
@@ -53,12 +58,12 @@ jobs:
                 publish_gate error "GitHub status API failed three consecutive times"
                 exit 1
               fi
-              sleep 30
+              [ "$attempt" -lt 60 ] && sleep 30
               continue
             fi
             api_failures=0
             verdict_rc=0
-            bash scripts/evaluate-samorev-status.sh <<<"$status" || verdict_rc=$?
+            bash scripts/evaluate-samorev-status.sh <<<"$statuses" || verdict_rc=$?
             case "$verdict_rc" in
               0)
                 publish_gate success "Owner-published samorev verdict passed"
@@ -74,7 +79,7 @@ jobs:
                 exit 1
                 ;;
             esac
-            sleep 30
+            [ "$attempt" -lt 60 ] && sleep 30
           done
           echo "samorev did not reach a final verdict on exact head $HEAD_SHA"
           publish_gate failure "samorev did not finish within 30 minutes"

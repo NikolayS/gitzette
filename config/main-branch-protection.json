@@ -1,5 +1,9 @@
 {
   "audit_command": "bash scripts/check-branch-protection.sh",
+  "actions_workflow_permissions": {
+    "default_workflow_permissions": "read",
+    "can_approve_pull_request_reviews": false
+  },
   "required_status_checks": {
     "strict": true,
     "checks": [
