@@ -55,8 +55,25 @@ runner is enabled.
 
 `ROLLING_7D_USER_GENERATION_LIMIT` is per requester and
 `ROLLING_7D_GLOBAL_GENERATION_LIMIT` protects the shared OAuth identity across
-all requesters. The dedicated ChatGPT OAuth subscription is not metered per
-model call, so the old API-dollar ledger does not represent its cost model;
-these count ceilings bound abuse and provider capacity instead. If the account
-ever moves to metered billing, disable the runner until a reviewed monetary
-budget gate is added.
+all requesters. The user limit rejects excess requests. The global limit is a
+separate provider-capacity admission gate: eligible requests remain queued in
+FIFO order, and the claim statement atomically reserves capacity by setting
+`capacity_started_at` only when provider work begins. Reclaims reuse the same
+reservation. Queued work ages out after six hours, so a saturated account does
+not hard-refuse or leave a first-time user blocked for days.
+
+Every successful job records input tokens, output tokens, token measurement
+source, generated image count, and runner wall time on `generation_jobs` in the
+same lease-guarded batch that publishes it. `/status` shows rolling-seven-day
+aggregates. OpenClaw 2026.7.1-beta.5 does not expose token usage in its local
+capability JSON, so the runner currently stores a deterministic UTF-8-byte/4
+estimate and labels it `estimated`; if a future envelope supplies bounded
+provider counts, it records them as `provider`. Image count and wall time are
+measured directly. The initial 100-start setting, its worst-case call shape,
+and the production calibration procedure are documented in
+[`docs/usage-calibration.md`](../docs/usage-calibration.md).
+
+The dedicated ChatGPT OAuth subscription is not an API-key billing account, so
+the old API-dollar ledger does not represent its cost model. If the account
+moves to metered billing, disable the runner until a reviewed monetary budget
+gate is added.

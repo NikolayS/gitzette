@@ -450,8 +450,22 @@ pageRoutes.get("/status", async (c) => {
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM users`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) AS total,
       SUM(CASE WHEN status='permanent_failed' THEN 1 ELSE 0 END) AS failed,
-      MIN(CASE WHEN status IN ('queued','retryable_failed') THEN created_at END) AS oldest_queued
-      FROM generation_jobs WHERE created_at>=unixepoch('now','-7 days')`).first<{ total: number; failed: number; oldest_queued: number | null }>(),
+      MIN(CASE WHEN status IN ('queued','retryable_failed') THEN created_at END) AS oldest_queued,
+      SUM(input_tokens) AS input_tokens,
+      SUM(output_tokens) AS output_tokens,
+      SUM(image_count) AS image_count,
+      SUM(wall_time_ms) AS wall_time_ms,
+      SUM(CASE WHEN token_source='estimated' THEN 1 ELSE 0 END) AS estimated_jobs
+      FROM generation_jobs WHERE created_at>=unixepoch('now','-7 days')`).first<{
+        total: number;
+        failed: number;
+        oldest_queued: number | null;
+        input_tokens: number | null;
+        output_tokens: number | null;
+        image_count: number | null;
+        wall_time_ms: number | null;
+        estimated_jobs: number | null;
+      }>(),
   ]);
   const now = Math.floor(Date.now() / 1000);
   return c.html(statusPage({
@@ -460,6 +474,11 @@ pageRoutes.get("/status", async (c) => {
     jobsThisWeek: jobsRow?.total ?? 0,
     failuresThisWeek: jobsRow?.failed ?? 0,
     oldestQueuedSeconds: jobsRow?.oldest_queued ? Math.max(0, now - jobsRow.oldest_queued) : 0,
+    inputTokensThisWeek: jobsRow?.input_tokens ?? 0,
+    outputTokensThisWeek: jobsRow?.output_tokens ?? 0,
+    imagesThisWeek: jobsRow?.image_count ?? 0,
+    runnerWallSecondsThisWeek: Math.round((jobsRow?.wall_time_ms ?? 0) / 1000),
+    estimatedTokenJobsThisWeek: jobsRow?.estimated_jobs ?? 0,
   }));
 });
 
@@ -655,7 +674,18 @@ ${headTags()}
 </html>`;
 }
 
-function statusPage(stats: { dispatches: number; users: number; jobsThisWeek: number; failuresThisWeek: number; oldestQueuedSeconds: number }): string {
+function statusPage(stats: {
+  dispatches: number;
+  users: number;
+  jobsThisWeek: number;
+  failuresThisWeek: number;
+  oldestQueuedSeconds: number;
+  inputTokensThisWeek: number;
+  outputTokensThisWeek: number;
+  imagesThisWeek: number;
+  runnerWallSecondsThisWeek: number;
+  estimatedTokenJobsThisWeek: number;
+}): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -698,6 +728,26 @@ ${headTags()}
   <div class="stat">
     <div class="label">Oldest queued job · seconds</div>
     <div class="value">${stats.oldestQueuedSeconds}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Input tokens · last 7 days</div>
+    <div class="value">${stats.inputTokensThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Output tokens · last 7 days</div>
+    <div class="value">${stats.outputTokensThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Images generated · last 7 days</div>
+    <div class="value">${stats.imagesThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Runner wall time · seconds · last 7 days</div>
+    <div class="value">${stats.runnerWallSecondsThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Jobs using token estimates · last 7 days</div>
+    <div class="value">${stats.estimatedTokenJobsThisWeek}</div>
   </div>
   ${creatorFooter()}
 </body>

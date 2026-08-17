@@ -56,15 +56,36 @@ Do not "simplify" these constraints without replacing the failure mode they addr
 ## Job protocol
 
 `POST /generate` authenticates the GitHub session, validates the target,
-enforces both per-user and global rolling-seven-day quotas, deduplicates live
-work, creates a D1 job, and immediately returns HTTP 202. The global ceiling
-protects the shared OAuth account even when an attacker rotates GitHub users.
+enforces the per-user rolling-seven-day request quota, deduplicates live work,
+creates a D1 job, and immediately returns HTTP 202. The global rolling-seven-day
+ceiling is enforced atomically when the runner claims provider work. Jobs above
+that ceiling remain in FIFO order instead of returning a global 429; they start
+as capacity recovers or visibly age out after six hours. This separates abuse
+control from provider capacity, protects the shared OAuth account when an
+attacker rotates GitHub users, and prevents one burst from hard-locking a
+first-time user out for days.
 
 The durable path is:
 
 `queued -> collecting -> writing -> illustrating -> validating -> published`
 
-The runner claims a job using a random ten-minute lease. Stage transitions are forward-only and renew the lease; a minute heartbeat keeps ownership during long collection and image-generation calls. Expired leases may be reclaimed. Failures are either `retryable_failed` (up to five claims) or `permanent_failed`. Repeated runner/provider failures exponentially pause claims for up to 15 minutes. Unclaimed queued/retryable jobs age out after six hours, so a disabled runner cannot leave the browser spinning or dedupe-blocked forever. Browser status maps these states to the legacy `generating`, `ready`, and `failed` UI contract while also returning the precise stage.
+The runner claims a job using a random ten-minute lease. Its first claim records
+`capacity_started_at`; subsequent lease reclaims reuse that one global-capacity
+reservation. Stage transitions are forward-only and renew the lease; a minute
+heartbeat keeps ownership during long collection and image-generation calls.
+Expired leases may be reclaimed. Failures are either `retryable_failed` (up to
+five claims) or `permanent_failed`. Repeated runner/provider failures
+exponentially pause claims for up to 15 minutes. Unclaimed queued/retryable jobs
+age out after six hours, so a disabled or saturated runner cannot leave the
+browser spinning or dedupe-blocked forever. Browser status maps these states to
+the legacy `generating`, `ready`, and `failed` UI contract while also returning
+the precise stage.
+
+Successful publication records bounded per-job input/output token counts,
+whether those counts came from the provider or the documented estimator, image
+count, and runner wall time in the same lease-guarded D1 batch. The private
+`/status` dashboard aggregates them over seven days. See
+`docs/usage-calibration.md` for the 100-job initial ceiling and activation rule.
 
 ## Canonical evidence and edition
 

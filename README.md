@@ -13,7 +13,14 @@ Your dispatch lives at `gitzette.online/@yourusername`.
 ## Quotas
 
 - 3 manual regenerations per user in a rolling seven-day window
-- 100 total generations across all users in a rolling seven-day window
+- 100 jobs may begin provider work across all users in a rolling seven-day window
+
+The global ceiling is enforced atomically by the runner claim, not by rejecting
+otherwise eligible requests. Excess work stays in FIFO order and either starts
+when capacity recovers or fails visibly after the six-hour queue-age limit. A
+burst therefore cannot turn the global account guardrail into a multi-day hard
+lockout for a first-time user. See [usage calibration](docs/usage-calibration.md)
+for the telemetry and activation rule behind the initial 100-job setting.
 
 Community-supported. [Sponsor the project](https://github.com/sponsors/NikolayS) to get more generations per week.
 

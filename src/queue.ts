@@ -5,8 +5,9 @@ import { isGitHubUsername } from "./identifiers";
 import { isCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
 export const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"] as const;
+export const TERMINAL_STATUSES = ["published", "permanent_failed"] as const;
+export const ALL_STATUSES = [...LIVE_STATUSES, ...TERMINAL_STATUSES] as const;
 export const MAX_GENERATE_BODY_BYTES = 2048;
-const DEFAULT_GLOBAL_WEEKLY_LIMIT = 100;
 const DEFAULT_MAX_QUEUE_AGE_SECONDS = 6 * 60 * 60;
 
 type JobRow = {
@@ -86,23 +87,17 @@ queueRoutes.post("/generate", async (c) => {
 
   const id = crypto.randomUUID();
   const requestLimit = Math.max(1, Number.parseInt(c.env.ROLLING_7D_USER_GENERATION_LIMIT || "3", 10) || 3);
-  const globalLimit = positiveInteger(c.env.ROLLING_7D_GLOBAL_GENERATION_LIMIT, DEFAULT_GLOBAL_WEEKLY_LIMIT);
   try {
     const inserted = await c.env.DB.prepare(
       `INSERT INTO generation_jobs (id,user_id,requested_by,week_key,status)
        SELECT ?,?,?,?,'queued'
-       WHERE (
-         ? OR (
-           SELECT COUNT(*) FROM generation_jobs
-           WHERE requested_by=? AND created_at>=unixepoch('now','-7 days')
-         ) < ?
-       ) AND (
+       WHERE ? OR (
          SELECT COUNT(*) FROM generation_jobs
-         WHERE created_at>=unixepoch('now','-7 days')
+         WHERE requested_by=? AND created_at>=unixepoch('now','-7 days')
        ) < ?`
-    ).bind(id, target.id, requester.id, weekKey, isAdmin(requester.id, c.env.ADMIN_USER_ID) ? 1 : 0, requester.id, requestLimit, globalLimit).run();
+    ).bind(id, target.id, requester.id, weekKey, isAdmin(requester.id, c.env.ADMIN_USER_ID) ? 1 : 0, requester.id, requestLimit).run();
     if ((inserted.meta.changes ?? 0) !== 1) {
-      return c.json({ error: "generation capacity reached", weeklyUserLimit: requestLimit, weeklyGlobalLimit: globalLimit }, 429);
+      return c.json({ error: "generation request limit reached", weeklyUserLimit: requestLimit }, 429);
     }
   } catch (error) {
     const raced = await c.env.DB.prepare(
@@ -203,15 +198,17 @@ export function blocksDuplicate(status: string): boolean {
   return (LIVE_STATUSES as readonly string[]).includes(status);
 }
 
-export function hasGenerationCapacity(
+export function hasGenerationRequestCapacity(
   userCount: number,
-  globalCount: number,
   userLimit: number,
-  globalLimit: number,
   isAdmin = false,
 ): boolean {
-  // This mirrors the policy for boundary tests only. Production enforcement is
-  // the single conditional INSERT ... SELECT above; dedupe is additionally
-  // protected by generation_jobs_one_live_job in migration 0001.
-  return (isAdmin || userCount < userLimit) && globalCount < globalLimit;
+  // Global provider capacity is enforced at claim time. Keeping it out of this
+  // admission decision lets first-time users queue instead of receiving a hard
+  // refusal after another user's burst.
+  return isAdmin || userCount < userLimit;
+}
+
+export function hasRunnerCapacity(globalStartedCount: number, globalLimit: number, alreadyStarted = false): boolean {
+  return alreadyStarted || globalStartedCount < globalLimit;
 }

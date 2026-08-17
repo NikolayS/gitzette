@@ -3,8 +3,11 @@ import { renderEdition, validateManifest, type PublicationManifest } from "./edi
 import { hasPublicationDimensions, webpDimensions } from "./image";
 import { bearerToken, secretMatches } from "./credentials";
 import type { Env } from "./index";
+import { validateJobUsage, type JobUsage } from "./usage";
 
 const DEFAULT_LEASE_SECONDS = 10 * 60;
+const DEFAULT_GLOBAL_WEEKLY_LIMIT = 100;
+const ROLLING_CAPACITY_SECONDS = 7 * 24 * 60 * 60;
 const MAX_ATTEMPTS = 5;
 const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024;
 const STAGES = new Set(["collecting", "writing", "illustrating", "validating"]);
@@ -39,6 +42,7 @@ runnerRoutes.post("/jobs/claim", async (c) => {
   const leaseToken = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   const leaseExpires = now + leaseSeconds(c.env);
+  const globalLimit = positiveInteger(c.env.ROLLING_7D_GLOBAL_GENERATION_LIMIT, DEFAULT_GLOBAL_WEEKLY_LIMIT);
   await c.env.DB.prepare(
     `UPDATE generation_jobs
      SET status='permanent_failed',last_error='generation attempts exhausted',lease_token=NULL,lease_expires_at=NULL,updated_at=?
@@ -46,17 +50,24 @@ runnerRoutes.post("/jobs/claim", async (c) => {
   ).bind(now, MAX_ATTEMPTS, now).run();
   const row = await c.env.DB.prepare(
     `UPDATE generation_jobs
-       SET status='collecting', attempt=attempt+1, lease_token=?, lease_expires_at=?, last_error=NULL, updated_at=?
+       SET status='collecting', attempt=attempt+1, capacity_started_at=COALESCE(capacity_started_at,?),
+           lease_token=?, lease_expires_at=?, last_error=NULL, updated_at=?
      WHERE id=(
        SELECT id FROM generation_jobs
        WHERE attempt < ? AND (
          status IN ('queued','retryable_failed') OR
          (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < ?)
        )
-       ORDER BY created_at LIMIT 1
+       AND (
+         capacity_started_at IS NOT NULL OR (
+           SELECT COUNT(*) FROM generation_jobs
+           WHERE capacity_started_at>=?
+         ) < ?
+       )
+       ORDER BY created_at, rowid LIMIT 1
      )
      RETURNING id,user_id,week_key,status,attempt,lease_token,lease_expires_at`
-  ).bind(leaseToken, leaseExpires, now, MAX_ATTEMPTS, now).first<Omit<ClaimedJob, "username">>();
+  ).bind(now, leaseToken, leaseExpires, now, MAX_ATTEMPTS, now, now - ROLLING_CAPACITY_SECONDS, globalLimit).first<Omit<ClaimedJob, "username">>();
   if (!row) return c.body(null, 204);
   await deleteStagingPrefix(c.env.DISPATCHES, `staging/${row.id}/`);
   const user = await c.env.DB.prepare("SELECT username FROM users WHERE id=?").bind(row.user_id).first<{ username: string }>();
@@ -126,7 +137,7 @@ runnerRoutes.post("/jobs/:id/fail", async (c) => {
 });
 
 runnerRoutes.post("/jobs/:id/publish", async (c) => {
-  const body = await requestJson<{ leaseToken?: string; manifest?: unknown }>(c);
+  const body = await requestJson<{ leaseToken?: string; manifest?: unknown; usage?: unknown }>(c);
   if (!body) return c.json({ error: "invalid request body" }, 400);
   if (!body.leaseToken) return c.json({ error: "missing leaseToken" }, 400);
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
@@ -136,6 +147,10 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
   let manifest: PublicationManifest;
   try { manifest = validateManifest(body.manifest, job.username, job.week_key); }
   catch (error) { return c.json({ error: String(error) }, 422); }
+  let usage: JobUsage;
+  try { usage = validateJobUsage(body.usage); }
+  catch (error) { return c.json({ error: String(error) }, 422); }
+  if (usage.imageCount !== manifest.images.length) return c.json({ error: "usage image count mismatch" }, 422);
 
   const finalImages = new Map<string, string>();
   for (const image of manifest.images) {
@@ -177,9 +192,10 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
          ON CONFLICT(user_id,week_key) DO UPDATE SET r2_key=excluded.r2_key, generated_at=excluded.generated_at`
       ).bind(versionId),
       c.env.DB.prepare(
-        `UPDATE generation_jobs SET status='published',published_at=unixepoch(),updated_at=unixepoch(),lease_token=NULL,lease_expires_at=NULL
+        `UPDATE generation_jobs SET status='published',published_at=unixepoch(),updated_at=unixepoch(),
+           input_tokens=?,output_tokens=?,token_source=?,image_count=?,wall_time_ms=?,lease_token=NULL,lease_expires_at=NULL
          WHERE id=? AND lease_token=? AND lease_expires_at>=unixepoch()`
-      ).bind(job.id, body.leaseToken),
+      ).bind(usage.inputTokens, usage.outputTokens, usage.tokenSource, usage.imageCount, usage.wallTimeMs, job.id, body.leaseToken),
     ]);
   } catch (error) {
     console.error("atomic publish failed", error);
@@ -218,6 +234,11 @@ function leaseSeconds(env: Env): number {
   return Number.isInteger(configured) && configured >= 2 && configured <= 3600
     ? configured
     : DEFAULT_LEASE_SECONDS;
+}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export function isForwardStage(current: string, requested: string): boolean {

@@ -28,10 +28,11 @@ for _attempt in $(seq 1 5); do
   port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
   setsid bunx wrangler dev --local --port "$port" --persist-to "$state_dir" \
     --var RUNNER_SECRET:e2e-runner-secret \
+    --var STATUS_TOKEN:e2e-status-token \
     --var SESSION_SECRET:e2e-session-secret \
     --var ADMIN_USER_ID:1 \
     --var ROLLING_7D_USER_GENERATION_LIMIT:2 \
-    --var ROLLING_7D_GLOBAL_GENERATION_LIMIT:100 \
+    --var ROLLING_7D_GLOBAL_GENERATION_LIMIT:4 \
     --var MAX_QUEUE_AGE_SECONDS:2 \
     --var RUNNER_LEASE_SECONDS:2 \
     --show-interactive-dev-session=false >"$state_dir/wrangler.log" 2>&1 &

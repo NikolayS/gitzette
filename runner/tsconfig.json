@@ -5,6 +5,6 @@
     "types": ["bun"],
     "noEmit": true
   },
-  "include": ["./**/*.ts", "../src/edition.ts", "../src/image.ts", "../src/identifiers.ts", "../src/week.ts"],
+  "include": ["./**/*.ts", "../src/edition.ts", "../src/image.ts", "../src/identifiers.ts", "../src/usage.ts", "../src/week.ts"],
   "exclude": ["node_modules"]
 }

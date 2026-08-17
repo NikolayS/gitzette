@@ -6,6 +6,7 @@ import type { Edition, EvidenceBundle, PublicationManifest } from "../src/editio
 import type { RunnerConfig } from "./config";
 import { RunnerEngine } from "./run";
 import type { ClaimedJob, Collector, Inference, Publisher, RunnerStage } from "./types";
+import type { JobUsage, TokenUsage } from "../src/usage";
 
 const job: ClaimedJob = { id: "2bb65583-b570-4a55-b4e4-5de336b10664", username: "octocat", weekKey: "2026-W32", leaseToken: "5ba2cbaf-5dc5-4a3a-8be0-d4230dd11e09", leaseExpiresAt: 1_800_000_000, attempt: 1 };
 
@@ -14,13 +15,14 @@ class FakePublisher implements Publisher {
   heartbeats = 0;
   uploads: string[] = [];
   published?: PublicationManifest;
+  publishedUsage?: JobUsage;
   failure?: string;
   constructor(private queued: ClaimedJob | null = job) {}
   async claim() { const value = this.queued; this.queued = null; return value; }
   async heartbeat() { this.heartbeats++; }
   async stage(_job: ClaimedJob, stage: RunnerStage) { this.stages.push(stage); }
   async upload(_job: ClaimedJob, key: string) { this.uploads.push(key); }
-  async publish(_job: ClaimedJob, manifest: PublicationManifest) { this.published = manifest; }
+  async publish(_job: ClaimedJob, manifest: PublicationManifest, usage: JobUsage) { this.published = manifest; this.publishedUsage = usage; }
   async fail(_job: ClaimedJob, message: string) { this.failure = message; }
 }
 
@@ -49,19 +51,27 @@ describe("runner engine", () => {
     const evidence: EvidenceBundle = { state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "Parser fix", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] };
     let image = 0;
     const inference: Inference = {
-      write: async () => edition,
+      write: async () => ({ edition, usage: tokenUsage(100, 20) }),
       illustrate: async (_subject, output) => {
         image++;
         const child = Bun.spawn(["/usr/bin/convert", "-size", "1024x1024", "xc:#f7f4ee", "-fill", image === 1 ? "red" : "blue", "-draw", "circle 512,512 760,512", output]);
         expect(await child.exited).toBe(0);
+        return tokenUsage(10, 0);
       },
-      reviewIllustration: async () => {},
+      reviewIllustration: async () => tokenUsage(5, 1),
     };
     const result = await new RunnerEngine(config(directory), publisher, { collect: async () => evidence }, inference).runOnce();
     expect(result, publisher.failure).toBe("processed");
     expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp"]);
     expect(publisher.published?.images).toHaveLength(2);
     expect(publisher.published?.promptVersion).toBe("gitzette-editor-v2");
+    expect(publisher.publishedUsage).toMatchObject({
+      inputTokens: 130,
+      outputTokens: 22,
+      tokenSource: "estimated",
+      imageCount: 2,
+    });
+    expect(publisher.publishedUsage?.wallTimeMs).toBeGreaterThanOrEqual(0);
     expect(publisher.failure).toBeUndefined();
   });
 
@@ -69,7 +79,11 @@ describe("runner engine", () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
     const publisher = new FakePublisher();
     const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
-    const inference: Inference = { write: async () => { throw new Error("unknown edition field: prompt"); }, illustrate: async () => {}, reviewIllustration: async () => {} };
+    const inference: Inference = {
+      write: async () => { throw new Error("unknown edition field: prompt"); },
+      illustrate: async () => tokenUsage(0, 0),
+      reviewIllustration: async () => tokenUsage(0, 0),
+    };
     expect(await new RunnerEngine(config(directory), publisher, collector, inference).runOnce()).toBe("failed");
     expect(publisher.published).toBeUndefined();
     expect(publisher.failure).toContain("prompt");
@@ -83,7 +97,7 @@ describe("runner engine", () => {
     const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
     const inference: Inference = {
       write: async () => { await Bun.sleep(35); throw new Error("stop after heartbeat proof"); },
-      illustrate: async () => {}, reviewIllustration: async () => {},
+      illustrate: async () => tokenUsage(0, 0), reviewIllustration: async () => tokenUsage(0, 0),
     };
     expect(await new RunnerEngine(slowConfig, publisher, collector, inference).runOnce()).toBe("failed");
     expect(publisher.heartbeats).toBeGreaterThanOrEqual(2);
@@ -97,4 +111,8 @@ function config(directory: string): RunnerConfig {
     workDir: directory, generatorVersion: "test", imageMagickBin: "/usr/bin/convert",
     imageMagickCompareBin: "/usr/bin/compare",
   };
+}
+
+function tokenUsage(inputTokens: number, outputTokens: number): TokenUsage {
+  return { inputTokens, outputTokens, tokenSource: "estimated" };
 }

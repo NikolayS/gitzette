@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ControlPlaneClient } from "./control-plane";
+import type { JobUsage } from "../src/usage";
 
 const id = "2bb65583-b570-4a55-b4e4-5de336b10664";
 const lease = "5ba2cbaf-5dc5-4a3a-8be0-d4230dd11e09";
@@ -32,7 +33,8 @@ describe("control-plane client", () => {
 
     const revoked = new ControlPlaneClient("https://gitzette.online", "secret", (async () => new Response("lease lost", { status: 409 })) as unknown as typeof fetch);
     const job = { id, username: "octocat", weekKey: "2026-W32", leaseToken: lease, leaseExpiresAt: 1_800_000_000, attempt: 1 };
-    await expect(revoked.publish(job, {} as never)).rejects.toThrow("publish returned 409");
+    const usage: JobUsage = { inputTokens: 0, outputTokens: 0, tokenSource: "none", imageCount: 0, wallTimeMs: 1 };
+    await expect(revoked.publish(job, {} as never, usage)).rejects.toThrow("publish returned 409");
 
     const malformed = new ControlPlaneClient("https://gitzette.online", "secret", (async () => Response.json({ job: { id, username: "octocat", weekKey: "2025-W53", leaseToken: lease, leaseExpiresAt: "later", attempt: 1 } })) as unknown as typeof fetch);
     await expect(malformed.claim()).rejects.toThrow("invalid job week");

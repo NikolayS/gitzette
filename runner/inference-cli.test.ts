@@ -18,13 +18,15 @@ describe("OpenClaw CLI boundary", () => {
       return Bun.spawn(["/usr/bin/true"], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     }) as typeof Bun.spawn;
 
-    await new OpenClawInference(config(directory), spawn).illustrate("hostile $(touch /tmp/nope)", output);
+    const usage = await new OpenClawInference(config(directory), spawn).illustrate("hostile $(touch /tmp/nope)", output);
     expect(originalArgv[0]).toBe("/sealed/openclaw");
     expect(originalArgv.slice(1, 5)).toEqual(["infer", "image", "generate", "--json"]);
     expect(originalArgv).not.toContain("sh");
     expect(originalEnv.GITZETTE_RUNNER_SECRET).toBeUndefined();
     expect(originalEnv.GITZETTE_GITHUB_TOKEN).toBeUndefined();
     expect(originalEnv.OPENAI_API_KEY).toBeUndefined();
+    expect(usage.tokenSource).toBe("estimated");
+    expect(usage.inputTokens).toBeGreaterThan(0);
   });
 });
 

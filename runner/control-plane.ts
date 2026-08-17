@@ -1,5 +1,6 @@
 import type { ClaimedJob, Publisher, RunnerStage } from "./types";
 import type { PublicationManifest } from "../src/edition";
+import type { JobUsage } from "../src/usage";
 import { isGitHubUsername, isUuid } from "../src/identifiers";
 import { isCompletedIsoWeekKey } from "../src/week";
 
@@ -46,11 +47,11 @@ export class ControlPlaneClient implements Publisher {
     });
   }
 
-  async publish(job: ClaimedJob, manifest: PublicationManifest): Promise<void> {
+  async publish(job: ClaimedJob, manifest: PublicationManifest, usage: JobUsage): Promise<void> {
     await this.expectOk(`/runner/jobs/${job.id}/publish`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ leaseToken: job.leaseToken, manifest }),
+      body: JSON.stringify({ leaseToken: job.leaseToken, manifest, usage }),
     });
   }
 

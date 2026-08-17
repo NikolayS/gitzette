@@ -5,6 +5,7 @@ import type { RunnerConfig } from "./config";
 import { EDITOR_PROMPT_VERSION } from "./inference";
 import { perceptualDistance, postProcessImage, sha256, validateVisual } from "./images";
 import type { ClaimedJob, Collector, Inference, Publisher } from "./types";
+import { combineTokenUsage, type JobUsage, type TokenUsage } from "../src/usage";
 
 export class RunnerEngine {
   constructor(
@@ -50,6 +51,14 @@ export class RunnerEngine {
   }
 
   private async processWithLease(job: ClaimedJob, assertLease: () => void): Promise<void> {
+    const startedAt = performance.now();
+    let tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, tokenSource: "none" };
+    const addUsage = (usage: TokenUsage) => { tokenUsage = combineTokenUsage(tokenUsage, usage); };
+    const jobUsage = (imageCount: number): JobUsage => ({
+      ...tokenUsage,
+      imageCount,
+      wallTimeMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    });
     const evidence = await this.collector.collect(job.username, job.weekKey);
     assertLease();
     if (evidence.state === "collection_failed") throw new Error("collection failed");
@@ -67,11 +76,13 @@ export class RunnerEngine {
         images: [],
       };
       validateManifest(manifest, job.username, job.weekKey);
-      await this.publisher.publish(job, manifest);
+      await this.publisher.publish(job, manifest, jobUsage(0));
       return;
     }
 
-    const edition = await this.inference.write(evidence);
+    const written = await this.inference.write(evidence);
+    addUsage(written.usage);
+    const edition = written.edition;
     assertLease();
     await this.publisher.stage(job, "illustrating");
     const directory = jobDir(this.config, job);
@@ -88,11 +99,11 @@ export class RunnerEngine {
       if (!story) throw new Error(`edition omitted ${key}`);
       const input = join(directory, `${key}.png`);
       const output = join(directory, key);
-      await this.inference.illustrate(`${story.headline}. ${story.deck}`, input);
+      addUsage(await this.inference.illustrate(`${story.headline}. ${story.deck}`, input));
       assertLease();
       const bytes = await postProcessImage(input, output, imageRuntime);
       await validateVisual(output, imageRuntime);
-      await this.inference.reviewIllustration(`${story.headline}. ${story.deck}`, output);
+      addUsage(await this.inference.reviewIllustration(`${story.headline}. ${story.deck}`, output));
       assertLease();
       if (images.length > 0) {
         const distance = await perceptualDistance(join(directory, images[0].key), output, imageRuntime);
@@ -115,7 +126,7 @@ export class RunnerEngine {
       images,
     };
     validateManifest(manifest, job.username, job.weekKey);
-    await this.publisher.publish(job, manifest);
+    await this.publisher.publish(job, manifest, jobUsage(images.length));
   }
 }
 

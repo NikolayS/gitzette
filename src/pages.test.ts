@@ -35,5 +35,6 @@ describe("private status route boundary", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
+    expect(await response.text()).toContain("Input tokens · last 7 days");
   });
 });
