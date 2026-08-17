@@ -29,6 +29,27 @@ narrow `RUNNER_SECRET` is configured on both sides. Never put an AI API key in
 the environment file; startup rejects broad credential patterns and known AI
 provider variables. `bun.lock` is the sole dependency lockfile used by CI.
 
+OpenClaw 2026.7 does not import OAuth material from a legacy `~/.codex`
+directory. Do not copy another user's Codex files into this account or treat
+their presence as proof of usable runner auth. After the dedicated GitZette
+account and revocation policy are approved, authenticate directly into the
+isolated OpenClaw store as the service user:
+
+```bash
+sudo -u gitzette-runner env -i \
+  HOME=/var/lib/gitzette-runner \
+  PATH=/var/lib/gitzette-runner/.bun/bin:/usr/local/bin:/usr/bin:/bin \
+  OPENCLAW_STATE_DIR=/var/lib/gitzette-runner/.openclaw \
+  OPENCLAW_CONFIG_PATH=/var/lib/gitzette-runner/.openclaw/openclaw.json \
+  /var/lib/gitzette-runner/.bun/bin/openclaw models auth login \
+    --provider openai --device-code
+```
+
+Run the same sealed environment with `openclaw infer model auth status --json`
+and require an available OpenAI OAuth route with no fallback before running the
+text and image canaries. Missing, expired, or rate-limited auth keeps the
+service disabled. Never add an API key to make a canary pass.
+
 Provisioning must verify the credential boundary before enabling the service:
 
 ```bash
