@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS generation_jobs (
   wall_time_ms INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  published_at INTEGER
+  published_at INTEGER,
+  schedule_key TEXT
 );
 
 CREATE INDEX IF NOT EXISTS generation_jobs_claim
@@ -83,6 +84,10 @@ CREATE INDEX IF NOT EXISTS generation_jobs_claim
 CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_one_live_job
   ON generation_jobs(user_id, week_key)
   WHERE status IN ('queued', 'collecting', 'writing', 'illustrating', 'validating', 'retryable_failed');
+
+CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_scheduled_once
+  ON generation_jobs(schedule_key)
+  WHERE schedule_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS edition_versions (
   id TEXT PRIMARY KEY,

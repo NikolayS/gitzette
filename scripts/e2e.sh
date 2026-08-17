@@ -19,14 +19,14 @@ trap 'trap - EXIT; cleanup; exit 143' TERM
 
 bunx wrangler d1 migrations apply gitzette-db --local --persist-to "$state_dir" >/dev/null
 bunx wrangler d1 execute gitzette-db --local --persist-to "$state_dir" --command \
-  "INSERT INTO users(id,username,avatar_url) VALUES('1','octocat',''),('2','NikolayS',''),('3','target-user',''); INSERT INTO sessions(token,user_id,expires_at) VALUES('e2e-session','1',unixepoch()+3600),('intruder-session','2',unixepoch()+3600),('target-session','3',unixepoch()+3600);" >/dev/null
+  "INSERT INTO users(id,username,avatar_url) VALUES('1','octocat',''),('2','NikolayS',''),('3','target-user',''),('4','DHH',''),('5','dcramer',''),('6','karpathy',''),('7','levkk',''),('8','mitchellh',''),('9','simonw',''),('10','steipete',''),('11','torvalds',''); INSERT INTO sessions(token,user_id,expires_at) VALUES('e2e-session','1',unixepoch()+3600),('intruder-session','2',unixepoch()+3600),('target-session','3',unixepoch()+3600);" >/dev/null
 
 ready=false
 for _attempt in $(seq 1 5); do
   # Ask the kernel for a free loopback port, then retry if another process wins
   # the small close-to-bind race before Wrangler starts.
   port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
-  setsid bunx wrangler dev --local --port "$port" --persist-to "$state_dir" \
+  setsid bunx wrangler dev --local --test-scheduled --port "$port" --persist-to "$state_dir" \
     --var RUNNER_SECRET:e2e-runner-secret \
     --var STATUS_TOKEN:e2e-status-token \
     --var SESSION_SECRET:e2e-session-secret \

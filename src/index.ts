@@ -5,6 +5,7 @@ import { authRoutes } from "./auth";
 import { queueRoutes } from "./queue";
 import { runnerRoutes } from "./runner";
 import { pageRoutes } from "./pages";
+import { runWeeklySchedule } from "./schedule";
 
 export interface Env {
   DB: D1Database;
@@ -33,4 +34,7 @@ app.route("/runner", runnerRoutes);
 // ── public dispatch pages ─────────────────────────────────────────────────────
 app.route("/", pageRoutes);
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled: runWeeklySchedule,
+} satisfies ExportedHandler<Env>;

@@ -87,6 +87,13 @@ count, and runner wall time in the same lease-guarded D1 batch. The private
 `/status` dashboard aggregates them over seven days. See
 `docs/usage-calibration.md` for the 100-job initial ceiling and activation rule.
 
+At 13:17 UTC every Monday, after the previous ISO week is complete everywhere,
+the Worker schedules that week for the nine retained weekly profiles: NikolayS,
+DHH, dcramer, karpathy, levkk, mitchellh, simonw, steipete, and torvalds. The
+schedule uses a durable unique key per profile/week, so Cron Trigger redelivery
+cannot regenerate an already-finished edition. It fails without enqueuing any
+work if the immutable admin principal or a retained profile is missing.
+
 ## Canonical evidence and edition
 
 The frozen evidence bundle has exactly one state:

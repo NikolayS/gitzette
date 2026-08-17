@@ -112,3 +112,8 @@ The scheduled moderate-or-higher dependency audit opens or updates a GitHub
 issue when it fails. GitHub may disable scheduled workflows after 60 days with
 no repository activity; operators must treat a missing weekly run as a failure
 and use `workflow_dispatch` to restore the cadence.
+
+The separate Cloudflare Cron Trigger runs weekly generation at 13:17 UTC on
+Monday, after the prior week is complete in every time zone. It enqueues the
+nine retained weekly profiles exactly once per profile/week; `/status` exposes
+the latest scheduled week and its rolling-seven-day scheduled-job count.

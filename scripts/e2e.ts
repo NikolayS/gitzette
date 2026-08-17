@@ -3,6 +3,7 @@ import { ControlPlaneClient } from "../runner/control-plane";
 import { RunnerEngine } from "../runner/run";
 import type { Edition } from "../src/edition";
 import type { JobUsage, TokenUsage } from "../src/usage";
+import { previousCompletedIsoWeekKey } from "../src/week";
 
 const base = process.env.E2E_BASE_URL;
 if (!base) throw new Error("E2E_BASE_URL is required; run via scripts/e2e.sh");
@@ -305,4 +306,17 @@ expect(delegated.body.job.username).toBe("target-user");
 expect((await json(`/generate/jobs/${delegated.body.job.id}`, { headers: { cookie: "session=target-session" } })).response.status).toBe(200);
 expect((await json(`/generate/jobs/${delegated.body.job.id}`, { headers: sessionHeaders })).response.status).toBe(200);
 
-console.log("E2E OK: queue, authz, per-user quota, global queue-and-defer, usage telemetry, stale-job expiry, dedupe, lease/stages, artifacts, active+quiet invariants, atomic publish, XSS, retry");
+// The production cron is wired to the Worker and remains idempotent if
+// Cloudflare redelivers the same weekly event after jobs become terminal.
+for (const expected of [9, 9]) {
+  const scheduled = await fetch(`${base}/__scheduled?cron=17+13+*+*+1`);
+  expect(scheduled.status).toBe(200);
+  const scheduledStatus = await fetch(base + "/status", { headers: { authorization: "Bearer e2e-status-token" } });
+  const scheduledHtml = await scheduledStatus.text();
+  expect(scheduledHtml).toContain(
+    `<div class="label">Weekly scheduled jobs · last 7 days</div>\n    <div class="value">${expected}</div>`,
+  );
+  expect(scheduledHtml).toContain(previousCompletedIsoWeekKey());
+}
+
+console.log("E2E OK: queue, authz, per-user quota, global queue-and-defer, weekly schedule, usage telemetry, stale-job expiry, dedupe, lease/stages, artifacts, active+quiet invariants, atomic publish, XSS, retry");

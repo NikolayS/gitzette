@@ -7,6 +7,9 @@ compatibility_flags = ["nodejs_compat"]
 [limits]
 subrequest_limit = 1000
 
+[triggers]
+crons = ["17 13 * * 1"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "gitzette-db"

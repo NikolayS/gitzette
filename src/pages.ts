@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { getUser } from "./auth";
 import { bearerToken, secretMatches } from "./credentials";
 import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
+import { HOME_PROFILE_USERNAMES } from "./highlighted";
 import type { Env } from "./index";
 
 export const pageRoutes = new Hono<{ Bindings: Env }>();
@@ -455,7 +456,9 @@ pageRoutes.get("/status", async (c) => {
       SUM(output_tokens) AS output_tokens,
       SUM(image_count) AS image_count,
       SUM(wall_time_ms) AS wall_time_ms,
-      SUM(CASE WHEN token_source='estimated' THEN 1 ELSE 0 END) AS estimated_jobs
+      SUM(CASE WHEN token_source='estimated' THEN 1 ELSE 0 END) AS estimated_jobs,
+      SUM(CASE WHEN schedule_key IS NOT NULL THEN 1 ELSE 0 END) AS scheduled_jobs,
+      MAX(CASE WHEN schedule_key IS NOT NULL THEN week_key END) AS latest_scheduled_week
       FROM generation_jobs WHERE created_at>=unixepoch('now','-7 days')`).first<{
         total: number;
         failed: number;
@@ -465,6 +468,8 @@ pageRoutes.get("/status", async (c) => {
         image_count: number | null;
         wall_time_ms: number | null;
         estimated_jobs: number | null;
+        scheduled_jobs: number | null;
+        latest_scheduled_week: string | null;
       }>(),
   ]);
   const now = Math.floor(Date.now() / 1000);
@@ -479,6 +484,8 @@ pageRoutes.get("/status", async (c) => {
     imagesThisWeek: jobsRow?.image_count ?? 0,
     runnerWallSecondsThisWeek: Math.round((jobsRow?.wall_time_ms ?? 0) / 1000),
     estimatedTokenJobsThisWeek: jobsRow?.estimated_jobs ?? 0,
+    scheduledJobsThisWeek: jobsRow?.scheduled_jobs ?? 0,
+    latestScheduledWeek: jobsRow?.latest_scheduled_week ?? "none",
   }));
 });
 
@@ -626,13 +633,7 @@ ${headTags()}
     </form>
     <div style="margin-top:12px;margin-bottom:28px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">explore:</span>
-      <button onclick="document.getElementById('username-input').value='torvalds';go2('torvalds');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">torvalds</button>
-      <button onclick="document.getElementById('username-input').value='steipete';go2('steipete');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">steipete</button>
-      <button onclick="document.getElementById('username-input').value='karpathy';go2('karpathy');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">karpathy</button>
-      <button onclick="document.getElementById('username-input').value='DHH';go2('DHH');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">DHH</button>
-      <button onclick="document.getElementById('username-input').value='mitchellh';go2('mitchellh');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">mitchellh</button>
-      <button onclick="document.getElementById('username-input').value='dcramer';go2('dcramer');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">dcramer</button>
-      <button onclick="document.getElementById('username-input').value='simonw';go2('simonw');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">simonw</button>
+      ${HOME_PROFILE_USERNAMES.map((username) => `<button onclick="document.getElementById('username-input').value='${username}';go2('${username}');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">${username}</button>`).join("\n      ")}
     </div>
     <script>
     function go(e) {
@@ -685,6 +686,8 @@ function statusPage(stats: {
   imagesThisWeek: number;
   runnerWallSecondsThisWeek: number;
   estimatedTokenJobsThisWeek: number;
+  scheduledJobsThisWeek: number;
+  latestScheduledWeek: string;
 }): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -748,6 +751,14 @@ ${headTags()}
   <div class="stat">
     <div class="label">Jobs using token estimates · last 7 days</div>
     <div class="value">${stats.estimatedTokenJobsThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Weekly scheduled jobs · last 7 days</div>
+    <div class="value">${stats.scheduledJobsThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Latest scheduled week</div>
+    <div class="value">${stats.latestScheduledWeek}</div>
   </div>
   ${creatorFooter()}
 </body>
