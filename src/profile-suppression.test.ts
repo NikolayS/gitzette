@@ -3,8 +3,15 @@ import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { pageRoutes } from "./pages";
 import { queueRoutes } from "./queue";
+import type { ProfilePublicationState } from "./profile-suppression";
 
 describe("runtime profile suppression", () => {
+  test("requires every combined check to carry the runtime suppression column", () => {
+    // @ts-expect-error A query that omits the D1 suppression projection must fail typecheck.
+    const incomplete: ProfilePublicationState = { username: "octocat" };
+    expect(incomplete.username).toBe("octocat");
+  });
+
   test("immediately hides public content and blocks generation without a deploy", async () => {
     const sqlite = new Database(":memory:");
     sqlite.exec("PRAGMA foreign_keys = ON");

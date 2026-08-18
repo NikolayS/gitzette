@@ -78,6 +78,14 @@ class StubStatement {
   }
 
   async run() {
+    if (this.query.startsWith("DELETE FROM artifact_cleanup_jobs")) {
+      this.db.pendingCleanupIds.delete(String(this.args[0]));
+      return { meta: { changes: 1 } };
+    }
+    if (this.query.startsWith("INSERT INTO artifact_cleanup_jobs")) {
+      this.db.pendingCleanupIds.add(String(this.args[0]));
+      return { meta: { changes: 1 } };
+    }
     if (this.query.includes("last_error='profile unavailable'")) {
       const [id, leaseToken] = this.args as [string, string];
       if (this.db.job.id !== id || this.db.job.lease_token !== leaseToken) return { meta: { changes: 0 } };
@@ -94,6 +102,7 @@ class StubStatement {
 class StubD1 {
   readonly versions = new Map<string, string>();
   readonly dispatches = new Map<string, string>();
+  readonly pendingCleanupIds = new Set<string>();
 
   constructor(readonly job: StubJob, readonly username = "octocat", readonly runtimeSuppressed = false) {}
 
@@ -317,5 +326,6 @@ async function generationDatabase(): Promise<Database> {
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(await Bun.file("migrations/0000_base.sql").text());
   db.exec(await Bun.file("migrations/0001_generation_queue.sql").text());
+  db.exec(await Bun.file("migrations/0006_artifact_cleanup_queue.sql").text());
   return db;
 }

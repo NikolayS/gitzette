@@ -118,6 +118,7 @@ async function generationDatabase(): Promise<Database> {
   db.exec(await Bun.file("migrations/0003_remove_legacy_generating_dispatch.sql").text());
   db.exec(await Bun.file("migrations/0004_normalize_github_usernames.sql").text());
   db.exec(await Bun.file("migrations/0005_profile_suppressions.sql").text());
+  db.exec(await Bun.file("migrations/0006_artifact_cleanup_queue.sql").text());
   return db;
 }
 

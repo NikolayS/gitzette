@@ -116,6 +116,9 @@ primary Monday enqueue after the prior week is complete in every time zone, and
 Both weekly branches perform their own stale-job sweep before enqueue; they do
 not depend on the hourly trigger arriving on time. A staging cleanup failure is
 logged per job and cannot poison the rest of the sweep or the weekly retry.
+Cleanup is capped at 20 R2 pages per job and invocation; incomplete/error
+prefixes enter the durable `artifact_cleanup_jobs` retry queue, appear on the
+private `/status` page, and resume on the next hourly invocation.
 The reviewed production configuration keeps both `CLEANUP_SWEEP_ENABLED=false`
 and `WEEKLY_GENERATION_ENABLED=false`, so the scheduled handler cannot mutate
 durable state until the dedicated runner is provisioned and its canaries pass.

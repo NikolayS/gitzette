@@ -45,11 +45,11 @@ const suppressedProfiles = normalizedSet(SUPPRESSED_PROFILE_USERNAMES);
 export const HOME_PROFILE_USERNAMES = HOME_PROFILE_CANDIDATES
   .filter((username) => weeklyProfiles.has(username.toLowerCase()));
 
-export function isManagedProfileSuppressed(username: string): boolean {
-  return isProfileSuppressedByPolicy(username, managedProfiles, weeklyProfiles, suppressedProfiles);
+export function isUsernameBlockedByManagedRegistry(username: string): boolean {
+  return isUsernameBlockedByRegistryPolicy(username, managedProfiles, weeklyProfiles, suppressedProfiles);
 }
 
-export function isProfileSuppressedByPolicy(
+export function isUsernameBlockedByRegistryPolicy(
   username: string,
   managed: ReadonlySet<string>,
   active: ReadonlySet<string>,

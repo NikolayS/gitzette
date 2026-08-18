@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import {
-  isManagedProfileSuppressed,
-  isProfileSuppressedByPolicy,
+  isUsernameBlockedByManagedRegistry,
+  isUsernameBlockedByRegistryPolicy,
 } from "./highlighted";
 import { pageRoutes } from "./pages";
 import { queueRoutes } from "./queue";
@@ -10,16 +10,16 @@ import { queueRoutes } from "./queue";
 describe("managed profile publication policy", () => {
   test("suppresses a managed profile removed from the active weekly allowlist", () => {
     const managed = new Set(["dhh"]);
-    expect(isProfileSuppressedByPolicy("DHH", managed, new Set())).toBe(true);
-    expect(isProfileSuppressedByPolicy("DHH", managed, new Set(["dhh"]))).toBe(false);
-    expect(isProfileSuppressedByPolicy("ordinary-user", managed, new Set())).toBe(false);
-    expect(isManagedProfileSuppressed("DHH")).toBe(false);
-    expect(isManagedProfileSuppressed("gitzette-opt-out-test")).toBe(true);
-    expect(isManagedProfileSuppressed("ordinary-user")).toBe(false);
+    expect(isUsernameBlockedByRegistryPolicy("DHH", managed, new Set())).toBe(true);
+    expect(isUsernameBlockedByRegistryPolicy("DHH", managed, new Set(["dhh"]))).toBe(false);
+    expect(isUsernameBlockedByRegistryPolicy("ordinary-user", managed, new Set())).toBe(false);
+    expect(isUsernameBlockedByManagedRegistry("DHH")).toBe(false);
+    expect(isUsernameBlockedByManagedRegistry("gitzette-opt-out-test")).toBe(true);
+    expect(isUsernameBlockedByManagedRegistry("ordinary-user")).toBe(false);
   });
 
   test("keeps an explicit tombstone suppressed after removal from both registries", () => {
-    expect(isProfileSuppressedByPolicy(
+    expect(isUsernameBlockedByRegistryPolicy(
       "retired-user",
       new Set(),
       new Set(),

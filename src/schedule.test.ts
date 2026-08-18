@@ -40,8 +40,24 @@ class StubStatement {
       this.db.staleSweepCalls += 1;
       return { results: this.db.expiredJobIds.map((id) => ({ id })) } as unknown as D1Result<T>;
     }
+    if (this.query.startsWith("SELECT job_id FROM artifact_cleanup_jobs")) {
+      return { results: [...this.db.pendingCleanupIds].map((job_id) => ({ job_id })) } as unknown as D1Result<T>;
+    }
     if (!this.query.startsWith("SELECT id,username")) throw new Error(`unexpected all: ${this.query}`);
     return { results: this.db.profiles } as D1Result<T>;
+  }
+
+  async run() {
+    const id = String(this.args[0]);
+    if (this.query.startsWith("DELETE FROM artifact_cleanup_jobs")) {
+      this.db.pendingCleanupIds.delete(id);
+      return { meta: { changes: 1 } };
+    }
+    if (this.query.startsWith("INSERT INTO artifact_cleanup_jobs")) {
+      this.db.pendingCleanupIds.add(id);
+      return { meta: { changes: 1 } };
+    }
+    throw new Error(`unexpected run: ${this.query}`);
   }
 }
 
@@ -49,6 +65,7 @@ class StubD1 {
   readonly scheduleKeys = new Set<string>();
   batchCalls = 0;
   staleSweepCalls = 0;
+  readonly pendingCleanupIds = new Set<string>();
 
   constructor(
     readonly adminExists: boolean,
@@ -366,6 +383,59 @@ describe("weekly profile scheduling", () => {
     expect(db.batchCalls).toBe(1);
     expect(bucket.objects.size).toBe(0);
     expect(cleanupLog).toContain(`"jobId":"${failedId}"`);
+    expect(db.pendingCleanupIds).toEqual(new Set([failedId]));
+  });
+
+  test("resumes a capped R2 cleanup on the next hourly invocation", async () => {
+    const sqlite = await generationDatabase();
+    const cleanupError = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const db = new SqliteD1(sqlite);
+      const staleJobId = "2bb65583-b570-4a55-b4e4-5de336b10664";
+      sqlite.query("INSERT INTO users(id,username) VALUES ('1','admin')").run();
+      sqlite.query(
+        "INSERT INTO generation_jobs(id,user_id,requested_by,week_key,status,created_at) VALUES (?,?,?,?,?,unixepoch()-2)",
+      ).run(staleJobId, "1", "1", "2026-W33", "queued");
+      const objects = new Set(Array.from(
+        { length: 20_001 },
+        (_, index) => `staging/${staleJobId}/lease/image-${index}.webp`,
+      ));
+      const bucket = {
+        async list({ prefix, limit }: { prefix: string; limit: number }) {
+          return {
+            objects: [...objects].filter((key) => key.startsWith(prefix)).slice(0, limit).map((key) => ({ key })),
+          };
+        },
+        async delete(keys: string[]) {
+          for (const key of keys) objects.delete(key);
+        },
+      };
+      const env = {
+        DB: db,
+        DISPATCHES: bucket,
+        MAX_QUEUE_AGE_SECONDS: "1",
+        CLEANUP_SWEEP_ENABLED: "true",
+      } as never;
+
+      await runWeeklySchedule(
+        { cron: JOB_EXPIRY_CRON, scheduledTime } as ScheduledController,
+        env,
+      );
+      expect(objects.size).toBe(1);
+      expect(sqlite.query("SELECT job_id,attempts FROM artifact_cleanup_jobs").get())
+        .toEqual({ job_id: staleJobId, attempts: 1 });
+
+      await runWeeklySchedule(
+        { cron: JOB_EXPIRY_CRON, scheduledTime: scheduledTime + 60 * 60 * 1000 } as ScheduledController,
+        env,
+      );
+      expect(objects.size).toBe(0);
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM artifact_cleanup_jobs").get())
+        .toEqual({ count: 0 });
+    } finally {
+      cleanupError.mockRestore();
+      sqlite.close();
+    }
   });
 
   test("expires manual work and removes staging while weekly enqueue stays disabled", async () => {
@@ -499,5 +569,6 @@ async function generationDatabase(): Promise<Database> {
   db.exec(await Bun.file("migrations/0003_remove_legacy_generating_dispatch.sql").text());
   db.exec(await Bun.file("migrations/0004_normalize_github_usernames.sql").text());
   db.exec(await Bun.file("migrations/0005_profile_suppressions.sql").text());
+  db.exec(await Bun.file("migrations/0006_artifact_cleanup_queue.sql").text());
   return db;
 }

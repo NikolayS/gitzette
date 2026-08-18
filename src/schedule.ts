@@ -2,8 +2,8 @@ import type { Env } from "./index";
 import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
 import { expireStaleJobs, LIVE_STATUSES, maxQueueAgeSeconds } from "./queue";
 import { parseIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
-import { deleteR2Prefix } from "./artifacts";
-import { isProfileSuppressed } from "./profile-suppression";
+import { deleteJobStaging } from "./artifacts";
+import { isPublicationBlockedForProfile } from "./profile-suppression";
 
 export const JOB_EXPIRY_CRON = "7 * * * *";
 export const WEEKLY_GENERATION_CRONS = ["17 13 * * 1", "17 20 * * 1"] as const;
@@ -58,7 +58,7 @@ async function enqueueWeeklyProfilesAfterSweep(
     throw new Error(`weekly generation profiles are missing: ${missing.join(",")}`);
   }
   const eligibleUsernames = WEEKLY_PROFILE_USERNAMES.filter((username) =>
-    !isProfileSuppressed(byUsername.get(username.toLowerCase())!),
+    !isPublicationBlockedForProfile(byUsername.get(username.toLowerCase())!),
   );
 
   if (!staleSweepComplete) await expireStaleArtifacts(env);
@@ -130,14 +130,22 @@ export async function runWeeklySchedule(
 
 async function expireStaleArtifacts(env: Pick<Env, "DB" | "DISPATCHES" | "MAX_QUEUE_AGE_SECONDS">): Promise<void> {
   const expiredJobIds = await expireStaleJobs(env.DB, maxQueueAgeSeconds(env));
-  for (const id of expiredJobIds) {
+  const pending = await env.DB.prepare(
+    "SELECT job_id FROM artifact_cleanup_jobs ORDER BY updated_at,job_id LIMIT 100",
+  ).all<{ job_id: string }>();
+  const cleanupJobIds = new Set([
+    ...expiredJobIds,
+    ...(pending.results ?? []).map((row) => row.job_id),
+  ]);
+  for (const id of cleanupJobIds) {
     try {
-      await deleteR2Prefix(env.DISPATCHES, `staging/${id}/`);
+      await deleteJobStaging(env, id);
     } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 500) : "unknown cleanup error";
       console.error(JSON.stringify({
         event: "stale_artifact_cleanup_failed",
         jobId: id,
-        error: error instanceof Error ? error.message.slice(0, 500) : "unknown cleanup error",
+        error: message,
       }));
     }
   }

@@ -38,6 +38,24 @@ credential. The `pull_request_target` publisher executes only protected-main
 code. Deployment credentials are available only to the protected `production`
 environment; tag-triggered deploys require that environment's approval.
 
+## Artifact cleanup recovery
+
+Each stale-job cleanup deletes at most 20 R2 pages in one invocation. An
+incomplete or failed exact UUID prefix is persisted in
+`artifact_cleanup_jobs`, shown as `Operator alert · artifact cleanup pending`
+on the private `/status` page, and retried by the next hourly invocation.
+Success removes the durable retry row.
+
+If a row reaches three attempts or remains for three hours, acknowledge it
+within one hour and set `WEEKLY_GENERATION_ENABLED=false` while leaving the
+cleanup sweep enabled. Inspect only the displayed job UUID's
+`staging/<job-uuid>/` prefix in the Cloudflare R2 console/API; never select
+`staging/` or another broad prefix. Preserve incident evidence, delete only
+objects under that exact validated UUID prefix, and let the next hourly sweep
+prove the prefix empty and remove the alert. Do not edit the D1 retry row by
+hand. Weekly generation stays disabled until `/status` shows zero pending
+artifact cleanups and the incident has a reviewed root cause.
+
 This gate protects merges, not compromised administrator credentials, installed
 Apps, or secrets used by other event-triggered workflows. Actions holding
 secrets must be commit-SHA pinned and must not check out or execute untrusted PR

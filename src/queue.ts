@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { getUser } from "./auth";
 import type { Env } from "./index";
 import { normalizeGitHubUsername } from "./identifiers";
-import { isProfileSuppressed, isRuntimeProfileSuppressed } from "./profile-suppression";
-import { deleteR2Prefix } from "./artifacts";
+import { isPublicationBlockedForProfile, isUsernameRuntimeSuppressed } from "./profile-suppression";
+import { deleteJobStaging } from "./artifacts";
 import { isCompletedIsoWeekKey, isGeneratableCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
 export const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"] as const;
@@ -100,12 +100,12 @@ queueRoutes.post("/generate", async (c) => {
     if (!existing) return c.json({ error: "target user must exist before enqueue" }, 404);
     target = existing;
   }
-  if (isProfileSuppressed(target)) {
+  if (isPublicationBlockedForProfile(target)) {
     return c.json({ error: "profile unavailable" }, 410);
   }
 
   const expiredJobIds = await expireStaleTargetJob(c.env.DB, maxQueueAgeSeconds(c.env), target.id, weekKey);
-  await Promise.all(expiredJobIds.map((id) => deleteR2Prefix(c.env.DISPATCHES, `staging/${id}/`)));
+  await Promise.all(expiredJobIds.map((id) => deleteJobStaging(c.env, id)));
 
   const live = await c.env.DB.prepare(
     `SELECT j.*, u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id
@@ -119,7 +119,7 @@ queueRoutes.post("/generate", async (c) => {
     const inserted = await c.env.DB.prepare(GENERATION_REQUEST_INSERT_SQL)
       .bind(id, target.id, requester.id, weekKey, target.id, isAdmin(requester.id, c.env.ADMIN_USER_ID) ? 1 : 0, requester.id, requestLimit).run();
     if ((inserted.meta.changes ?? 0) !== 1) {
-      if (await isRuntimeProfileSuppressed(c.env.DB, target.username)) {
+      if (await isUsernameRuntimeSuppressed(c.env.DB, target.username)) {
         return c.json({ error: "profile unavailable" }, 410);
       }
       return c.json({ error: "generation request limit reached", weeklyUserLimit: requestLimit }, 429);

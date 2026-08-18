@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { getUser } from "./auth";
 import { bearerToken, secretMatches } from "./credentials";
 import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
-import { HOME_PROFILE_USERNAMES, WEEKLY_PROFILE_USERNAMES, isManagedProfileSuppressed } from "./highlighted";
-import { isProfileSuppressed, isRuntimeProfileSuppressed } from "./profile-suppression";
+import { HOME_PROFILE_USERNAMES, WEEKLY_PROFILE_USERNAMES, isUsernameBlockedByManagedRegistry } from "./highlighted";
+import { isPublicationBlockedForProfile, isUsernameRuntimeSuppressed } from "./profile-suppression";
 import { normalizeGitHubUsername } from "./identifiers";
 import type { Env } from "./index";
 import { SCHEDULED_AGE_OUT_ERROR, maxQueueAgeSeconds } from "./queue";
@@ -448,7 +448,7 @@ pageRoutes.get("/", async (c) => {
 
   const cwk = currentWeekKey();
   const filtered = (recent.results ?? [])
-    .filter((d) => d.week_key <= cwk && !isManagedProfileSuppressed(d.username));
+    .filter((d) => d.week_key <= cwk && !isUsernameBlockedByManagedRegistry(d.username));
   return c.html(homePage(filtered));
 });
 
@@ -459,8 +459,8 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
   const obj = await c.env.DISPATCHES.get(`illustrations/${slug}`);
   if (!obj) return c.text("not found", 404);
   const ownerUsername = obj.customMetadata?.ownerUsername;
-  if (ownerUsername && isManagedProfileSuppressed(ownerUsername)) return c.text("not found", 404);
-  if (ownerUsername && await isRuntimeProfileSuppressed(c.env.DB, ownerUsername)) return c.text("not found", 404);
+  if (ownerUsername && isUsernameBlockedByManagedRegistry(ownerUsername)) return c.text("not found", 404);
+  if (ownerUsername && await isUsernameRuntimeSuppressed(c.env.DB, ownerUsername)) return c.text("not found", 404);
   const buf = await obj.arrayBuffer();
   const contentType = slug.endsWith(".webp") ? "image/webp"
     : slug.endsWith(".png") ? "image/png" : "image/jpeg";
@@ -500,7 +500,7 @@ pageRoutes.get("/status", async (c) => {
     ).bind(...WEEKLY_PROFILE_USERNAMES, unfulfilledWeekKey, unfulfilledWeekKey)
       .all<{ username: string; week_key: string }>()
     : Promise.resolve({ results: [] as { username: string; week_key: string }[] });
-  const [genRow, userRow, jobsRow, agedOutRows, unfulfilledRows] = await Promise.all([
+  const [genRow, userRow, jobsRow, agedOutRows, unfulfilledRows, artifactCleanupRows] = await Promise.all([
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE r2_key IS NOT NULL`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM users`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) AS total,
@@ -532,6 +532,13 @@ pageRoutes.get("/status", async (c) => {
        ORDER BY j.updated_at DESC,u.username LIMIT 100`,
     ).bind(SCHEDULED_AGE_OUT_ERROR).all<{ username: string; week_key: string; updated_at: number }>(),
     unfulfilledQuery,
+    c.env.DB.prepare(
+      `SELECT q.job_id,u.username,q.attempts,q.last_error,q.updated_at
+       FROM artifact_cleanup_jobs q
+       JOIN generation_jobs j ON j.id=q.job_id
+       JOIN users u ON u.id=j.user_id
+       ORDER BY q.updated_at,q.job_id LIMIT 100`,
+    ).all<{ job_id: string; username: string; attempts: number; last_error: string; updated_at: number }>(),
   ]);
   const now = Math.floor(Date.now() / 1000);
   return c.html(statusPage({
@@ -549,6 +556,7 @@ pageRoutes.get("/status", async (c) => {
     latestScheduledWeek: jobsRow?.latest_scheduled_week ?? "none",
     agedOutSchedules: agedOutRows.results ?? [],
     unfulfilledSchedules: unfulfilledRows.results ?? [],
+    artifactCleanupPending: artifactCleanupRows.results ?? [],
   }));
 });
 
@@ -556,7 +564,7 @@ pageRoutes.get("/status", async (c) => {
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
   const username = normalizeGitHubUsername(c.req.param("username"));
   if (!username) return c.text("not found", 404);
-  if (isManagedProfileSuppressed(username)) return c.text("not found", 404);
+  if (isUsernameBlockedByManagedRegistry(username)) return c.text("not found", 404);
   const viewer = await getUser(c);
   const isOwner = viewer ? normalizeGitHubUsername(viewer.username) === username : false;
 
@@ -578,7 +586,7 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
     } catch { /* ignore */ }
     return c.html(notFoundPage(username, ghUser), 404);
   }
-  if (isProfileSuppressed({ username, suppressed: userRow.suppressed })) return c.text("not found", 404);
+  if (isPublicationBlockedForProfile({ username, suppressed: userRow.suppressed })) return c.text("not found", 404);
 
   // Query all published dispatches. Legacy generating sentinels are removed by
   // migration 0003 and cannot block profile rendering.
@@ -610,7 +618,7 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}/:week_key{\\d{4}-W\\d{1,2}}", async (
   const { week_key } = c.req.param();
   const username = normalizeGitHubUsername(c.req.param("username"));
   if (!username) return c.text("not found", 404);
-  if (isManagedProfileSuppressed(username)) return c.text("not found", 404);
+  if (isUsernameBlockedByManagedRegistry(username)) return c.text("not found", 404);
   const viewer = await getUser(c);
   const isOwner = viewer ? normalizeGitHubUsername(viewer.username) === username : false;
 
@@ -759,6 +767,7 @@ function statusPage(stats: {
   latestScheduledWeek: string;
   agedOutSchedules: { username: string; week_key: string; updated_at: number }[];
   unfulfilledSchedules: { username: string; week_key: string }[];
+  artifactCleanupPending: { job_id: string; username: string; attempts: number; last_error: string; updated_at: number }[];
 }): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -840,6 +849,11 @@ ${headTags()}
     <div class="label">Operator alert · unfulfilled weekly slots after final retry</div>
     <div class="value">${stats.unfulfilledSchedules.length}</div>
     ${stats.unfulfilledSchedules.map((row) => `<div>@${row.username} · ${row.week_key}</div>`).join("")}
+  </div>
+  <div class="stat">
+    <div class="label">Operator alert · artifact cleanup pending</div>
+    <div class="value">${stats.artifactCleanupPending.length}</div>
+    ${stats.artifactCleanupPending.map((row) => `<div>@${row.username} · ${row.job_id} · attempt ${row.attempts} · updated ${row.updated_at}</div>`).join("")}
   </div>
   ${creatorFooter()}
 </body>

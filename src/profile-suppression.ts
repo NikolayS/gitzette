@@ -1,15 +1,15 @@
-import { isManagedProfileSuppressed } from "./highlighted";
+import { isUsernameBlockedByManagedRegistry } from "./highlighted";
 
 export type ProfilePublicationState = {
   username: string;
-  suppressed?: number | boolean | null;
+  suppressed: number | boolean | null;
 };
 
-export function isProfileSuppressed(profile: ProfilePublicationState): boolean {
-  return isManagedProfileSuppressed(profile.username) || Boolean(profile.suppressed);
+export function isPublicationBlockedForProfile(profile: ProfilePublicationState): boolean {
+  return isUsernameBlockedByManagedRegistry(profile.username) || Boolean(profile.suppressed);
 }
 
-export async function isRuntimeProfileSuppressed(
+export async function isUsernameRuntimeSuppressed(
   db: D1Database,
   username: string,
 ): Promise<boolean> {

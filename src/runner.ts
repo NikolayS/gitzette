@@ -3,10 +3,10 @@ import { renderEdition, validateManifest, type PublicationManifest } from "./edi
 import { hasPublicationDimensions, webpDimensions } from "./image";
 import { bearerToken, secretMatches } from "./credentials";
 import type { Env } from "./index";
-import { isProfileSuppressed } from "./profile-suppression";
+import { isPublicationBlockedForProfile } from "./profile-suppression";
 import { maxQueueAgeSeconds } from "./queue";
 import { validateJobUsage, type JobUsage } from "./usage";
-import { deleteR2Prefix } from "./artifacts";
+import { deleteJobStaging, deleteR2Prefix } from "./artifacts";
 
 const DEFAULT_LEASE_SECONDS = 10 * 60;
 const DEFAULT_GLOBAL_WEEKLY_LIMIT = 100;
@@ -75,7 +75,7 @@ runnerRoutes.post("/jobs/claim", async (c) => {
      RETURNING id`
   ).bind(now, MAX_ATTEMPTS, now).all<{ id: string }>();
   await Promise.all((exhausted.results ?? []).map((job) =>
-    deleteR2Prefix(c.env.DISPATCHES, `staging/${job.id}/`)
+    deleteJobStaging(c.env, job.id)
   ));
   const row = await c.env.DB.prepare(CLAIM_JOB_SQL)
     .bind(
@@ -96,13 +96,13 @@ runnerRoutes.post("/jobs/claim", async (c) => {
        EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=users.username COLLATE NOCASE) AS suppressed
      FROM users WHERE id=?`,
   ).bind(row.user_id).first<{ username: string; suppressed: number }>();
-  if (isProfileSuppressed(user!)) {
+  if (isPublicationBlockedForProfile(user!)) {
     if (!await terminalizeSuppressedJob(c.env, row.id, row.lease_token)) {
       return c.json({ error: "lease changed" }, 409);
     }
     return c.body(null, 204);
   }
-  await deleteR2Prefix(c.env.DISPATCHES, `staging/${row.id}/`);
+  await deleteJobStaging(c.env, row.id);
   return c.json({ job: { ...row, username: user!.username, weekKey: row.week_key, leaseToken: row.lease_token, leaseExpiresAt: row.lease_expires_at } });
 });
 
@@ -167,7 +167,8 @@ runnerRoutes.post("/jobs/:id/fail", async (c) => {
   const stagingPrefix = status === "permanent_failed"
     ? `staging/${job.id}/`
     : `staging/${job.id}/${body.leaseToken}/`;
-  await deleteR2Prefix(c.env.DISPATCHES, stagingPrefix);
+  if (status === "permanent_failed") await deleteJobStaging(c.env, job.id);
+  else await deleteR2Prefix(c.env.DISPATCHES, stagingPrefix);
   return c.json({ status });
 });
 
@@ -178,7 +179,7 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
   if (job.status !== "validating") return c.json({ error: "job is not ready to publish" }, 409);
-  if (isProfileSuppressed(job)) {
+  if (isPublicationBlockedForProfile(job)) {
     if (!await terminalizeSuppressedJob(c.env, job.id, body.leaseToken)) {
       return c.json({ error: "lease changed" }, 409);
     }
@@ -260,14 +261,14 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
   if (!committed) {
     await c.env.DISPATCHES.delete(r2Key);
     const current = await heldJob(c.env.DB, job.id, body.leaseToken);
-    if (current && isProfileSuppressed(current)) {
+    if (current && isPublicationBlockedForProfile(current)) {
       await terminalizeSuppressedJob(c.env, job.id, body.leaseToken);
       return c.json({ error: "profile unavailable" }, 410);
     }
     return c.json({ error: "lease lost during commit" }, 409);
   }
 
-  await deleteR2Prefix(c.env.DISPATCHES, `staging/${job.id}/`);
+  await deleteJobStaging(c.env, job.id);
   return c.json({ status: "published", username: job.username, weekKey: job.week_key, url: `/${job.username}/${job.week_key}`, versionId });
 });
 
@@ -301,7 +302,7 @@ async function terminalizeSuppressedJob(
      WHERE id=? AND lease_token=?`
   ).bind(id, leaseToken).run();
   if ((result.meta.changes ?? 0) !== 1) return false;
-  await deleteR2Prefix(env.DISPATCHES, `staging/${id}/`);
+  await deleteJobStaging(env, id);
   return true;
 }
 
