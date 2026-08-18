@@ -162,6 +162,36 @@ describe("weekly profile scheduling", () => {
     }
   });
 
+  test("re-enqueues scheduled work that aged out before provider capacity started", async () => {
+    const sqlite = await generationDatabase();
+    try {
+      const db = new SqliteD1(sqlite);
+      sqlite.query("INSERT INTO users(id,username) VALUES (?,?)").run("1", "admin");
+      for (const profile of profiles) {
+        sqlite.query("INSERT INTO users(id,username) VALUES (?,?)").run(profile.id, profile.username);
+      }
+      const env = { DB: db as never, ADMIN_USER_ID: "1", MAX_QUEUE_AGE_SECONDS: "1" };
+
+      expect((await enqueueWeeklyProfiles(env, scheduledTime)).queued).toBe(9);
+      sqlite.query("UPDATE generation_jobs SET created_at=unixepoch()-2 WHERE schedule_key IS NOT NULL").run();
+
+      expect(await enqueueWeeklyProfiles(env, scheduledTime)).toEqual({
+        weekKey: "2026-W33",
+        targets: 9,
+        queued: 9,
+        deduplicated: 0,
+      });
+      expect(sqlite.query(
+        "SELECT status,(schedule_key IS NULL) AS cleared,COUNT(*) AS count FROM generation_jobs GROUP BY status,cleared ORDER BY status",
+      ).all()).toEqual([
+        { status: "permanent_failed", cleared: 1, count: 9 },
+        { status: "queued", cleared: 0, count: 9 },
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("keeps the production scheduler inert until the runner is enabled", async () => {
     const db = new StubD1(true, profiles);
     await runWeeklySchedule(

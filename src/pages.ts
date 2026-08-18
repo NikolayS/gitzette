@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { getUser } from "./auth";
 import { bearerToken, secretMatches } from "./credentials";
 import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
-import { HOME_PROFILE_USERNAMES } from "./highlighted";
+import { HOME_PROFILE_USERNAMES, isManagedProfileSuppressed } from "./highlighted";
 import type { Env } from "./index";
 
 export const pageRoutes = new Hono<{ Bindings: Env }>();
@@ -421,7 +421,8 @@ pageRoutes.get("/", async (c) => {
   ).all<{ username: string; week_key: string; generated_at: number }>();
 
   const cwk = currentWeekKey();
-  const filtered = (recent.results ?? []).filter(d => d.week_key <= cwk);
+  const filtered = (recent.results ?? [])
+    .filter((d) => d.week_key <= cwk && !isManagedProfileSuppressed(d.username));
   return c.html(homePage(filtered));
 });
 
@@ -495,6 +496,7 @@ pageRoutes.get("/status", async (c) => {
 // public profile page — lists all dispatches (or latest if only one)
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
   const { username } = c.req.param();
+  if (isManagedProfileSuppressed(username)) return c.text("not found", 404);
   const viewer = await getUser(c);
   const isOwner = viewer?.username === username;
 
@@ -548,6 +550,7 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
 // specific week: /username/2026-W13
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}/:week_key{\\d{4}-W\\d{1,2}}", async (c) => {
   const { username, week_key } = c.req.param();
+  if (isManagedProfileSuppressed(username)) return c.text("not found", 404);
   const viewer = await getUser(c);
   const isOwner = viewer?.username === username;
 

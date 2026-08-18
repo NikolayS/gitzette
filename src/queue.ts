@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { getUser } from "./auth";
 import type { Env } from "./index";
 import { isGitHubUsername } from "./identifiers";
+import { isManagedProfileSuppressed } from "./highlighted";
 import { isCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
 export const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"] as const;
@@ -84,6 +85,9 @@ queueRoutes.post("/generate", async (c) => {
     if (!existing) return c.json({ error: "target user must exist before enqueue" }, 404);
     target = existing;
   }
+  if (isManagedProfileSuppressed(target.username)) {
+    return c.json({ error: "profile unavailable" }, 410);
+  }
 
   await expireStaleTargetJob(c.env.DB, maxQueueAgeSeconds(c.env), target.id, weekKey);
 
@@ -158,7 +162,9 @@ async function getJob(db: D1Database, id: string): Promise<JobRow | null> {
 export async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<void> {
   await db.prepare(
     `UPDATE generation_jobs
-     SET status='permanent_failed', last_error='generation runner unavailable; please retry', updated_at=unixepoch()
+     SET status='permanent_failed',
+         schedule_key=CASE WHEN capacity_started_at IS NULL THEN NULL ELSE schedule_key END,
+         last_error='generation runner unavailable; please retry', updated_at=unixepoch()
      WHERE (
        status IN ('queued','retryable_failed') OR
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
@@ -174,7 +180,9 @@ async function expireStaleTargetJob(
 ): Promise<void> {
   await db.prepare(
     `UPDATE generation_jobs
-     SET status='permanent_failed', last_error='generation runner unavailable; please retry', updated_at=unixepoch()
+     SET status='permanent_failed',
+         schedule_key=CASE WHEN capacity_started_at IS NULL THEN NULL ELSE schedule_key END,
+         last_error='generation runner unavailable; please retry', updated_at=unixepoch()
      WHERE user_id=? AND week_key=? AND (
        status IN ('queued','retryable_failed') OR
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())

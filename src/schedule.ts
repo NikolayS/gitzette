@@ -28,7 +28,10 @@ export async function enqueueWeeklyProfiles(
   ).bind(...WEEKLY_PROFILE_USERNAMES).all<{ id: string; username: string }>();
   const byUsername = new Map((profiles.results ?? []).map((row) => [row.username.toLowerCase(), row]));
   const missing = WEEKLY_PROFILE_USERNAMES.filter((username) => !byUsername.has(username.toLowerCase()));
-  if (missing.length > 0) throw new Error(`weekly generation profiles are missing: ${missing.join(",")}`);
+  if (missing.length > 0) {
+    console.error(JSON.stringify({ event: "weekly_generation_profiles_missing", missing }));
+    throw new Error(`weekly generation profiles are missing: ${missing.join(",")}`);
+  }
 
   await expireStaleJobs(env.DB, maxQueueAgeSeconds(env));
 

@@ -123,3 +123,17 @@ profile/week, including across terminal-status trigger redelivery. A failed
 profile/week is retried explicitly through the admin generation path instead
 of replaying the cron batch. `/status` exposes the latest scheduled week and
 its rolling-seven-day scheduled-job count.
+
+### Highlighted-profile opt-out and takedown
+
+The contact for an automated-profile opt-out or takedown is
+[@NikolayS](https://github.com/NikolayS); open an issue in this repository with
+the profile name and requested removal. An operator must disable the weekly
+scheduler and runner, then remove the username from
+`WEEKLY_PROFILE_USERNAMES` while retaining it in
+`MANAGED_PROFILE_USERNAMES`. That reviewed deployment suppresses the profile
+from the home page, blocks new generation, and makes both the profile and every
+existing edition route return 404. The operator must run the production smoke
+test and verify those 404s before closing the request. Retaining the name in the
+managed registry is deliberate: it prevents historical D1/R2 records from
+becoming public again. A later opt-in requires a new reviewed allowlist change.

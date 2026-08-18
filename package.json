@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 migrations apply gitzette-db --local",
+    "db:init:local": "wrangler d1 migrations apply gitzette-db --local",
     "db:bootstrap": "bash scripts/bootstrap-production-db.sh",
     "db:migrate": "bash scripts/check-production-drift.sh && bash scripts/check-production-applied-schema.sh && wrangler d1 migrations apply gitzette-db --remote && bash scripts/check-production-schema.sh",
     "test": "bun test",

@@ -167,7 +167,7 @@ Before production activation:
    with a local replay of the complete reviewed chain and aborts deployment on
    structural drift. Out-of-band production DDL is forbidden. Refresh the
    fixture only before cutover in a reviewed commit after investigating drift.
-   `bun run db:init` is local-only and initializes an empty development database
+   `bun run db:init:local` is local-only and initializes an empty development database
    from the migration chain.
 2. Verify the OAuth store is owned by `gitzette-runner` mode `0700`, the runner
    environment is `root:root` mode `0600`, the account is dedicated/non-personal,
