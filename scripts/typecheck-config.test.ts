@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import ts from "typescript";
+
+const discoveryProbe = process.env.GITZETTE_TEST_DISCOVERY_PROBE === "1";
 
 describe("TypeScript project coverage", () => {
   test("the runner project typechecks every runner test file", () => {
@@ -26,6 +30,10 @@ describe("TypeScript project coverage", () => {
   });
 
   test("the test command discovers every top-level script test", async () => {
+    if (discoveryProbe) {
+      expect(true).toBe(true);
+      return;
+    }
     const packageJson = JSON.parse(await Bun.file(resolve("package.json")).text()) as {
       scripts?: Record<string, string>;
     };
@@ -34,20 +42,42 @@ describe("TypeScript project coverage", () => {
     const testCommand = runnerCommand?.split(/\s*&&\s*/)
       .find(command => /^bun\s+test(?:\s|$)/.test(command.trim()));
     expect(testCommand).toBeDefined();
-    const tokens = testCommand?.trim().match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"])*"|'[^']*')+/g) ?? [];
-    expect(tokens.slice(0, 2)).toEqual(["bun", "test"]);
-    const testArguments = tokens.slice(2);
-    expect(testArguments.some(argument => argument === "-t"
-      || argument.startsWith("--test-name-pattern")
-      || argument === "--only")).toBe(false);
-    const testPatterns = testArguments.filter(argument => !argument.startsWith("-"));
-    expect(testPatterns.length).toBeGreaterThan(0);
-
-    const discovered = ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.test.ts"], 1)
-      .map(name => resolve(name)).sort();
-    const matched = [...new Set(testPatterns.flatMap(pattern => [
-      ...new Bun.Glob(pattern).scanSync({ cwd: resolve("."), absolute: true }),
-    ]))].map(name => resolve(name)).filter(name => name.startsWith(resolve("scripts"))).sort();
-    expect(matched).toEqual(discovered);
+    const reportDirectory = await mkdtemp(resolve(tmpdir(), "gitzette-test-discovery-"));
+    const reportPath = resolve(reportDirectory, "bun-test.xml");
+    try {
+      const child = Bun.spawn([
+        "bash",
+        "-c",
+        `${testCommand} --reporter=junit --reporter-outfile="$GITZETTE_TEST_DISCOVERY_REPORT"`,
+      ], {
+        cwd: resolve("."),
+        env: {
+          ...process.env,
+          GITZETTE_TEST_DISCOVERY_PROBE: "1",
+          GITZETTE_TEST_DISCOVERY_REPORT: reportPath,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      if (exitCode !== 0) {
+        throw new Error(`configured test command failed with ${exitCode}\n${stdout}\n${stderr}`);
+      }
+      const report = await Bun.file(reportPath).text();
+      const executedFiles = new Set(
+        [...report.matchAll(/<testsuite[^>]+file="([^"]+\.test\.ts)"/g)]
+          .map(match => resolve(match[1])),
+      );
+      const discovered = ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.test.ts"], 1);
+      for (const name of discovered) {
+        expect(executedFiles.has(resolve(name)), `script test not executed: ${name}`).toBe(true);
+      }
+    } finally {
+      await rm(reportDirectory, { recursive: true, force: true });
+    }
   });
 });

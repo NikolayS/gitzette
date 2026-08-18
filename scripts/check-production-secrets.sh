@@ -25,14 +25,23 @@ gitzette_production_secrets_script_directory() {
 }
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-  return 0
+  echo "check-production-secrets.sh must be executed, not sourced" >&2
+  return 1
 fi
 
 set -euo pipefail
 
 production_secrets_script_source="${BASH_SOURCE[0]}"
 if [[ "$production_secrets_script_source" != */* ]]; then
-  production_secrets_script_source="$(command -v -- "$production_secrets_script_source")"
+  if resolved_production_secrets_script="$(command -v -- "$production_secrets_script_source" 2>/dev/null)"; then
+    production_secrets_script_source="$resolved_production_secrets_script"
+  elif [[ -f "$PWD/$production_secrets_script_source" ]]; then
+    production_secrets_script_source="$PWD/$production_secrets_script_source"
+  else
+    echo "cannot resolve check-production-secrets.sh from PATH or current directory" >&2
+    exit 1
+  fi
+  unset resolved_production_secrets_script
 fi
 production_secrets_script_directory="$(
   gitzette_production_secrets_script_directory "$production_secrets_script_source"

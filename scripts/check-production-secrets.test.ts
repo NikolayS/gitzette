@@ -14,7 +14,7 @@ afterEach(async () => {
 
 type FakeWranglerMode = "success" | "failure" | "empty";
 type WrapperPath = "direct" | "symlink";
-type WrapperInvocation = "bash-absolute" | "direct-absolute" | "direct-relative" | "path";
+type WrapperInvocation = "bash-absolute" | "bash-bare" | "direct-absolute" | "direct-relative" | "path";
 type SecretCheckOptions = {
   includeToken?: boolean;
   invocation?: WrapperInvocation;
@@ -88,6 +88,10 @@ esac
     case "bash-absolute":
       command = ["bash", scriptPath];
       break;
+    case "bash-bare":
+      command = ["bash", scriptPath.split("/").at(-1) ?? scriptPath];
+      cwd = dirname(scriptPath);
+      break;
     case "direct-absolute":
       command = [scriptPath];
       break;
@@ -130,10 +134,11 @@ describe("production secret preflight", () => {
   });
 
   test("fails closed when the Wrangler response is missing a required secret", async () => {
-    const result = await runSecretCheck(expectedProductionSecrets.slice(1).map(name => ({ name })));
+    const [omitted, ...present] = expectedProductionSecrets;
+    const result = await runSecretCheck(present.map(name => ({ name })));
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("production Worker secret mismatch");
-    expect(result.stderr).toContain("missing=[ADMIN_USER_ID]");
+    expect(result.stderr).toContain(`missing=[${omitted}]`);
     expect(result.stdout).toBe("");
   });
 
@@ -224,7 +229,7 @@ describe("production secret preflight", () => {
       new Response(child.stderr).text(),
     ]);
     expect(exitCode).toBe(1);
-    expect(stderr).toBe("check-production-secrets.sh symlink resolution exceeded 40 hops\n");
+    expect(stderr).toContain("symlink resolution exceeded 40 hops");
   });
 
   test("runs directly through the shebang from the CI working directory", async () => {
@@ -244,6 +249,32 @@ describe("production secret preflight", () => {
     expect(result.exitCode).toBe(0);
     expect(result.fakeInvoked).toBe(true);
     expect(result.stdout).toContain("Production secrets OK");
+  });
+
+  test("resolves bash bare-name fallback from the current directory", async () => {
+    const result = await runRawSecretCheck(
+      JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
+      { invocation: "bash-bare" },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.fakeInvoked).toBe(true);
+    expect(result.stdout).toContain("Production secrets OK");
+  });
+
+  test("fails loudly when the deploy gate is sourced", async () => {
+    const wrapper = join(repoRoot, "scripts", "check-production-secrets.sh");
+    const child = Bun.spawn(["bash", "-c", `source "$1"`, "--", wrapper], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("must be executed, not sourced");
   });
 
   test("requires the secret-list argv path", async () => {
