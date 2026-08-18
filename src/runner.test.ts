@@ -238,6 +238,7 @@ function quietUsage() {
 
 async function generationDatabase(): Promise<Database> {
   const db = new Database(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
   db.exec(await Bun.file("migrations/0000_base.sql").text());
   db.exec(await Bun.file("migrations/0001_generation_queue.sql").text());
   return db;
