@@ -32,9 +32,12 @@ estimated tokens as billing-grade provider usage.
 
 ## Activation and recalibration
 
-Before enabling `gitzette-runner.service`, run the five canaries and capture the
-dedicated account's usage window before and after with the runner's isolated
-OpenClaw state:
+Activation is blocked from changing `WEEKLY_GENERATION_ENABLED` to `true` until
+the five canaries measure the dedicated account's real provider window and the
+reviewed `ROLLING_7D_GLOBAL_GENERATION_LIMIT` is lowered to the measured value
+with the headroom rule below. Before enabling `gitzette-runner.service`, capture
+the account's usage window before and after with the runner's isolated OpenClaw
+state:
 
 ```bash
 sudo -u gitzette-runner env \
@@ -57,3 +60,11 @@ quality, prompt, account plan, or provider-limit change.
 If the provider window is unavailable or the local aggregate diverges
 materially from it, disable the runner and investigate. Do not add an API key or
 another provider as a fallback.
+
+An oversized ceiling is observable as provider rejection after a job has
+already claimed a lease, increasing `/status` permanent failures and eventually
+the distinct post-retry unfulfilled-week counter. Capacity correctly stopped by
+GitZette instead stays queued/deferred and appears in the queued-job count and
+oldest-queued age without a provider-start failure. Treat any provider rejection
+during calibration as proof that the proposed ceiling is too high; lower it and
+repeat all canaries before weekly activation.

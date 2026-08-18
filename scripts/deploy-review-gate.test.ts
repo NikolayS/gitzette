@@ -9,5 +9,15 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain('commits/$reviewed_sha/status\")');
     expect(workflow).toContain('.context == "samorev" and .state == "success" and .creator.login == "samo-agent"');
     expect(workflow).toContain('.context == "samorev-gate" and .state == "success"');
+    const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
+    const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
+    expect(reviewGate).toContain("checks: read");
+    expect(reviewGate).toContain("pull-requests: read");
+    expect(reviewGate).toContain("statuses: read");
+    expect(deploy).toContain("needs: review-gate");
+    expect(deploy).toContain("contents: read");
+    expect(deploy).not.toContain("checks: read");
+    expect(deploy).not.toContain("pull-requests: read");
+    expect(deploy).not.toContain("statuses: read");
   });
 });

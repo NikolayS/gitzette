@@ -436,7 +436,9 @@ describe("weekly profile scheduling", () => {
       const [minute, hour] = cron.split(" ").map(Number);
       return hour * 60 + minute;
     });
-    expect(weeklyMinutes[1] - weeklyMinutes[0]).toBeGreaterThan(configuredMaxAge / 60);
+    const retryGapSeconds = (weeklyMinutes[1] - weeklyMinutes[0]) * 60;
+    expect(retryGapSeconds).toBeGreaterThan(configuredMaxAge);
+    expect(retryGapSeconds - configuredMaxAge).toBeGreaterThanOrEqual(60 * 60);
     expect(JOB_EXPIRY_CRON.split(" ").slice(1)).toEqual(["*", "*", "*", "*"]);
     await expect(runWeeklySchedule({ cron: "* * * * *", scheduledTime } as ScheduledController, {} as never))
       .rejects.toThrow("unexpected generation cron");

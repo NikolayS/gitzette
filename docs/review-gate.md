@@ -103,6 +103,21 @@ result with `schema.sql`, exercises Worker+D1+R2 E2E, and typechecks Worker,
 scripts, runner source, and every runner test. `scripts/typecheck-config.test.ts`
 fails if a runner test falls out of that TypeScript project.
 
+The current full-delta re-review ledger makes both changed and unchanged
+attention explicit. Every row reran `bun run test:all`, E2E, typechecks,
+actionlint, shellcheck, the high audit, and the secret scan before the linked
+`--fetch` review:
+
+| Exact head | Focus of that fix cycle | Unchanged subsets re-verified by the full gate | Full-delta report |
+| --- | --- | --- | --- |
+| `30b0be6` | structured OAuth outage signals and strict D1 response parsing | migrations, queue/publication, scheduler, renderer, and deploy gate | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5333994431) |
+| `806ae6a` | credential scrub, cleanup activation, OAuth persistence, disclosure | runner inference/lease core, migration chain, publication transaction, and review foundation | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5334155893) |
+| `c62ecea` | baseline derivation, post-retry visibility, prompt sandbox, scope extraction | migrations, Worker queue/lease/publication, host runner runtime, and protected review state machine | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5334329357) |
+
+Each report records the complete base-to-head byte count, not only the focus
+column. A later fix head invalidates the prior row and must add a new exact-head
+report before approval.
+
 ## Policy audit and bootstrap
 
 `config/main-branch-protection.json` is the reviewed policy.
