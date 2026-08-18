@@ -187,6 +187,9 @@ describe("weekly profile scheduling", () => {
         { status: "permanent_failed", cleared: 1, count: 9 },
         { status: "queued", cleared: 0, count: 9 },
       ]);
+      expect(sqlite.query(
+        "SELECT COUNT(*) AS count FROM generation_jobs WHERE last_error='scheduled generation aged out before provider start'",
+      ).get()).toEqual({ count: 9 });
     } finally {
       sqlite.close();
     }

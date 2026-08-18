@@ -9,6 +9,7 @@ export const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating",
 export const TERMINAL_STATUSES = ["published", "permanent_failed"] as const;
 export const ALL_STATUSES = [...LIVE_STATUSES, ...TERMINAL_STATUSES] as const;
 export const MAX_GENERATE_BODY_BYTES = 2048;
+export const SCHEDULED_AGE_OUT_ERROR = "scheduled generation aged out before provider start";
 const DEFAULT_MAX_QUEUE_AGE_SECONDS = 6 * 60 * 60;
 
 export const GENERATION_REQUEST_INSERT_SQL = `INSERT INTO generation_jobs
@@ -164,7 +165,11 @@ export async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Pr
     `UPDATE generation_jobs
      SET status='permanent_failed',
          schedule_key=CASE WHEN capacity_started_at IS NULL THEN NULL ELSE schedule_key END,
-         last_error='generation runner unavailable; please retry', updated_at=unixepoch()
+         last_error=CASE
+           WHEN schedule_key IS NOT NULL AND capacity_started_at IS NULL THEN '${SCHEDULED_AGE_OUT_ERROR}'
+           ELSE 'generation runner unavailable; please retry'
+         END,
+         updated_at=unixepoch()
      WHERE (
        status IN ('queued','retryable_failed') OR
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
@@ -182,7 +187,11 @@ async function expireStaleTargetJob(
     `UPDATE generation_jobs
      SET status='permanent_failed',
          schedule_key=CASE WHEN capacity_started_at IS NULL THEN NULL ELSE schedule_key END,
-         last_error='generation runner unavailable; please retry', updated_at=unixepoch()
+         last_error=CASE
+           WHEN schedule_key IS NOT NULL AND capacity_started_at IS NULL THEN '${SCHEDULED_AGE_OUT_ERROR}'
+           ELSE 'generation runner unavailable; please retry'
+         END,
+         updated_at=unixepoch()
      WHERE user_id=? AND week_key=? AND (
        status IN ('queued','retryable_failed') OR
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())

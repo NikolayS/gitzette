@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_D1_TOKEN
+source scripts/require-wrangler.sh
+
 baseline_state="$(mktemp -d)"
 fixture_state="$(mktemp -d)"
 cleanup() {
@@ -8,12 +11,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-bunx wrangler d1 execute gitzette-db --local --persist-to "$baseline_state" --file migrations/0000_base.sql >/dev/null
-bunx wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --file fixtures/production-baseline-2026-08-15.sql >/dev/null
+local_wrangler d1 execute gitzette-db --local --persist-to "$baseline_state" --file migrations/0000_base.sql >/dev/null
+local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --file fixtures/production-baseline-2026-08-15.sql >/dev/null
 
 query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY type,name"
-bunx wrangler d1 execute gitzette-db --local --persist-to "$baseline_state" --command "$query" --json >"$baseline_state/schema.json"
-bunx wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
+local_wrangler d1 execute gitzette-db --local --persist-to "$baseline_state" --command "$query" --json >"$baseline_state/schema.json"
+local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
 
 # The Bun program intentionally receives shell values through argv.
 # shellcheck disable=SC2016

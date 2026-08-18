@@ -8,6 +8,8 @@ function statusEnv(statusToken: string | undefined) {
     DB: {
       prepare: () => ({
         first: async () => ({ total: 0, failed: 0, oldest_queued: null }),
+        bind() { return this; },
+        all: async () => ({ results: [{ username: "torvalds", week_key: "2026-W32", updated_at: 1 }] }),
       }),
     },
   } as never;
@@ -35,6 +37,8 @@ describe("private status route boundary", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
-    expect(await response.text()).toContain("Input tokens · last 7 days");
+    const body = await response.text();
+    expect(body).toContain("Input tokens · last 7 days");
+    expect(body).toContain("@torvalds · 2026-W32");
   });
 });

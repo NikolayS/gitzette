@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source scripts/require-wrangler.sh
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required to verify Worker secrets" >&2
@@ -8,7 +9,7 @@ fi
 
 secret_json="$(mktemp)"
 trap 'rm -f "$secret_json"' EXIT
-bunx wrangler secret list --format json >"$secret_json"
+"$wrangler_bin" secret list --format json >"$secret_json"
 # The Bun program intentionally receives shell values through argv.
 # shellcheck disable=SC2016
 bun -e '

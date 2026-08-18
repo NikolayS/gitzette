@@ -4,10 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:init:local": "wrangler d1 migrations apply gitzette-db --local",
+    "deploy": "./node_modules/.bin/wrangler deploy",
+    "db:init:local": "./node_modules/.bin/wrangler d1 migrations apply gitzette-db --local",
     "db:bootstrap": "bash scripts/bootstrap-production-db.sh",
-    "db:migrate": "bash scripts/check-production-drift.sh && bash scripts/check-production-applied-schema.sh && wrangler d1 migrations apply gitzette-db --remote && bash scripts/check-production-schema.sh",
+    "db:migrate": "bash scripts/check-production-drift.sh && bash scripts/check-production-applied-schema.sh && ./node_modules/.bin/wrangler d1 migrations apply gitzette-db --remote && bash scripts/check-production-schema.sh",
     "test": "bun test",
     "test:runner": "bunx tsc -p runner/tsconfig.json --noEmit && bunx tsc -p tsconfig.test.json --noEmit && bun test runner scripts/*.test.ts",
     "test:e2e": "bash scripts/e2e.sh",

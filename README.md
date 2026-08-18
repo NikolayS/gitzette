@@ -123,7 +123,10 @@ enabled, it enqueues the nine retained weekly profiles exactly once per
 profile/week, including across terminal-status trigger redelivery. A failed
 profile/week is retried explicitly through the admin generation path instead
 of replaying the cron batch. `/status` exposes the latest scheduled week and
-its rolling-seven-day scheduled-job count.
+its rolling-seven-day scheduled-job count. It also lists every weekly slot that
+aged out before provider work began during the last 14 days. A nonzero list is
+an operator alert: enqueue each named profile/week through the admin generation
+path, then verify publication before clearing the incident.
 
 ### Highlighted-profile opt-out and takedown
 

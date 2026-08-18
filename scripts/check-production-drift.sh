@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source scripts/require-wrangler.sh
 
 # This is a one-time pre-cutover baseline gate. After cutover, Wrangler's D1
 # migration ledger records and applies reviewed migrations; this script does not
@@ -24,11 +25,11 @@ trap cleanup EXIT
 # only valid for the 0000/0001 cutover. Once D1 records any migration, Wrangler's
 # migration ledger owns subsequent changes and this one-time baseline gate must
 # not compare the expanded schema with the old fixture.
-bunx wrangler d1 execute gitzette-db --remote --command \
+"$wrangler_bin" d1 execute gitzette-db --remote --command \
   "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name='d1_migrations'" --json >"$cutover_json"
 ledger_table_count="$(jq -r '.[0].results[0].total' "$cutover_json")"
 if [[ "$ledger_table_count" -gt 0 ]]; then
-  bunx wrangler d1 execute gitzette-db --remote --command \
+  "$wrangler_bin" d1 execute gitzette-db --remote --command \
     "SELECT name FROM d1_migrations ORDER BY id" --json >"$ledger_json"
   bun scripts/cutover-state.ts "$cutover_json" "$ledger_json" >/dev/null
   echo "Production cutover gate skipped: D1 migration ledger already exists"
@@ -39,10 +40,10 @@ if [[ "$(bun scripts/cutover-state.ts "$cutover_json")" != "cutover" ]]; then
   exit 1
 fi
 
-bunx wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --file fixtures/production-baseline-2026-08-15.sql >/dev/null
+local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --file fixtures/production-baseline-2026-08-15.sql >/dev/null
 query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY type,name"
-bunx wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
-bunx wrangler d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
+local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
+"$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
 
 # The Bun program intentionally receives shell values through argv.
 # shellcheck disable=SC2016
