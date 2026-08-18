@@ -119,6 +119,7 @@ production configuration keeps `WEEKLY_GENERATION_ENABLED=false`, so trigger
 delivery is inert until the dedicated runner OAuth account is provisioned and
 its canaries pass. Enable it only in a subsequent reviewed deployment. Once
 enabled, it enqueues the nine retained weekly profiles exactly once per
-profile/week; a permanently failed scheduled job can be re-enqueued, and
-`/status` exposes the latest scheduled week and its rolling-seven-day
-scheduled-job count.
+profile/week, including across terminal-status trigger redelivery. A failed
+profile/week is retried explicitly through the admin generation path instead
+of replaying the cron batch. `/status` exposes the latest scheduled week and
+its rolling-seven-day scheduled-job count.

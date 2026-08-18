@@ -131,7 +131,7 @@ describe("weekly profile scheduling", () => {
     }
   });
 
-  test("re-enqueues a scheduled profile after its prior job permanently fails", async () => {
+  test("keeps terminal cron redelivery idempotent while allowing an explicit retry", async () => {
     const sqlite = await generationDatabase();
     try {
       const db = new SqliteD1(sqlite);
@@ -141,21 +141,22 @@ describe("weekly profile scheduling", () => {
       }
 
       expect((await enqueueWeeklyProfiles({ DB: db as never, ADMIN_USER_ID: "1" }, scheduledTime)).queued).toBe(9);
-      const scheduleKey = `2026-W33:${profiles[0].id}`;
-      sqlite.query("UPDATE generation_jobs SET status='permanent_failed' WHERE schedule_key=?").run(scheduleKey);
+      sqlite.query("UPDATE generation_jobs SET status='permanent_failed' WHERE schedule_key IS NOT NULL").run();
 
       expect(await enqueueWeeklyProfiles({ DB: db as never, ADMIN_USER_ID: "1" }, scheduledTime)).toEqual({
         weekKey: "2026-W33",
         targets: 9,
-        queued: 1,
-        deduplicated: 8,
+        queued: 0,
+        deduplicated: 9,
       });
-      expect(sqlite.query(
-        "SELECT status,COUNT(*) AS count FROM generation_jobs WHERE schedule_key=? GROUP BY status ORDER BY status",
-      ).all(scheduleKey)).toEqual([
-        { status: "permanent_failed", count: 1 },
-        { status: "queued", count: 1 },
-      ]);
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM generation_jobs WHERE schedule_key IS NOT NULL").get())
+        .toEqual({ count: 9 });
+
+      sqlite.query(
+        "INSERT INTO generation_jobs(id,user_id,requested_by,week_key,status) VALUES (?,?,?,?,?)",
+      ).run("explicit-retry", profiles[0].id, "1", "2026-W33", "queued");
+      expect(sqlite.query("SELECT status,schedule_key FROM generation_jobs WHERE id='explicit-retry'").get())
+        .toEqual({ status: "queued", schedule_key: null });
     } finally {
       sqlite.close();
     }
