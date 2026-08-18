@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_D1_TOKEN
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
+gitzette_require_local
 
 baseline_state="$(mktemp -d)"
 fixture_state="$(mktemp -d)"

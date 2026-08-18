@@ -94,7 +94,12 @@ export async function runWeeklySchedule(
   controller: ScheduledController,
   env: Env,
 ): Promise<void> {
+  const cleanupEnabled = env.CLEANUP_SWEEP_ENABLED === "true";
   if (controller.cron === JOB_EXPIRY_CRON) {
+    if (!cleanupEnabled) {
+      console.log(JSON.stringify({ event: "generation_cleanup_disabled" }));
+      return;
+    }
     await expireStaleArtifacts(env);
     console.log(JSON.stringify({ event: "generation_jobs_expired" }));
     return;
@@ -102,13 +107,14 @@ export async function runWeeklySchedule(
   if (!weeklyGenerationCrons.has(controller.cron)) {
     throw new Error(`unexpected generation cron: ${controller.cron}`);
   }
-  // Queue expiry is a control-plane invariant for manual and scheduled jobs;
-  // it must run even while weekly enqueue is disabled.
-  await expireStaleArtifacts(env);
+  // Cleanup remains independent of weekly enqueue after explicit activation.
+  // Weekly generation itself fails closed unless that prerequisite is active.
+  if (cleanupEnabled) await expireStaleArtifacts(env);
   if (env.WEEKLY_GENERATION_ENABLED !== "true") {
     console.log(JSON.stringify({ event: "weekly_generation_disabled" }));
     return;
   }
+  if (!cleanupEnabled) throw new Error("weekly generation requires CLEANUP_SWEEP_ENABLED=true");
   const result = await enqueueWeeklyProfilesAfterSweep(env, controller.scheduledTime, true);
   console.log(JSON.stringify({ event: "weekly_generation_enqueued", ...result }));
 }

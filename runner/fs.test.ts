@@ -16,7 +16,9 @@ describe("runner private directories", () => {
     expect((await stat(path)).mode & 0o777).toBe(0o700);
     await chmod(path, 0o755);
     await ensurePrivateDirectory(path);
-    expect((await stat(path)).mode & 0o777).toBe(0o700);
+    const info = await stat(path);
+    expect(info.mode & 0o777).toBe(0o700);
+    if (typeof process.getuid === "function") expect(info.uid).toBe(process.getuid());
   });
 
   test("rejects a symlinked private directory", async () => {

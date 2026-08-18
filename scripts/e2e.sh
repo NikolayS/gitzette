@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_D1_TOKEN
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
+gitzette_require_local
 
 state_dir="$(mktemp -d)"
 port=""
@@ -51,6 +51,7 @@ for _attempt in $(seq 1 5); do
     --var ROLLING_7D_USER_GENERATION_LIMIT:2 \
     --var ROLLING_7D_GLOBAL_GENERATION_LIMIT:4 \
     --var MAX_QUEUE_AGE_SECONDS:20 \
+    --var CLEANUP_SWEEP_ENABLED:true \
     --var WEEKLY_GENERATION_ENABLED:true \
     --var RUNNER_LEASE_SECONDS:2 \
     --show-interactive-dev-session=false >"$state_dir/wrangler.log" 2>&1 &

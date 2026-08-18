@@ -89,8 +89,10 @@ count, and runner wall time in the same lease-guarded D1 batch. The private
 
 The scheduled handler dispatches three explicit Cloudflare Cron Triggers by
 `controller.cron`. At minute 7 of every hour (`7 * * * *`) it only expires stale
-jobs and removes their staging objects, independent of whether weekly enqueue is
-enabled. At 13:17 UTC every Monday (`17 13 * * 1`), after the previous ISO week
+jobs and removes their staging objects when the separately reviewed
+`CLEANUP_SWEEP_ENABLED` gate is true; the committed default is false. Once
+activated, cleanup remains independent of whether weekly enqueue is enabled.
+At 13:17 UTC every Monday (`17 13 * * 1`), after the previous ISO week
 is complete everywhere, it schedules that week for the nine retained weekly
 profiles: NikolayS, DHH, dcramer, karpathy, levkk, mitchellh, simonw, steipete,
 and torvalds. At 20:17 UTC (`17 20 * * 1`), more than the six-hour queue age-out
@@ -99,6 +101,7 @@ never received provider capacity can be scheduled again. Both weekly branches
 run their own stale-job sweep before enqueue, so retry correctness does not
 depend on the hourly trigger arriving on time. Cleanup failures are logged per
 job and cannot prevent other expired jobs or the weekly retry from progressing.
+A weekly trigger fails closed if weekly generation is enabled before cleanup.
 A durable unique key
 per profile/week makes successful trigger redelivery a no-op and prevents an
 already-finished edition from being regenerated. Weekly enqueue fails without

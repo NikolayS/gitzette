@@ -17,7 +17,12 @@ fi
 cd -- "$gitzette_repo_root" || exit 1
 unset gitzette_repo_root
 
-local_wrangler() {
-  env -u CLOUDFLARE_API_TOKEN -u CLOUDFLARE_ACCOUNT_ID -u CLOUDFLARE_D1_TOKEN \
-    "$wrangler_bin" "$@"
+local_wrangler() (
+  gitzette_require_local
+  exec "$wrangler_bin" "$@"
+)
+
+gitzette_require_local() {
+  unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_D1_TOKEN
+  unset CLOUDFLARE_EMAIL CLOUDFLARE_API_KEY CF_API_TOKEN CF_ACCOUNT_ID
 }

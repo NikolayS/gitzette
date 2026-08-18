@@ -121,10 +121,11 @@ primary Monday enqueue after the prior week is complete in every time zone, and
 Both weekly branches perform their own stale-job sweep before enqueue; they do
 not depend on the hourly trigger arriving on time. A staging cleanup failure is
 logged per job and cannot poison the rest of the sweep or the weekly retry.
-The reviewed production configuration keeps `WEEKLY_GENERATION_ENABLED=false`,
-so weekly enqueue is inert until the dedicated runner OAuth account is
-provisioned and its canaries pass; hourly expiry remains active. Enable weekly
-enqueue only in a subsequent reviewed deployment. Once enabled, it enqueues the
+The reviewed production configuration keeps both `CLEANUP_SWEEP_ENABLED=false`
+and `WEEKLY_GENERATION_ENABLED=false`, so the scheduled handler cannot mutate
+durable state until the dedicated runner is provisioned and its canaries pass.
+Enable cleanup in a reviewed deployment before enabling weekly enqueue; weekly
+generation fails closed if cleanup is not active. Once enabled, it enqueues the
 nine retained profiles once per profile/week, with the retry restoring only
 primary-run work that aged out before provider capacity began. `/status`
 exposes the latest scheduled week and its rolling-seven-day scheduled-job count.
@@ -149,6 +150,11 @@ false; enable scheduling only in a later reviewed deployment. Never fabricate
 an ID or use the admin enqueue path as a seeding mechanism.
 
 ### Highlighted-profile opt-out and takedown
+
+Every rendered edition carries a fixed, non-editor-controlled notice that it is
+AI-generated from public GitHub activity. This is disclosure, not a claim of
+consent or authorization. Runtime suppression and the takedown deadlines below
+remain mandatory for any verified request.
 
 The contact for an automated-profile opt-out or takedown is
 [@NikolayS](https://github.com/NikolayS); open an issue in this repository with

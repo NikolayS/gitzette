@@ -73,8 +73,13 @@ never use this capture command to bless unexpected production drift.
 | `check-production-applied-schema.sh` | Must print `Applied-schema gate skipped: pre-cutover baseline gate owns the unmigrated database`. | Replays the exact ledger prefix locally and compares it with live D1 before mutation. |
 | `check-production-schema.sh` | Runs after the first remote apply and compares live D1 with the complete chain. | Runs after every remote apply and compares live D1 with the complete chain. |
 
-On the first successful `bun run db:migrate`, the operator must see the cutover
-gate OK line, the applied-schema skipped line, Wrangler's successful migration
+On the first successful `bun run db:migrate`, the operator must see `Production
+username collision preflight OK: zero case-fold collisions`, the cutover gate OK
+line, the applied-schema skipped line, Wrangler's successful migration
 apply, and finally `Production schema OK: live D1 matches the complete reviewed
-migration chain`. Any missing or different gate line is a failed cutover; stop
-before deployment.
+migration chain`. The collision query is read-only and runs before migration
+0004; any row aborts before mutation. The migration also deterministically
+aborts before its lowercase update if two historical user IDs collide, as
+proved by `src/migrations.test.ts`. No live zero-row result is claimed in this
+repository until the protected production credential runs this gate. Any
+missing or different gate line is a failed cutover; stop before deployment.

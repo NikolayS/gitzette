@@ -267,6 +267,7 @@ describe("weekly profile scheduling", () => {
         DISPATCHES: bucket,
         ADMIN_USER_ID: "1",
         MAX_QUEUE_AGE_SECONDS: "21600",
+        CLEANUP_SWEEP_ENABLED: "true",
         WEEKLY_GENERATION_ENABLED: "true",
       } as never;
 
@@ -301,16 +302,31 @@ describe("weekly profile scheduling", () => {
       { DB: db, DISPATCHES: new StubR2(), WEEKLY_GENERATION_ENABLED: "false" } as never,
     );
     expect(db.batchCalls).toBe(0);
-    expect(db.staleSweepCalls).toBe(1);
+    expect(db.staleSweepCalls).toBe(0);
   });
 
-  test("expires stale work on the hourly clock without entering weekly enqueue", async () => {
+  test("keeps hourly cleanup inert until its separate activation gate is enabled", async () => {
     const db = new StubD1(true, profiles);
     await runWeeklySchedule(
       { cron: JOB_EXPIRY_CRON, scheduledTime } as ScheduledController,
       { DB: db, DISPATCHES: new StubR2(), WEEKLY_GENERATION_ENABLED: "true" } as never,
     );
+    expect(db.staleSweepCalls).toBe(0);
+    await runWeeklySchedule(
+      { cron: JOB_EXPIRY_CRON, scheduledTime } as ScheduledController,
+      { DB: db, DISPATCHES: new StubR2(), CLEANUP_SWEEP_ENABLED: "true" } as never,
+    );
     expect(db.staleSweepCalls).toBe(1);
+    expect(db.batchCalls).toBe(0);
+  });
+
+  test("fails closed if weekly generation is enabled before cleanup", async () => {
+    const db = new StubD1(true, profiles);
+    await expect(runWeeklySchedule(
+      { cron: WEEKLY_GENERATION_CRON, scheduledTime } as ScheduledController,
+      { DB: db, DISPATCHES: new StubR2(), WEEKLY_GENERATION_ENABLED: "true" } as never,
+    )).rejects.toThrow("requires CLEANUP_SWEEP_ENABLED=true");
+    expect(db.staleSweepCalls).toBe(0);
     expect(db.batchCalls).toBe(0);
   });
 
@@ -330,6 +346,7 @@ describe("weekly profile scheduling", () => {
           DISPATCHES: bucket,
           ADMIN_USER_ID: "2",
           MAX_QUEUE_AGE_SECONDS: "21600",
+          CLEANUP_SWEEP_ENABLED: "true",
           WEEKLY_GENERATION_ENABLED: "true",
         } as never,
       );
@@ -361,6 +378,7 @@ describe("weekly profile scheduling", () => {
         DB: db,
         DISPATCHES: bucket,
         MAX_QUEUE_AGE_SECONDS: "1",
+        CLEANUP_SWEEP_ENABLED: "true",
         WEEKLY_GENERATION_ENABLED: "false",
         RUNNER_SECRET: "expected",
         ROLLING_7D_GLOBAL_GENERATION_LIMIT: "100",
@@ -397,6 +415,7 @@ describe("weekly profile scheduling", () => {
 
   test("couples hourly expiry and redundant weekly triggers to the handler", async () => {
     const config = await Bun.file("wrangler.toml").text();
+    expect(config).toMatch(/^CLEANUP_SWEEP_ENABLED\s*=\s*"false"$/m);
     const configured = config.match(/^crons\s*=\s*(\[[^\n]+\])\s*$/m);
     expect(configured).not.toBeNull();
     expect(JSON.parse(configured![1])).toEqual([JOB_EXPIRY_CRON, ...WEEKLY_GENERATION_CRONS]);

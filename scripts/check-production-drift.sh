@@ -16,9 +16,10 @@ fixture_state="$(mktemp -d)"
 remote_json="$(mktemp)"
 cutover_json="$(mktemp)"
 ledger_json="$(mktemp)"
+collision_json="$(mktemp)"
 cleanup() {
   rm -rf "$fixture_state"
-  rm -f "$remote_json" "$cutover_json" "$ledger_json"
+  rm -f "$remote_json" "$cutover_json" "$ledger_json" "$collision_json"
 }
 trap cleanup EXIT
 
@@ -29,6 +30,25 @@ trap cleanup EXIT
 "$wrangler_bin" d1 execute gitzette-db --remote --command \
   "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name='d1_migrations'" --json >"$cutover_json"
 ledger_table_count="$(jq -r '.[0].results[0].total' "$cutover_json")"
+"$wrangler_bin" d1 execute gitzette-db --remote --command \
+  "SELECT lower(username) AS username,COUNT(*) AS total FROM users GROUP BY lower(username) HAVING COUNT(*)>1" \
+  --json >"$collision_json"
+bun -e '
+  const document = JSON.parse(await Bun.file(process.argv[1]).text());
+  if (!Array.isArray(document) || document.length !== 1) {
+    throw new Error("invalid production username-collision preflight response");
+  }
+  const envelope = document[0];
+  if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)
+    || Object.hasOwn(envelope, "error") || !Array.isArray(envelope.results)) {
+    throw new Error("invalid production username-collision preflight response");
+  }
+  if (envelope.results.length !== 0) {
+    throw new Error("production contains case-folding GitHub username collisions; aborting migration");
+  }
+' "$collision_json"
+echo "Production username collision preflight OK: zero case-fold collisions"
+
 if [[ "$ledger_table_count" -gt 0 ]]; then
   "$wrangler_bin" d1 execute gitzette-db --remote --command \
     "SELECT name FROM d1_migrations ORDER BY id" --json >"$ledger_json"

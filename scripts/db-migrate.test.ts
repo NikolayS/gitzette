@@ -25,6 +25,8 @@ set -euo pipefail
 args="$*"
 if [[ "$args" == *"SELECT COUNT(*) AS total"* ]]; then
   printf '%s\\n' '[{"results":[{"total":0}]}]'
+elif [[ "$args" == *"GROUP BY lower(username)"* ]]; then
+  printf '%s\\n' '[{"results":[]}]'
 elif [[ "$args" == *"sqlite_master"* && "$args" == *"--json"* ]]; then
   printf '%s\\n' '[{"results":[]}]'
 elif [[ "$args" == "d1 migrations apply gitzette-db --remote" ]]; then
@@ -49,6 +51,7 @@ fi
     ]);
 
     expect(exitCode, stderr).toBe(0);
+    expect(stdout).toContain("Production username collision preflight OK: zero case-fold collisions");
     expect(stdout).toContain("Production cutover gate OK: unmigrated live D1 matches the reviewed baseline");
     expect(stdout).toContain("Applied-schema gate skipped: pre-cutover baseline gate owns the unmigrated database");
     expect(stdout).toContain("Mock remote migration apply OK");

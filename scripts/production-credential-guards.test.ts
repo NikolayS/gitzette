@@ -53,4 +53,31 @@ describe("production migration credential guards", () => {
       `${repoRoot}/node_modules/.bin/wrangler`,
     ]);
   });
+
+  test("local-only scripts centrally clear every Wrangler credential alias", async () => {
+    const helperPath = `${repoRoot}/scripts/require-wrangler.sh`;
+    const credentials = [
+      "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_D1_TOKEN",
+      "CLOUDFLARE_EMAIL", "CLOUDFLARE_API_KEY", "CF_API_TOKEN", "CF_ACCOUNT_ID",
+    ];
+    const env = { ...process.env };
+    for (const name of credentials) env[name] = "must-not-survive";
+    const child = Bun.spawn([
+      "bash", "-c",
+      'set -euo pipefail; source "$1"; gitzette_require_local; env',
+      "local-credential-probe", helperPath,
+    ], { cwd: "/tmp", env, stdout: "pipe", stderr: "pipe" });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe("");
+    for (const name of credentials) expect(stdout).not.toContain(`${name}=`);
+
+    for (const script of ["check-production-baseline.sh", "check-schema.sh", "e2e.sh"]) {
+      expect(await Bun.file(`${repoRoot}/scripts/${script}`).text()).toContain("gitzette_require_local");
+    }
+  });
 });

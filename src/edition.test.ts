@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { escapeHtml, renderEdition, validateManifest, type PublicationManifest } from "./edition";
+import { AI_ACTIVITY_NOTICE, escapeHtml, renderEdition, validateManifest, type PublicationManifest } from "./edition";
 
 function activeManifest(): PublicationManifest {
   return {
@@ -58,6 +58,21 @@ describe("typed publication manifest", () => {
     const html = renderEdition(validateManifest(activeManifest(), "octocat", "2026-W32"), (key) => `/img/${key}`);
     expect(html).toMatch(/<article>[\s\S]*<h2>[\s\S]*<p>/);
     expect(html).toContain('<p class="deck"><em>One boundary condition, finally bounded.</em></p>');
+    expect(html).toContain(`<p class="notice">${AI_ACTIVITY_NOTICE}</p>`);
+  });
+
+  test("renders the fixed AI/public-activity notice for active and quiet editions", () => {
+    const activeHtml = renderEdition(validateManifest(activeManifest(), "octocat", "2026-W32"), (key) => `/img/${key}`);
+    const quiet = activeManifest();
+    quiet.model = "deterministic";
+    quiet.evidence.state = "quiet";
+    quiet.evidence.items = [];
+    quiet.edition.stories = [];
+    quiet.images = [];
+    const quietHtml = renderEdition(validateManifest(quiet, "octocat", "2026-W32"), () => "unused");
+    for (const html of [activeHtml, quietHtml]) {
+      expect(html).toContain(`<p class="notice">${AI_ACTIVITY_NOTICE}</p>`);
+    }
   });
 
   test("retains the legacy nonempty editorial-copy guards", () => {
