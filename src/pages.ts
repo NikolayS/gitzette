@@ -547,7 +547,7 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
   }
 
   // Query all published dispatches. Legacy generating sentinels are removed by
-  // migration 0002 and cannot block profile rendering.
+  // migration 0003 and cannot block profile rendering.
   const allDispatches = await c.env.DB.prepare(
     `SELECT d.week_key, d.r2_key, d.generated_at
      FROM dispatches d
@@ -792,7 +792,7 @@ ${headTags()}
     <div class="value">${stats.latestScheduledWeek}</div>
   </div>
   <div class="stat">
-    <div class="label">Aged-out weekly schedule slots · last 14 days</div>
+    <div class="label">Operator alert · deferred weekly slots aged out · last 14 days</div>
     <div class="value">${stats.agedOutSchedules.length}</div>
     ${stats.agedOutSchedules.map((row) => `<div>@${row.username} · ${row.week_key}</div>`).join("")}
   </div>

@@ -49,8 +49,8 @@ jobs:
             exit 1
           fi
 
-          statuses="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/status")"
-          if ! jq -e 'any(.statuses[]; .context == "samorev" and .state == "success" and .creator.login == "samo-agent") and any(.statuses[]; .context == "samorev-gate" and .state == "success")' <<<"$statuses" >/dev/null; then
+          statuses="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/statuses?per_page=100")"
+          if ! jq -e 'any(.[]; .context == "samorev" and .state == "success" and .creator.login == "samo-agent") and any(.[]; .context == "samorev-gate" and .state == "success")' <<<"$statuses" >/dev/null; then
             echo "reviewed head lacks the CODEOWNER samorev verdict or base-controlled gate" >&2
             exit 1
           fi

@@ -39,6 +39,7 @@ describe("private status route boundary", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     const body = await response.text();
     expect(body).toContain("Input tokens · last 7 days");
+    expect(body).toContain("Operator alert · deferred weekly slots aged out · last 14 days");
     expect(body).toContain("@torvalds · 2026-W32");
   });
 });

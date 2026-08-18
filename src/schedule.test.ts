@@ -289,5 +289,6 @@ async function generationDatabase(): Promise<Database> {
   db.exec(await Bun.file("migrations/0000_base.sql").text());
   db.exec(await Bun.file("migrations/0001_generation_queue.sql").text());
   db.exec(await Bun.file("migrations/0002_weekly_generation_schedule.sql").text());
+  db.exec(await Bun.file("migrations/0003_remove_legacy_generating_dispatch.sql").text());
   return db;
 }

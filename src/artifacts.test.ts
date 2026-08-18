@@ -22,4 +22,14 @@ describe("R2 artifact cleanup", () => {
     await deleteR2Prefix(bucket as never, "staging/job/");
     expect([...objects]).toEqual(["staging/other/lease/image.webp"]);
   });
+
+  test("rejects broad prefixes and fails when deletion makes no progress", async () => {
+    const stuck = {
+      async list() { return { objects: [{ key: "staging/job/lease/image.webp" }], truncated: false }; },
+      async delete() {},
+    };
+    await expect(deleteR2Prefix(stuck as never, "")).rejects.toThrow("nonempty");
+    await expect(deleteR2Prefix(stuck as never, "staging/job")).rejects.toThrow("delimiter-terminated");
+    await expect(deleteR2Prefix(stuck as never, "staging/job/")).rejects.toThrow("made no progress");
+  });
 });

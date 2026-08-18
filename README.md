@@ -82,7 +82,7 @@ set and rejects any retired or unknown standing credential.
 
 ```bash
 bun install
-wrangler dev
+bun run dev
 bun run test:all
 ```
 
@@ -125,8 +125,12 @@ profile/week is retried explicitly through the admin generation path instead
 of replaying the cron batch. `/status` exposes the latest scheduled week and
 its rolling-seven-day scheduled-job count. It also lists every weekly slot that
 aged out before provider work began during the last 14 days. A nonzero list is
-an operator alert: enqueue each named profile/week through the admin generation
-path, then verify publication before clearing the incident.
+an operator alert. These rows carry the distinct terminal failure code
+`scheduled generation aged out before provider start`. Sign in as the immutable
+`ADMIN_USER_ID`, then `POST /generate` with
+`{"forUsername":"<profile>","weekKey":"<week>"}` for every listed slot while
+that ISO week is still eligible. Verify publication before clearing the
+incident; the next Monday cron targets a different week and is not recovery.
 
 Before changing `WEEKLY_GENERATION_ENABLED` to `true`, run
 `bash scripts/check-weekly-profiles.sh` with production Cloudflare credentials.
@@ -142,8 +146,12 @@ an ID or use the admin enqueue path as a seeding mechanism.
 
 The contact for an automated-profile opt-out or takedown is
 [@NikolayS](https://github.com/NikolayS); open an issue in this repository with
-the profile name and requested removal. An operator must disable the weekly
-scheduler and runner, then remove the username from
+the profile name and requested removal. The request must be acknowledged within
+one hour and fully suppressed within four hours, including outside business
+hours. `@NikolayS` owns the response; the designated production on-call
+maintainer with Cloudflare production access executes the out-of-hours disable
+and reviewed deploy. An operator must disable the weekly scheduler and runner,
+then remove the username from
 `WEEKLY_PROFILE_USERNAMES` while retaining it in
 `MANAGED_PROFILE_USERNAMES`. That reviewed deployment suppresses the profile
 from the home page, blocks new generation, and makes both the profile and every
