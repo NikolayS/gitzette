@@ -17,5 +17,7 @@ export async function deleteR2Prefix(bucket: R2Bucket, prefix: string): Promise<
     await bucket.delete(keys);
     previousPage = signature;
   }
+  // Exhaustion is a hard failure: callers must never mistake partial cleanup
+  // for success or silently leave staged content behind.
   throw new Error(`R2 cleanup exceeded ${MAX_DELETE_ROUNDS} rounds for ${prefix}`);
 }

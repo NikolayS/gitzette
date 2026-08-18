@@ -4,7 +4,10 @@ import { expireStaleJobs, LIVE_STATUSES, maxQueueAgeSeconds } from "./queue";
 import { previousCompletedIsoWeekKey } from "./week";
 import { deleteR2Prefix } from "./artifacts";
 
-export const WEEKLY_GENERATION_CRON = "17 13 * * 1";
+export const JOB_EXPIRY_CRON = "7 * * * *";
+export const WEEKLY_GENERATION_CRONS = ["17 13 * * 1", "17 19 * * 1"] as const;
+export const WEEKLY_GENERATION_CRON = WEEKLY_GENERATION_CRONS[0];
+const weeklyGenerationCrons = new Set<string>(WEEKLY_GENERATION_CRONS);
 
 export type WeeklyScheduleResult = {
   weekKey: string;
@@ -81,7 +84,12 @@ export async function runWeeklySchedule(
   controller: ScheduledController,
   env: Env,
 ): Promise<void> {
-  if (controller.cron !== WEEKLY_GENERATION_CRON) {
+  if (controller.cron === JOB_EXPIRY_CRON) {
+    await expireStaleArtifacts(env);
+    console.log(JSON.stringify({ event: "generation_jobs_expired" }));
+    return;
+  }
+  if (!weeklyGenerationCrons.has(controller.cron)) {
     throw new Error(`unexpected generation cron: ${controller.cron}`);
   }
   // Queue expiry is a control-plane invariant for manual and scheduled jobs;

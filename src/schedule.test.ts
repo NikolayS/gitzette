@@ -4,7 +4,13 @@ import { Hono } from "hono";
 import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
 import { queueRoutes } from "./queue";
 import { runnerRoutes } from "./runner";
-import { enqueueWeeklyProfiles, runWeeklySchedule, WEEKLY_GENERATION_CRON } from "./schedule";
+import {
+  enqueueWeeklyProfiles,
+  JOB_EXPIRY_CRON,
+  runWeeklySchedule,
+  WEEKLY_GENERATION_CRON,
+  WEEKLY_GENERATION_CRONS,
+} from "./schedule";
 import { AOE_LAG_MS } from "./week";
 
 type Profile = { id: string; username: string };
@@ -228,6 +234,16 @@ describe("weekly profile scheduling", () => {
     expect(db.staleSweepCalls).toBe(1);
   });
 
+  test("expires stale work on the hourly clock without entering weekly enqueue", async () => {
+    const db = new StubD1(true, profiles);
+    await runWeeklySchedule(
+      { cron: JOB_EXPIRY_CRON, scheduledTime } as ScheduledController,
+      { DB: db, DISPATCHES: new StubR2(), WEEKLY_GENERATION_ENABLED: "true" } as never,
+    );
+    expect(db.staleSweepCalls).toBe(1);
+    expect(db.batchCalls).toBe(0);
+  });
+
   test("expires manual work and removes staging while weekly enqueue stays disabled", async () => {
     const sqlite = await generationDatabase();
     try {
@@ -279,14 +295,17 @@ describe("weekly profile scheduling", () => {
     }
   });
 
-  test("couples the configured trigger to the only accepted handler cron", async () => {
+  test("couples hourly expiry and redundant weekly triggers to the handler", async () => {
     const config = await Bun.file("wrangler.toml").text();
-    const configuredCrons = [...config.matchAll(/^crons\s*=\s*\["([^"]+)"\]\s*$/gm)];
-    expect(configuredCrons).toHaveLength(1);
-    expect(configuredCrons[0][1]).toBe(WEEKLY_GENERATION_CRON);
-    const [minute, hour, dayOfMonth, month, dayOfWeek] = WEEKLY_GENERATION_CRON.split(" ");
-    expect([dayOfMonth, month, dayOfWeek]).toEqual(["*", "*", "1"]);
-    expect(Number(hour) * 60 + Number(minute)).toBeGreaterThanOrEqual(AOE_LAG_MS / 60_000);
+    const configured = config.match(/^crons\s*=\s*(\[[^\n]+\])\s*$/m);
+    expect(configured).not.toBeNull();
+    expect(JSON.parse(configured![1])).toEqual([JOB_EXPIRY_CRON, ...WEEKLY_GENERATION_CRONS]);
+    for (const cron of WEEKLY_GENERATION_CRONS) {
+      const [minute, hour, dayOfMonth, month, dayOfWeek] = cron.split(" ");
+      expect([dayOfMonth, month, dayOfWeek]).toEqual(["*", "*", "1"]);
+      expect(Number(hour) * 60 + Number(minute)).toBeGreaterThanOrEqual(AOE_LAG_MS / 60_000);
+    }
+    expect(JOB_EXPIRY_CRON.split(" ").slice(1)).toEqual(["*", "*", "*", "*"]);
     await expect(runWeeklySchedule({ cron: "* * * * *", scheduledTime } as ScheduledController, {} as never))
       .rejects.toThrow("unexpected generation cron");
   });

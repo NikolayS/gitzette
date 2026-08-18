@@ -39,4 +39,26 @@ describe("weekly generation data migration", () => {
       db.close();
     }
   });
+
+  test("aborts username normalization before case-folding distinct user ids together", async () => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(await Bun.file("migrations/0000_base.sql").text());
+      db.query("INSERT INTO users(id,username) VALUES ('1','Alice'),('2','alice')").run();
+      const migration = await Bun.file("migrations/0004_normalize_github_usernames.sql").text();
+
+      expect(() => {
+        const statements = migration.replace(/^--.*$/gm, "").split(";").map((sql) => sql.trim()).filter(Boolean);
+        for (const statement of statements) {
+          db.exec(`${statement};`);
+        }
+      }).toThrow("CHECK constraint failed");
+      expect(db.query("SELECT id,username FROM users ORDER BY id").all()).toEqual([
+        { id: "1", username: "Alice" },
+        { id: "2", username: "alice" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });
