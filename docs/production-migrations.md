@@ -46,6 +46,26 @@ the committed fixture and migration chain; they do not inspect or mutate live
 D1. All production schema checks are read-only. Only Wrangler's migration apply
 step mutates production.
 
+## Captured baseline provenance
+
+`fixtures/production-baseline-2026-08-15.sql` is a canonical SQL reconstruction
+of the pre-migration production `sqlite_master` captured on 2026-08-15, not a
+byte-for-byte export. The exact read-only capture and canonicalization command
+for its SQL body is below. Run it from the repository root and preserve the
+fixture's provenance header when replacing the reviewed SQL body:
+
+```bash
+query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'trigger' THEN 2 ELSE 3 END,name"
+./node_modules/.bin/wrangler d1 execute gitzette-db --remote --command "$query" --json \
+  | bun -e 'const { canonicalSchema } = await import("./scripts/schema-equivalence.ts"); const rows = canonicalSchema(JSON.parse(await Bun.stdin.text())); console.log(rows.flatMap((row) => row.sql === null ? [] : [row.sql + ";"]).join("\n"));' \
+  >/tmp/production-baseline-2026-08-15.sql
+```
+
+`canonicalSchema` removes line and block comments outside quoted strings,
+collapses whitespace around punctuation, strips `IF NOT EXISTS`, and removes
+unnecessary quotes from the declared object name. Review the resulting diff;
+never use this capture command to bless unexpected production drift.
+
 | Script | Pre-cutover database | Migrated database |
 | --- | --- | --- |
 | `check-production-baseline.sh` | Local/CI only: verifies the captured fixture matches `0000_base.sql`. | Same local/CI assertion; never contacts D1. |

@@ -89,8 +89,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_one_live_job
   WHERE status IN ('queued', 'collecting', 'writing', 'illustrating', 'validating', 'retryable_failed');
 
 CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_scheduled_once
-  ON generation_jobs(schedule_key)
-  WHERE schedule_key IS NOT NULL;
+  ON generation_jobs(schedule_key);
 
 CREATE TABLE IF NOT EXISTS edition_versions (
   id TEXT PRIMARY KEY,

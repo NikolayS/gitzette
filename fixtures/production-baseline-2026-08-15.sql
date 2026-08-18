@@ -1,5 +1,8 @@
--- Read-only sqlite_master snapshot of pre-migration production D1, captured
--- 2026-08-15. This is a CI fixture only; Wrangler must never apply it remotely.
+-- Canonical SQL reconstruction of pre-migration production D1 sqlite_master,
+-- captured 2026-08-15. It is not a byte-for-byte sqlite_master export. The
+-- regeneration command and normalization rules are documented in
+-- docs/production-migrations.md. This is a CI fixture only; Wrangler must never
+-- apply it remotely.
 CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, avatar_url TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
 CREATE TABLE generations (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL REFERENCES users(id), week_key TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT (unixepoch()), UNIQUE(user_id, week_key));
 CREATE TABLE "dispatches" (user_id TEXT NOT NULL REFERENCES users(id), week_key TEXT NOT NULL, html TEXT NOT NULL DEFAULT "", generated_at INTEGER NOT NULL DEFAULT (unixepoch()), r2_key TEXT, PRIMARY KEY (user_id, week_key));
