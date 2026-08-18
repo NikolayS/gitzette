@@ -9,17 +9,39 @@ on:
 
 jobs:
   typecheck:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install --frozen-lockfile
-      - run: bunx tsc --noEmit
-      - run: bun test
+      - name: Install image validation runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            imagemagick=8:6.9.12.98+dfsg1-5.2build2 \
+            imagemagick-6.q16=8:6.9.12.98+dfsg1-5.2build2
+          sudo install -o root -g root -m 0644 runner/imagemagick/policy.xml /etc/ImageMagick-6/policy.xml
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Verify systemd Bun invocation flag
+        run: bun --no-env-file --version
+      - name: Validate protected-main policy definition
+        run: >-
+          jq -e '.required_status_checks.strict == true and
+          (.required_status_checks.checks | sort_by(.context)) ==
+          [{"context":"samorev","app_id":null},{"context":"samorev-gate","app_id":15368},{"context":"typecheck","app_id":15368}] and
+          .enforce_admins == true and .required_conversation_resolution == true and
+          .required_pull_request_reviews.require_code_owner_reviews == true and
+          .required_pull_request_reviews.required_approving_review_count == 1 and
+          .allow_force_pushes == false and .allow_deletions == false'
+          config/main-branch-protection.json
+      - name: Verify generated Worker binding types
+        run: bun run check:worker-types
+      - run: bun run test:all
       - run: bash scripts/evaluate-samorev-status.test.sh
       - run: bash scripts/normalize-branch-protection.test.sh
       - run: bash scripts/poll-samorev-gate.test.sh
       - run: shellcheck scripts/*.sh
       - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
+      # High/critical advisories block merges.
+      - run: bun audit --audit-level=high

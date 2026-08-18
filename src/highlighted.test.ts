@@ -1,0 +1,77 @@
+import { describe, expect, test } from "bun:test";
+import { Hono } from "hono";
+import {
+  isUsernameBlockedByManagedRegistry,
+  isUsernameBlockedByRegistryPolicy,
+} from "./highlighted";
+import { pageRoutes } from "./pages";
+import { queueRoutes } from "./queue";
+
+describe("managed profile publication policy", () => {
+  test("suppresses a managed profile removed from the active weekly allowlist", () => {
+    const managed = new Set(["dhh"]);
+    expect(isUsernameBlockedByRegistryPolicy("DHH", managed, new Set())).toBe(true);
+    expect(isUsernameBlockedByRegistryPolicy("DHH", managed, new Set(["dhh"]))).toBe(false);
+    expect(isUsernameBlockedByRegistryPolicy("ordinary-user", managed, new Set())).toBe(false);
+    expect(isUsernameBlockedByManagedRegistry("DHH")).toBe(false);
+    expect(isUsernameBlockedByManagedRegistry("gitzette-opt-out-test")).toBe(true);
+    expect(isUsernameBlockedByManagedRegistry("ordinary-user")).toBe(false);
+  });
+
+  test("keeps an explicit tombstone suppressed after removal from both registries", () => {
+    expect(isUsernameBlockedByRegistryPolicy(
+      "retired-user",
+      new Set(),
+      new Set(),
+      new Set(["retired-user"]),
+    )).toBe(true);
+  });
+
+  test("hides removed profile routes and blocks enqueue", async () => {
+    const pages = new Hono().route("/", pageRoutes as never);
+    const pageEnv = {
+      DB: {
+        prepare: () => ({
+          all: async () => ({
+            results: [
+              { username: "gitzette-opt-out-test", week_key: "2026-W32", generated_at: 1 },
+              { username: "DHH", week_key: "2026-W32", generated_at: 1 },
+            ],
+          }),
+        }),
+      },
+    } as never;
+    const home = await pages.request("/", {}, pageEnv);
+    expect(home.status).toBe(200);
+    expect(await home.text()).not.toContain("gitzette-opt-out-test");
+    expect((await pages.request("/gitzette-opt-out-test", {}, pageEnv)).status).toBe(404);
+    expect((await pages.request("/gitzette-opt-out-test/2026-W32", {}, pageEnv)).status).toBe(404);
+
+    const suppressedImage = await pages.request("/img/1-deadbeef.webp", {}, {
+      DISPATCHES: {
+        get: async () => ({
+          customMetadata: { ownerUserId: "retired", ownerUsername: "gitzette-opt-out-test" },
+          arrayBuffer: async () => new ArrayBuffer(1),
+        }),
+      },
+    } as never);
+    expect(suppressedImage.status).toBe(404);
+
+    const queue = new Hono().route("/", queueRoutes as never);
+    const queueEnv = {
+      DB: {
+        prepare: () => ({
+          bind() { return this; },
+          first: async () => ({ id: "retired", username: "gitzette-opt-out-test", avatar_url: "" }),
+        }),
+      },
+    } as never;
+    const response = await queue.request("/generate", {
+      method: "POST",
+      headers: { cookie: "session=retired-session", "content-type": "application/json" },
+      body: "{}",
+    }, queueEnv);
+    expect(response.status).toBe(410);
+    expect(await response.json() as { error: string }).toEqual({ error: "profile unavailable" });
+  });
+});

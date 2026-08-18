@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import { getUser } from "./auth";
+import { bearerToken, secretMatches } from "./credentials";
 import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
+import { HOME_PROFILE_USERNAMES, WEEKLY_PROFILE_USERNAMES, isUsernameBlockedByManagedRegistry } from "./highlighted";
+import { isPublicationBlockedForProfile, isUsernameRuntimeSuppressed } from "./profile-suppression";
+import { normalizeGitHubUsername } from "./identifiers";
 import type { Env } from "./index";
+import { SCHEDULED_AGE_OUT_ERROR, maxQueueAgeSeconds } from "./queue";
+import { postRetryUnfulfilledWeekKey } from "./schedule";
 
 export const pageRoutes = new Hono<{ Bindings: Env }>();
 
@@ -155,8 +161,7 @@ function ctaFooter(): string {
 function extractH1(html: string): string {
   const m = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
   if (!m) return "";
-  // strip inner HTML tags
-  return m[1].replace(/<[^>]+>/g, "").trim();
+  return decodeRenderedText(m[1].replace(/<[^>]+>/g, "").trim());
 }
 
 /** Extract text content of the first element with class "deck". */
@@ -164,8 +169,18 @@ function extractDeck(html: string): string {
   // match class="deck" or class="... deck ..."
   const m = html.match(/<[^>]+class="[^"]*\bdeck\b[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
   if (!m) return "";
-  const text = m[1].replace(/<[^>]+>/g, "").trim();
+  const text = decodeRenderedText(m[1].replace(/<[^>]+>/g, "").trim());
   return text.length > 200 ? text.slice(0, 197) + "…" : text;
+}
+
+function decodeRenderedText(value: string): string {
+  return value.replace(/&(amp|lt|gt|quot|#39);/g, (entity) => ({
+    "&amp;": "&",
+    "&lt;": "<",
+    "&gt;": ">",
+    "&quot;": '"',
+    "&#39;": "'",
+  })[entity]!);
 }
 
 /** Extract the first <img src="..."> URL. */
@@ -193,7 +208,7 @@ function fixUnclosedHeadlineLinks(html: string): string {
 }
 
 /** Build OG + Twitter Card meta tags for a dispatch page. */
-function buildDispatchOGTags(html: string, username: string, week_key: string): string {
+export function buildDispatchOGTags(html: string, username: string, week_key: string): string {
   const title = extractH1(html) || `@${username}'s dispatch · ${week_key}`;
   const description = extractDeck(html) || `Open-source activity for @${username}, week ${week_key}.`;
   const image = extractFirstImg(html);
@@ -212,6 +227,16 @@ function buildDispatchOGTags(html: string, username: string, week_key: string): 
     `<meta name="twitter:description" content="${esc(description)}">`,
     image ? `<meta name="twitter:image" content="${esc(image)}">` : "",
   ].filter(Boolean).join("\n");
+}
+
+function generationRequestClient(): string {
+  return `async function enqueueGeneration(requestedWeek){
+    const res=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:requestedWeek?JSON.stringify({weekKey:requestedWeek}):'{}'});
+    let data={};
+    try{data=await res.json();}catch{}
+    if(!res.ok||data.error)throw new Error(data.error||'generation failed');
+    return data;
+  }`;
 }
 
 async function fetchAndServeDispatch(
@@ -261,7 +286,8 @@ async function fetchAndServeDispatch(
   // Fix unclosed <a class="headline-link"> tags in legacy dispatch HTML (#49)
   const processedHtml = fixUnclosedHeadlineLinks(html);
 
-  if (processedHtml.startsWith("<!DOCTYPE") || processedHtml.startsWith("<html")) {
+  const documentStart = processedHtml.trimStart().toLowerCase();
+  if (documentStart.startsWith("<!doctype") || documentStart.startsWith("<html")) {
     const breadcrumb = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow:hidden;">
           <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;border:none;">gitzette</a>
           <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
@@ -280,6 +306,7 @@ async function fetchAndServeDispatch(
         </div>
         <div style="min-height:48px;"></div>
         <script>
+        ${generationRequestClient()}
         var _regenPending=false,_regenTimer=null;
         async function regenerate() {
           const btn = document.querySelector('button[onclick="regenerate()"]');
@@ -291,12 +318,13 @@ async function fetchAndServeDispatch(
           }
           clearTimeout(_regenTimer);_regenPending=false;
           btn.disabled=true; btn.textContent='generating...';
-          await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:'${week_key}'})});
+          try{await enqueueGeneration('${week_key}');}
+          catch(error){btn.textContent=error.message;setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000);return;}
           let n=0;
           const iv=setInterval(async()=>{
             n++; btn.textContent='generating... ('+(n*5)+'s)';
-            const s=await fetch('/generate/status').then(r=>r.json());
-            if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(iv);location.reload();}
+            const s=await fetch('/generate/status?weekKey=${week_key}').then(r=>r.json());
+            if(s.status==='ready'&&s.week_key==='${week_key}'){clearInterval(iv);location.reload();}
             if(n>60){clearInterval(iv);btn.textContent='reload manually';}
           },5000);
         }
@@ -411,12 +439,16 @@ pageRoutes.get("/", async (c) => {
     `SELECT u.username, d.week_key, d.generated_at
      FROM dispatches d
      JOIN users u ON u.id = d.user_id
-     WHERE d.r2_key IS NOT NULL AND d.week_key != 'generating'
+     WHERE d.r2_key IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM profile_suppressions ps WHERE ps.username=u.username COLLATE NOCASE
+       )
      ORDER BY d.generated_at DESC LIMIT 100`
   ).all<{ username: string; week_key: string; generated_at: number }>();
 
   const cwk = currentWeekKey();
-  const filtered = (recent.results ?? []).filter(d => d.week_key <= cwk);
+  const filtered = (recent.results ?? [])
+    .filter((d) => d.week_key <= cwk && !isUsernameBlockedByManagedRegistry(d.username));
   return c.html(homePage(filtered));
 });
 
@@ -426,6 +458,9 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
   const { slug } = c.req.param();
   const obj = await c.env.DISPATCHES.get(`illustrations/${slug}`);
   if (!obj) return c.text("not found", 404);
+  const ownerUsername = obj.customMetadata?.ownerUsername;
+  if (ownerUsername && isUsernameBlockedByManagedRegistry(ownerUsername)) return c.text("not found", 404);
+  if (ownerUsername && await isUsernameRuntimeSuppressed(c.env.DB, ownerUsername)) return c.text("not found", 404);
   const buf = await obj.arrayBuffer();
   const contentType = slug.endsWith(".webp") ? "image/webp"
     : slug.endsWith(".png") ? "image/png" : "image/jpeg";
@@ -439,31 +474,106 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
 });
 
 pageRoutes.get("/status", async (c) => {
-  const token = c.req.query("token");
-  if (!token || token !== c.env.SESSION_SECRET) {
+  const authorization = c.req.header("authorization") || "";
+  const token = bearerToken(authorization);
+  if (!token || !await secretMatches(token, c.env.STATUS_TOKEN)) {
     return c.text("403 Forbidden", 403);
   }
-  const [spendRow, genRow, userRow] = await Promise.all([
-    c.env.DB.prepare(`SELECT COALESCE(SUM(cost_usd),0) as total FROM spend_log WHERE strftime('%Y-%m', datetime(ts, 'unixepoch')) = strftime('%Y-%m', 'now')`).first<{ total: number }>(),
-    c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE week_key != 'generating' AND r2_key IS NOT NULL`).first<{ total: number }>(),
+  const unfulfilledWeekKey = c.env.WEEKLY_GENERATION_ENABLED === "true"
+    ? postRetryUnfulfilledWeekKey(new Date(), maxQueueAgeSeconds(c.env))
+    : null;
+  const expectedProfiles = WEEKLY_PROFILE_USERNAMES.map(() => "(?)").join(",");
+  const unfulfilledQuery = unfulfilledWeekKey
+    ? c.env.DB.prepare(
+      `WITH expected(username) AS (VALUES ${expectedProfiles})
+       SELECT expected.username,? AS week_key
+       FROM expected
+       LEFT JOIN users u ON u.username=expected.username COLLATE NOCASE
+       LEFT JOIN profile_suppressions ps ON ps.username=expected.username COLLATE NOCASE
+       WHERE ps.username IS NULL AND (
+         u.id IS NULL OR NOT EXISTS (
+           SELECT 1 FROM generation_jobs j
+           WHERE j.user_id=u.id AND j.week_key=? AND j.status='published'
+         )
+       )
+       ORDER BY expected.username`,
+    ).bind(...WEEKLY_PROFILE_USERNAMES, unfulfilledWeekKey, unfulfilledWeekKey)
+      .all<{ username: string; week_key: string }>()
+    : Promise.resolve({ results: [] as { username: string; week_key: string }[] });
+  const [genRow, userRow, jobsRow, agedOutRows, unfulfilledRows, artifactCleanupRows] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE r2_key IS NOT NULL`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM users`).first<{ total: number }>(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS total,
+      SUM(CASE WHEN status='permanent_failed' THEN 1 ELSE 0 END) AS failed,
+      MIN(CASE WHEN status IN ('queued','retryable_failed') THEN created_at END) AS oldest_queued,
+      SUM(input_tokens) AS input_tokens,
+      SUM(output_tokens) AS output_tokens,
+      SUM(image_count) AS image_count,
+      SUM(wall_time_ms) AS wall_time_ms,
+      SUM(CASE WHEN token_source='estimated' THEN 1 ELSE 0 END) AS estimated_jobs,
+      SUM(CASE WHEN schedule_key IS NOT NULL THEN 1 ELSE 0 END) AS scheduled_jobs,
+      MAX(CASE WHEN schedule_key IS NOT NULL THEN week_key END) AS latest_scheduled_week
+      FROM generation_jobs WHERE created_at>=unixepoch('now','-7 days')`).first<{
+        total: number;
+        failed: number;
+        oldest_queued: number | null;
+        input_tokens: number | null;
+        output_tokens: number | null;
+        image_count: number | null;
+        wall_time_ms: number | null;
+        estimated_jobs: number | null;
+        scheduled_jobs: number | null;
+        latest_scheduled_week: string | null;
+      }>(),
+    c.env.DB.prepare(
+      `SELECT u.username,j.week_key,j.updated_at
+       FROM generation_jobs j JOIN users u ON u.id=j.user_id
+       WHERE j.last_error=? AND j.updated_at>=unixepoch('now','-14 days')
+       ORDER BY j.updated_at DESC,u.username LIMIT 100`,
+    ).bind(SCHEDULED_AGE_OUT_ERROR).all<{ username: string; week_key: string; updated_at: number }>(),
+    unfulfilledQuery,
+    c.env.DB.prepare(
+      `SELECT q.job_id,u.username,q.prefix,q.attempts,q.last_error,q.updated_at
+       FROM artifact_cleanup_jobs q
+       LEFT JOIN generation_jobs j ON j.id=q.job_id
+       LEFT JOIN users u ON u.id=j.user_id
+       ORDER BY q.updated_at,q.job_id LIMIT 100`,
+    ).all<{ job_id: string; username: string | null; prefix: string; attempts: number; last_error: string; updated_at: number }>(),
   ]);
-  const monthlyBudget = parseFloat(c.env.MONTHLY_LLM_BUDGET_USD ?? "50");
-  const spent = spendRow?.total ?? 0;
-  const pct = Math.min(100, Math.round((spent / monthlyBudget) * 100));
-  return c.html(statusPage({ spent, monthlyBudget, pct, dispatches: genRow?.total ?? 0, users: userRow?.total ?? 0 }));
+  const now = Math.floor(Date.now() / 1000);
+  return c.html(statusPage({
+    dispatches: genRow?.total ?? 0,
+    users: userRow?.total ?? 0,
+    jobsThisWeek: jobsRow?.total ?? 0,
+    failuresThisWeek: jobsRow?.failed ?? 0,
+    oldestQueuedSeconds: jobsRow?.oldest_queued ? Math.max(0, now - jobsRow.oldest_queued) : 0,
+    inputTokensThisWeek: jobsRow?.input_tokens ?? 0,
+    outputTokensThisWeek: jobsRow?.output_tokens ?? 0,
+    imagesThisWeek: jobsRow?.image_count ?? 0,
+    runnerWallSecondsThisWeek: Math.round((jobsRow?.wall_time_ms ?? 0) / 1000),
+    estimatedTokenJobsThisWeek: jobsRow?.estimated_jobs ?? 0,
+    scheduledJobsThisWeek: jobsRow?.scheduled_jobs ?? 0,
+    latestScheduledWeek: jobsRow?.latest_scheduled_week ?? "none",
+    agedOutSchedules: agedOutRows.results ?? [],
+    unfulfilledSchedules: unfulfilledRows.results ?? [],
+    artifactCleanupPending: artifactCleanupRows.results ?? [],
+  }));
 });
 
 // public profile page — lists all dispatches (or latest if only one)
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
-  const { username } = c.req.param();
+  const username = normalizeGitHubUsername(c.req.param("username"));
+  if (!username) return c.text("not found", 404);
+  if (isUsernameBlockedByManagedRegistry(username)) return c.text("not found", 404);
   const viewer = await getUser(c);
-  const isOwner = viewer?.username === username;
+  const isOwner = viewer ? normalizeGitHubUsername(viewer.username) === username : false;
 
   // Check if user exists + fetch avatar
   const userRow = await c.env.DB.prepare(
-    `SELECT id, avatar_url FROM users WHERE username = ?`
-  ).bind(username).first<{ id: number; avatar_url: string | null }>();
+    `SELECT id,avatar_url,
+       EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=users.username COLLATE NOCASE) AS suppressed
+     FROM users WHERE username=?`
+  ).bind(username).first<{ id: number; avatar_url: string | null; suppressed: number }>();
 
   if (!userRow) {
     // Check if this is a real GitHub user — if so, offer to generate
@@ -476,18 +586,14 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
     } catch { /* ignore */ }
     return c.html(notFoundPage(username, ghUser), 404);
   }
+  if (isPublicationBlockedForProfile({ username, suppressed: userRow.suppressed })) return c.text("not found", 404);
 
-  // Check if generating sentinel exists
-  const generating = await c.env.DB.prepare(
-    `SELECT 1 FROM dispatches WHERE user_id = ? AND week_key = 'generating'`
-  ).bind(userRow.id).first();
-  if (generating) return c.html(generatingPage(username));
-
-  // Query ALL real dispatches
+  // Query all published dispatches. Legacy generating sentinels are removed by
+  // migration 0003 and cannot block profile rendering.
   const allDispatches = await c.env.DB.prepare(
     `SELECT d.week_key, d.r2_key, d.generated_at
      FROM dispatches d
-     WHERE d.user_id = ? AND d.week_key != 'generating' AND d.r2_key IS NOT NULL
+     WHERE d.user_id = ? AND d.r2_key IS NOT NULL
      ORDER BY d.week_key DESC`
   ).bind(userRow.id).all<{ week_key: string; r2_key: string; generated_at: number }>();
 
@@ -509,15 +615,21 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
 
 // specific week: /username/2026-W13
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}/:week_key{\\d{4}-W\\d{1,2}}", async (c) => {
-  const { username, week_key } = c.req.param();
+  const { week_key } = c.req.param();
+  const username = normalizeGitHubUsername(c.req.param("username"));
+  if (!username) return c.text("not found", 404);
+  if (isUsernameBlockedByManagedRegistry(username)) return c.text("not found", 404);
   const viewer = await getUser(c);
-  const isOwner = viewer?.username === username;
+  const isOwner = viewer ? normalizeGitHubUsername(viewer.username) === username : false;
 
   const dispatchMeta = await c.env.DB.prepare(
     `SELECT d.r2_key, d.generated_at
      FROM dispatches d
      JOIN users u ON u.id = d.user_id
-     WHERE u.username = ? AND d.week_key = ?`
+     WHERE u.username = ? AND d.week_key = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM profile_suppressions ps WHERE ps.username=u.username COLLATE NOCASE
+       )`
   ).bind(username, week_key).first<{ r2_key: string | null; generated_at: number }>();
 
   if (!dispatchMeta?.r2_key) {
@@ -598,13 +710,7 @@ ${headTags()}
     </form>
     <div style="margin-top:12px;margin-bottom:28px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#888;">explore:</span>
-      <button onclick="document.getElementById('username-input').value='torvalds';go2('torvalds');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">torvalds</button>
-      <button onclick="document.getElementById('username-input').value='steipete';go2('steipete');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">steipete</button>
-      <button onclick="document.getElementById('username-input').value='karpathy';go2('karpathy');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">karpathy</button>
-      <button onclick="document.getElementById('username-input').value='DHH';go2('DHH');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">DHH</button>
-      <button onclick="document.getElementById('username-input').value='mitchellh';go2('mitchellh');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">mitchellh</button>
-      <button onclick="document.getElementById('username-input').value='dcramer';go2('dcramer');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">dcramer</button>
-      <button onclick="document.getElementById('username-input').value='simonw';go2('simonw');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">simonw</button>
+      ${HOME_PROFILE_USERNAMES.map((username) => `<button onclick="document.getElementById('username-input').value='${username}';go2('${username}');" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--ink);padding:3px 10px;cursor:pointer;">${username}</button>`).join("\n      ")}
     </div>
     <script>
     function go(e) {
@@ -646,8 +752,23 @@ ${headTags()}
 </html>`;
 }
 
-function statusPage(stats: { spent: number; monthlyBudget: number; pct: number; dispatches: number; users: number }): string {
-  const barW = Math.max(2, stats.pct);
+function statusPage(stats: {
+  dispatches: number;
+  users: number;
+  jobsThisWeek: number;
+  failuresThisWeek: number;
+  oldestQueuedSeconds: number;
+  inputTokensThisWeek: number;
+  outputTokensThisWeek: number;
+  imagesThisWeek: number;
+  runnerWallSecondsThisWeek: number;
+  estimatedTokenJobsThisWeek: number;
+  scheduledJobsThisWeek: number;
+  latestScheduledWeek: string;
+  agedOutSchedules: { username: string; week_key: string; updated_at: number }[];
+  unfulfilledSchedules: { username: string; week_key: string }[];
+  artifactCleanupPending: { job_id: string; username: string | null; prefix: string; attempts: number; last_error: string; updated_at: number }[];
+}): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -665,9 +786,6 @@ ${headTags()}
   .stat { margin-bottom:32px; }
   .label { font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:#888; margin-bottom:6px; }
   .value { font-size:32px; font-weight:700; }
-  .bar-track { height:6px; background:#e0ddd5; margin-top:8px; max-width:400px; }
-  .bar-fill { height:6px; background:var(--ink); }
-  .hint { font-size:11px; color:#888; margin-top:4px; }
   a { color:var(--ink); }
 </style>
 </head>
@@ -675,18 +793,67 @@ ${headTags()}
   <h1>gitzette status</h1>
   <div class="sub">live system metrics · <a href="/">← home</a></div>
   <div class="stat">
-    <div class="label">LLM budget (this month)</div>
-    <div class="value">$${stats.spent.toFixed(2)} / $${stats.monthlyBudget.toFixed(0)}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${barW}%"></div></div>
-    <div class="hint">${stats.pct}% used · resets 1st of month</div>
-  </div>
-  <div class="stat">
     <div class="label">Dispatches generated</div>
     <div class="value">${stats.dispatches}</div>
   </div>
   <div class="stat">
     <div class="label">Users</div>
     <div class="value">${stats.users}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Generation jobs · last 7 days</div>
+    <div class="value">${stats.jobsThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Permanent failures · last 7 days</div>
+    <div class="value">${stats.failuresThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Oldest queued job · seconds</div>
+    <div class="value">${stats.oldestQueuedSeconds}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Input tokens · last 7 days</div>
+    <div class="value">${stats.inputTokensThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Output tokens · last 7 days</div>
+    <div class="value">${stats.outputTokensThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Images generated · last 7 days</div>
+    <div class="value">${stats.imagesThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Runner wall time · seconds · last 7 days</div>
+    <div class="value">${stats.runnerWallSecondsThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Jobs using token estimates · last 7 days</div>
+    <div class="value">${stats.estimatedTokenJobsThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Weekly scheduled jobs · last 7 days</div>
+    <div class="value">${stats.scheduledJobsThisWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Latest scheduled week</div>
+    <div class="value">${stats.latestScheduledWeek}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Operator alert · deferred weekly slots aged out · last 14 days</div>
+    <div class="value">${stats.agedOutSchedules.length}</div>
+    ${stats.agedOutSchedules.map((row) => `<div>@${row.username} · ${row.week_key}</div>`).join("")}
+  </div>
+  <div class="stat">
+    <div class="label">Operator alert · unfulfilled weekly slots after final retry</div>
+    <div class="value">${stats.unfulfilledSchedules.length}</div>
+    ${stats.unfulfilledSchedules.map((row) => `<div>@${row.username} · ${row.week_key}</div>`).join("")}
+  </div>
+  <div class="stat">
+    <div class="label">Operator alert · artifact cleanup pending</div>
+    <div class="value">${stats.artifactCleanupPending.length}</div>
+    ${stats.artifactCleanupPending.map((row) => `<div>${row.username ? `@${row.username} · ` : ""}${row.prefix} · attempt ${row.attempts} · updated ${row.updated_at}</div>`).join("")}
   </div>
   ${creatorFooter()}
 </body>
@@ -752,6 +919,7 @@ ${headTags()}
   </div>
   ${dispatchFooter(username, dispatch.week_key)}
   ${isOwner ? `<script>
+  ${generationRequestClient()}
   var _regenPending=false,_regenTimer=null;
   async function regenerate() {
     const btn = document.querySelector('.regen-btn');
@@ -763,14 +931,13 @@ ${headTags()}
     }
     clearTimeout(_regenTimer);_regenPending=false;
     btn.disabled=true; btn.textContent='generating...';
-    const res = await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:'${dispatch.week_key}'})});
-    const data = await res.json();
-    if (data.error) { btn.textContent=data.message||data.error; setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000); return; }
+    try{await enqueueGeneration('${dispatch.week_key}');}
+    catch(error){btn.textContent=error.message;setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000);return;}
     let n=0;
     const poll=setInterval(async()=>{
       n++;
-      const s=await fetch('/generate/status').then(r=>r.json());
-      if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(poll);location.reload();}
+      const s=await fetch('/generate/status?weekKey=${dispatch.week_key}').then(r=>r.json());
+      if(s.status==='ready'&&s.week_key==='${dispatch.week_key}'){clearInterval(poll);location.reload();}
       else if(n>60){clearInterval(poll);btn.textContent='reload manually';}
       else btn.textContent='generating... ('+(n*5)+'s)';
     },5000);
@@ -799,21 +966,16 @@ ${headTags()}
     ${isOwner ? `<button id="genbtn" onclick="startGen()" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>
     <div id="gen-msg" style="font-size:12px;color:#666;max-width:300px;line-height:1.5;display:none;"></div>
     <script>
+    ${generationRequestClient()}
     async function startGen(){
       const btn=document.getElementById('genbtn');
       const msg=document.getElementById('gen-msg');
+      const requestedWeek=${week_key ? `'${week_key}'` : "null"};
       btn.disabled=true; btn.textContent='checking...';
-      const res=await fetch('/generate',{method:'POST'});
-      const data=await res.json();
-      if(data.error==='no_activity'){
-        btn.style.display='none';
-        msg.textContent=data.message;
-        msg.style.display='block';
-        return;
-      }
-      if(data.error){
+      try{await enqueueGeneration(requestedWeek);}
+      catch(error){
         btn.disabled=false; btn.textContent='generate now';
-        msg.textContent=data.message||data.error;
+        msg.textContent=error.message;
         msg.style.display='block';
         return;
       }
@@ -822,7 +984,8 @@ ${headTags()}
       const iv=setInterval(async()=>{
         n++;
         btn.textContent='generating... ('+n*5+'s)';
-        const s=await fetch('/generate/status').then(r=>r.json());
+        const statusUrl=requestedWeek?'/generate/status?weekKey='+encodeURIComponent(requestedWeek):'/generate/status';
+        const s=await fetch(statusUrl).then(r=>r.json());
         if(s.status==='ready'){clearInterval(iv);location.reload();}
         if(s.status==='failed'){clearInterval(iv);btn.disabled=false;btn.textContent='try again';msg.textContent='Something went wrong on our end. Try again.';msg.style.display='block';}
         if(n>24){clearInterval(iv);btn.textContent='reload manually';}
@@ -856,62 +1019,6 @@ ${headTags()}
   </div>
   ${ctaFooter()}
   ${creatorFooter()}
-</body></html>`;
-}
-
-function generatingPage(username: string): string {
-  return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
-${headTags()}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
-<style>
-  *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
-  .center{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:40px 24px;text-align:center;}
-</style>
-</head><body>
-  <div class="center">
-    <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
-    <div style="font-size:18px;font-weight:700;">@${username}</div>
-    <div id="status-msg" style="color:#666;">Generating dispatch... this takes about 60 seconds.</div>
-    <div id="retry-btn" style="display:none;">
-      <div style="color:#c00;font-size:13px;margin-bottom:12px;">Generation timed out. Something went wrong.</div>
-      <a href="/generate" id="retry-link" style="display:inline-block;padding:10px 24px;background:#0f0f0f;color:#f7f4ee;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;text-decoration:none;" onclick="this.textContent='retrying...';retryGen();return false;">Try again</a>
-    </div>
-    <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
-  </div>
-  ${ctaFooter()}
-  ${creatorFooter()}
-  <script>
-  let n = 0;
-  const iv = setInterval(async () => {
-    n++;
-    try {
-      const s = await fetch('/generate/status').then(r => r.json());
-      if (s.status === 'ready') { clearInterval(iv); location.reload(); return; }
-      if (s.status === 'failed') {
-        clearInterval(iv);
-        document.getElementById('status-msg').style.display = 'none';
-        document.getElementById('retry-btn').style.display = 'block';
-        return;
-      }
-      if (s.status === 'generating') {
-        document.getElementById('status-msg').textContent = 'Generating dispatch... (' + Math.round(s.age) + 's)';
-      }
-    } catch(e) {}
-    if (n > 36) { // 3 min client-side max
-      clearInterval(iv);
-      document.getElementById('status-msg').style.display = 'none';
-      document.getElementById('retry-btn').style.display = 'block';
-    }
-  }, 5000);
-
-  async function retryGen() {
-    await fetch('/generate', { method: 'POST' });
-    setTimeout(() => location.reload(), 2000);
-  }
-  </script>
 </body></html>`;
 }
 

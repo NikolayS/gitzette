@@ -1,0 +1,137 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtemp } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import type { Edition, EvidenceBundle, PublicationManifest } from "../src/edition";
+import type { RunnerConfig } from "./config";
+import { OpenClawInferenceError } from "./inference";
+import { RunnerEngine } from "./run";
+import type { ClaimedJob, Collector, Inference, Publisher, RunnerStage } from "./types";
+import type { JobUsage, TokenUsage } from "../src/usage";
+
+const job: ClaimedJob = { id: "2bb65583-b570-4a55-b4e4-5de336b10664", username: "octocat", weekKey: "2026-W32", leaseToken: "5ba2cbaf-5dc5-4a3a-8be0-d4230dd11e09", leaseExpiresAt: 1_800_000_000, attempt: 1 };
+
+class FakePublisher implements Publisher {
+  stages: RunnerStage[] = [];
+  heartbeats = 0;
+  uploads: string[] = [];
+  published?: PublicationManifest;
+  publishedUsage?: JobUsage;
+  failure?: string;
+  failureRetryable?: boolean;
+  constructor(private queued: ClaimedJob | null = job) {}
+  async claim() { const value = this.queued; this.queued = null; return value; }
+  async heartbeat() { this.heartbeats++; }
+  async stage(_job: ClaimedJob, stage: RunnerStage) { this.stages.push(stage); }
+  async upload(_job: ClaimedJob, key: string) { this.uploads.push(key); }
+  async publish(_job: ClaimedJob, manifest: PublicationManifest, usage: JobUsage) { this.published = manifest; this.publishedUsage = usage; }
+  async fail(_job: ClaimedJob, message: string, retryable: boolean) {
+    this.failure = message;
+    this.failureRetryable = retryable;
+  }
+}
+
+const edition: Edition = {
+  headline: "The parser holds", tagline: "One boundary at a time.", closingNote: "The presses continue.",
+  stories: [
+    { headline: "Parser fixed", deck: "The edge closes.", paragraphs: ["A bounded claim."], evidenceIds: ["commit:abc"], tag: "FEATURE", illustrationKey: "image-1.webp" },
+    { headline: "Boundary tested", deck: "The test remains.", paragraphs: ["A second bounded claim."], evidenceIds: ["commit:abc"], tag: "COMMUNITY", illustrationKey: "image-2.webp" },
+  ],
+};
+
+describe("runner engine", () => {
+  test("publishes a quiet week without invoking AI", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const collector: Collector = { collect: async () => ({ state: "quiet", username: job.username, weekKey: job.weekKey, items: [] }) };
+    const inference: Inference = { write: async () => { throw new Error("AI must not run"); }, illustrate: async () => { throw new Error("AI must not run"); }, reviewIllustration: async () => { throw new Error("AI must not run"); } };
+    expect(await new RunnerEngine(config(directory), publisher, collector, inference).runOnce()).toBe("processed");
+    expect(publisher.stages).toEqual(["writing", "illustrating", "validating"]);
+    expect(publisher.published?.model).toBe("deterministic");
+  });
+
+  test("runs active evidence through two images and atomic publication", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const evidence: EvidenceBundle = { state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "Parser fix", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] };
+    let image = 0;
+    const inference: Inference = {
+      write: async () => ({ edition, usage: tokenUsage(100, 20) }),
+      illustrate: async (_subject, output) => {
+        image++;
+        const child = Bun.spawn(["/usr/bin/convert", "-size", "1024x1024", "xc:#f7f4ee", "-fill", image === 1 ? "red" : "blue", "-draw", "circle 512,512 760,512", output]);
+        expect(await child.exited).toBe(0);
+        return tokenUsage(10, 0);
+      },
+      reviewIllustration: async () => tokenUsage(5, 1),
+    };
+    const result = await new RunnerEngine(config(directory), publisher, { collect: async () => evidence }, inference).runOnce();
+    expect(result, publisher.failure).toBe("processed");
+    expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp"]);
+    expect(publisher.published?.images).toHaveLength(2);
+    expect(publisher.published?.promptVersion).toBe("gitzette-editor-v2");
+    expect(publisher.publishedUsage).toMatchObject({
+      inputTokens: 130,
+      outputTokens: 22,
+      tokenSource: "estimated",
+      imageCount: 2,
+    });
+    expect(publisher.publishedUsage?.wallTimeMs).toBeGreaterThanOrEqual(0);
+    expect(publisher.failure).toBeUndefined();
+  });
+
+  test("fails closed when model output cannot be validated", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
+    const inference: Inference = {
+      write: async () => { throw new Error("unknown edition field: prompt"); },
+      illustrate: async () => tokenUsage(0, 0),
+      reviewIllustration: async () => tokenUsage(0, 0),
+    };
+    expect(await new RunnerEngine(config(directory), publisher, collector, inference).runOnce()).toBe("failed");
+    expect(publisher.published).toBeUndefined();
+    expect(publisher.failure).toContain("prompt");
+  });
+
+  test("classifies a revoked OpenClaw OAuth session separately", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
+    const inference: Inference = {
+      write: async () => { throw new OpenClawInferenceError(1, "OAuth session expired"); },
+      illustrate: async () => tokenUsage(0, 0),
+      reviewIllustration: async () => tokenUsage(0, 0),
+    };
+    expect(await new RunnerEngine(config(directory), publisher, collector, inference).runOnce()).toBe("auth_failed");
+    expect(publisher.failure).toContain("runner_auth_unavailable: OpenClaw inference failed");
+    expect(publisher.failureRetryable).toBe(false);
+  });
+
+  test("renews the lease while a model call is still running", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const slowConfig = config(directory);
+    slowConfig.heartbeatSeconds = 0.01;
+    const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
+    const inference: Inference = {
+      write: async () => { await Bun.sleep(35); throw new Error("stop after heartbeat proof"); },
+      illustrate: async () => tokenUsage(0, 0), reviewIllustration: async () => tokenUsage(0, 0),
+    };
+    expect(await new RunnerEngine(slowConfig, publisher, collector, inference).runOnce()).toBe("failed");
+    expect(publisher.heartbeats).toBeGreaterThanOrEqual(2);
+  });
+});
+
+function config(directory: string): RunnerConfig {
+  return {
+    controlPlaneOrigin: "https://gitzette.online", runnerSecret: "x", githubToken: "x",
+    openclawBin: "/usr/local/bin/openclaw", openclawHome: directory, pollSeconds: 10, heartbeatSeconds: 60,
+    workDir: directory, generatorVersion: "test", imageMagickBin: "/usr/bin/convert",
+    imageMagickCompareBin: "/usr/bin/compare",
+  };
+}
+
+function tokenUsage(inputTokens: number, outputTokens: number): TokenUsage {
+  return { inputTokens, outputTokens, tokenSource: "estimated" };
+}

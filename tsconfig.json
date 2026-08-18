@@ -9,12 +9,6 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": [
-    "src/auth.ts",
-    "src/dispatch-health.ts",
-    "src/generate.ts",
-    "src/index.ts",
-    "src/pages.ts",
-    "src/quota.ts"
-  ]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }
