@@ -192,7 +192,7 @@ describe("weekly profile scheduling", () => {
     }
   });
 
-  test("keeps the production scheduler inert until the runner is enabled", async () => {
+  test("treats the configured string false as disabled until the runner is enabled", async () => {
     const db = new StubD1(true, profiles);
     await runWeeklySchedule(
       { cron: WEEKLY_GENERATION_CRON, scheduledTime } as ScheduledController,

@@ -93,12 +93,13 @@ The Worker contains no AI provider key or fallback. `RUNNER_SECRET` authenticate
 status. The owner-authorized TARS runner invokes Tanya301/samorev out of band,
 parses its blocking verdict, and posts the status through GitHub's statuses API.
 The PR-triggered gate verifies the status belongs to the current SHA and was
-created by `NikolayS`. Branch protection requires both that GitHub-Actions-app-
+created by immutable reviewer identity `samo-agent` (ID `280144521`). Branch
+protection requires both that GitHub-Actions-app-
 bound gate and the final external `samorev` status to succeed, including for
 admins; neither a pending verdict nor a rewritten proxy check is sufficient.
 Release tags are also fail closed: the deploy workflow accepts only a tag on
 the current `main` merge commit and re-verifies the associated PR head's two
-app-bound checks plus the final owner-published samorev status before touching
+app-bound checks plus the final reviewer-published samorev status before touching
 production.
 
 If production canaries fail, disable `gitzette-runner.service` first. Existing

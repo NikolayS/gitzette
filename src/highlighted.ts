@@ -11,6 +11,7 @@ export const MANAGED_PROFILE_USERNAMES = [
   "simonw",
   "steipete",
   "torvalds",
+  "gitzette-opt-out-test",
 ] as const;
 
 export const WEEKLY_PROFILE_USERNAMES = [

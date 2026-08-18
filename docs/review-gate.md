@@ -1,10 +1,17 @@
 # Exact-head review gate
 
-Protected `main` requires `typecheck`, `samorev`, and `samorev-gate` on the
-exact pull-request head. It also requires a fresh CODEOWNER approval from
-`@samo-agent`, dismisses stale approvals after a push, rejects approval by the
-last pusher, applies to administrators, and requires every conversation to be
-resolved.
+Protected `main` requires these exact-head status checks in the same order as
+`config/main-branch-protection.json`:
+
+| Required context | Producer |
+| --- | --- |
+| `samorev` | Commit status created only by immutable reviewer user `samo-agent` (ID `280144521`); no GitHub App binding. |
+| `samorev-gate` | Protected-main `pull_request_target` publisher, bound to the GitHub Actions App (ID `15368`). |
+| `typecheck` | Unprivileged `pull_request` CI, bound to the GitHub Actions App (ID `15368`). |
+
+Protection also requires a fresh CODEOWNER approval from `@samo-agent`,
+dismisses stale approvals after a push, rejects approval by the last pusher,
+applies to administrators, and requires every conversation to be resolved.
 
 The CODEOWNER approval is the identity boundary. GitHub Actions status names
 are shared across workflows, and classic branch protection cannot bind a

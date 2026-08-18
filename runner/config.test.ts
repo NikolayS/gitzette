@@ -44,5 +44,8 @@ describe("runner configuration boundary", () => {
     }
     expect(() => loadConfig({ ...base, GITZETTE_CONTROL_PLANE_ORIGIN: "https://gitzette.online/runner" })).toThrow("origin only");
     expect(() => loadConfig({ ...base, GITZETTE_CONTROL_PLANE_ORIGIN: "http://evil.example" })).toThrow("HTTPS");
+    for (const value of ["0", "1", "301", "NaN", "2.5"]) {
+      expect(() => loadConfig({ ...base, GITZETTE_POLL_SECONDS: value })).toThrow("invalid GITZETTE_POLL_SECONDS");
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { DEFAULT_POLL_SECONDS } from "./backoff";
 
 export type RunnerConfig = {
   controlPlaneOrigin: string;
@@ -41,7 +42,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new Error("GITZETTE_CONTROL_PLANE_ORIGIN must use HTTPS");
   }
 
-  const pollSeconds = Number(env.GITZETTE_POLL_SECONDS ?? "10");
+  const pollSeconds = Number(env.GITZETTE_POLL_SECONDS ?? String(DEFAULT_POLL_SECONDS));
   if (!Number.isInteger(pollSeconds) || pollSeconds < 2 || pollSeconds > 300) throw new Error("invalid GITZETTE_POLL_SECONDS");
   const heartbeatSeconds = Number(env.GITZETTE_HEARTBEAT_SECONDS ?? "60");
   if (!Number.isInteger(heartbeatSeconds) || heartbeatSeconds < 1 || heartbeatSeconds > 300) throw new Error("invalid GITZETTE_HEARTBEAT_SECONDS");
