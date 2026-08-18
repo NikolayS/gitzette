@@ -33,12 +33,9 @@ export class OpenClawInference implements Inference {
       "--output-format", "png", "--background", "opaque", "--quality", "medium",
       "--output", outputPath, "--prompt", prompt,
     ], 600_000);
-    let parsed: { ok?: boolean; provider?: string; model?: string; usage?: { inputTokens?: unknown; outputTokens?: unknown } } | undefined;
-    if (result.trim()) {
-      const envelope = JSON.parse(result) as Exclude<typeof parsed, undefined>;
-      if (!envelope.ok || envelope.provider !== "openai" || envelope.model !== "gpt-image-2") throw new Error("forbidden image transport or model");
-      parsed = envelope;
-    }
+    if (!result.trim()) throw new Error("image generator returned no provenance envelope");
+    const parsed = JSON.parse(result) as { ok?: boolean; provider?: string; model?: string; usage?: { inputTokens?: unknown; outputTokens?: unknown } };
+    if (!parsed.ok || parsed.provider !== "openai" || parsed.model !== "gpt-image-2") throw new Error("forbidden image transport or model");
     // RunnerEngine immediately hands this path to postProcessImage, whose
     // descriptor-based O_NOFOLLOW open and fstat are the authoritative boundary.
     return measuredOrEstimatedUsage(parsed, prompt, "");

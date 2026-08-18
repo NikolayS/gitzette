@@ -17,6 +17,25 @@ const NEXT_STAGE: Record<string, string> = {
   illustrating: "validating",
 };
 
+export const CLAIM_JOB_SQL = `UPDATE generation_jobs
+  SET status='collecting', attempt=attempt+1, capacity_started_at=COALESCE(capacity_started_at,?),
+      lease_token=?, lease_expires_at=?, last_error=NULL, updated_at=?
+WHERE id=(
+  SELECT id FROM generation_jobs
+  WHERE attempt < ? AND (
+    status IN ('queued','retryable_failed') OR
+    (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < ?)
+  )
+  AND (
+    capacity_started_at IS NOT NULL OR (
+      SELECT COUNT(*) FROM generation_jobs
+      WHERE capacity_started_at>=?
+    ) < ?
+  )
+  ORDER BY created_at, rowid LIMIT 1
+)
+RETURNING id,user_id,week_key,status,attempt,lease_token,lease_expires_at`;
+
 type ClaimedJob = {
   id: string;
   user_id: string;
@@ -48,26 +67,9 @@ runnerRoutes.post("/jobs/claim", async (c) => {
      SET status='permanent_failed',last_error='generation attempts exhausted',lease_token=NULL,lease_expires_at=NULL,updated_at=?
      WHERE attempt>=? AND status IN ('collecting','writing','illustrating','validating') AND lease_expires_at<?`
   ).bind(now, MAX_ATTEMPTS, now).run();
-  const row = await c.env.DB.prepare(
-    `UPDATE generation_jobs
-       SET status='collecting', attempt=attempt+1, capacity_started_at=COALESCE(capacity_started_at,?),
-           lease_token=?, lease_expires_at=?, last_error=NULL, updated_at=?
-     WHERE id=(
-       SELECT id FROM generation_jobs
-       WHERE attempt < ? AND (
-         status IN ('queued','retryable_failed') OR
-         (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < ?)
-       )
-       AND (
-         capacity_started_at IS NOT NULL OR (
-           SELECT COUNT(*) FROM generation_jobs
-           WHERE capacity_started_at>=?
-         ) < ?
-       )
-       ORDER BY created_at, rowid LIMIT 1
-     )
-     RETURNING id,user_id,week_key,status,attempt,lease_token,lease_expires_at`
-  ).bind(now, leaseToken, leaseExpires, now, MAX_ATTEMPTS, now, now - ROLLING_CAPACITY_SECONDS, globalLimit).first<Omit<ClaimedJob, "username">>();
+  const row = await c.env.DB.prepare(CLAIM_JOB_SQL)
+    .bind(now, leaseToken, leaseExpires, now, MAX_ATTEMPTS, now, now - ROLLING_CAPACITY_SECONDS, globalLimit)
+    .first<Omit<ClaimedJob, "username">>();
   if (!row) return c.body(null, 204);
   await deleteStagingPrefix(c.env.DISPATCHES, `staging/${row.id}/`);
   const user = await c.env.DB.prepare("SELECT username FROM users WHERE id=?").bind(row.user_id).first<{ username: string }>();
@@ -106,7 +108,7 @@ runnerRoutes.put("/jobs/:id/artifacts/:name", async (c) => {
   const job = await heldJob(c.env.DB, c.req.param("id"), leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
   if (job.status !== "illustrating" && job.status !== "validating") return c.json({ error: "job is not accepting artifacts" }, 409);
-  if (c.req.header("content-type")?.split(";")[0] !== "image/webp") return c.json({ error: "artifact must be image/webp" }, 415);
+  if (!isWebpContentType(c.req.header("content-type"))) return c.json({ error: "artifact must be image/webp" }, 415);
   const declared = Number(c.req.header("content-length") || 0);
   if (isArtifactTooLarge(declared)) return c.json({ error: "artifact too large" }, 413);
   const bytes = await c.req.arrayBuffer();
@@ -247,6 +249,10 @@ export function isForwardStage(current: string, requested: string): boolean {
 
 export function isArtifactTooLarge(bytes: number): boolean {
   return bytes > MAX_ARTIFACT_BYTES;
+}
+
+export function isWebpContentType(value: string | undefined): boolean {
+  return value?.split(";")[0]?.trim().toLowerCase() === "image/webp";
 }
 
 async function requestJson<T>(c: { req: { json<TValue>(): Promise<TValue> } }): Promise<T | null> {

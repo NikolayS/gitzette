@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS generation_jobs (
 CREATE INDEX IF NOT EXISTS generation_jobs_claim
   ON generation_jobs(status, lease_expires_at, created_at);
 
+CREATE INDEX IF NOT EXISTS generation_jobs_expiry
+  ON generation_jobs(status, created_at, lease_expires_at);
+
 CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_one_live_job
   ON generation_jobs(user_id, week_key)
   WHERE status IN ('queued', 'collecting', 'writing', 'illustrating', 'validating', 'retryable_failed');

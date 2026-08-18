@@ -6,7 +6,7 @@ import type { RunnerConfig } from "./config";
 import { OpenClawInference } from "./inference";
 
 describe("OpenClaw CLI boundary", () => {
-  test("uses an argv array, accepts the image CLI's empty JSON stdout, and strips secrets", async () => {
+  test("uses an argv array, verifies the image envelope, and strips secrets", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-cli-test-"));
     const output = join(directory, "image.png");
     await writeFile(output, new Uint8Array(2000));
@@ -15,7 +15,11 @@ describe("OpenClaw CLI boundary", () => {
     const spawn = ((argv: string[], options: Bun.SpawnOptions.OptionsObject<"ignore", "pipe", "pipe">) => {
       originalArgv = argv;
       originalEnv = options.env ?? {};
-      return Bun.spawn(["/usr/bin/true"], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      return Bun.spawn([
+        "/usr/bin/printf",
+        "%s",
+        JSON.stringify({ ok: true, provider: "openai", model: "gpt-image-2" }),
+      ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     }) as typeof Bun.spawn;
 
     const usage = await new OpenClawInference(config(directory), spawn).illustrate("hostile $(touch /tmp/nope)", output);
@@ -27,6 +31,18 @@ describe("OpenClaw CLI boundary", () => {
     expect(originalEnv.OPENAI_API_KEY).toBeUndefined();
     expect(usage.tokenSource).toBe("estimated");
     expect(usage.inputTokens).toBeGreaterThan(0);
+  });
+
+  test("fails closed when the image CLI omits its provenance envelope", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-cli-test-"));
+    const spawn = (() => Bun.spawn(["/usr/bin/true"], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    })) as typeof Bun.spawn;
+
+    await expect(new OpenClawInference(config(directory), spawn).illustrate("subject", join(directory, "image.png")))
+      .rejects.toThrow("image generator returned no provenance envelope");
   });
 });
 

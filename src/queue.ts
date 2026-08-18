@@ -10,6 +10,14 @@ export const ALL_STATUSES = [...LIVE_STATUSES, ...TERMINAL_STATUSES] as const;
 export const MAX_GENERATE_BODY_BYTES = 2048;
 const DEFAULT_MAX_QUEUE_AGE_SECONDS = 6 * 60 * 60;
 
+export const GENERATION_REQUEST_INSERT_SQL = `INSERT INTO generation_jobs
+  (id,user_id,requested_by,week_key,status)
+ SELECT ?,?,?,?,'queued'
+ WHERE ? OR (
+   SELECT COUNT(*) FROM generation_jobs
+   WHERE requested_by=? AND created_at>=unixepoch('now','-7 days')
+ ) < ?`;
+
 type JobRow = {
   id: string;
   user_id: string;
@@ -77,7 +85,7 @@ queueRoutes.post("/generate", async (c) => {
     target = existing;
   }
 
-  await expireStaleJobs(c.env.DB, maxQueueAgeSeconds(c.env));
+  await expireStaleTargetJob(c.env.DB, maxQueueAgeSeconds(c.env), target.id, weekKey);
 
   const live = await c.env.DB.prepare(
     `SELECT j.*, u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id
@@ -88,14 +96,8 @@ queueRoutes.post("/generate", async (c) => {
   const id = crypto.randomUUID();
   const requestLimit = Math.max(1, Number.parseInt(c.env.ROLLING_7D_USER_GENERATION_LIMIT || "3", 10) || 3);
   try {
-    const inserted = await c.env.DB.prepare(
-      `INSERT INTO generation_jobs (id,user_id,requested_by,week_key,status)
-       SELECT ?,?,?,?,'queued'
-       WHERE ? OR (
-         SELECT COUNT(*) FROM generation_jobs
-         WHERE requested_by=? AND created_at>=unixepoch('now','-7 days')
-       ) < ?`
-    ).bind(id, target.id, requester.id, weekKey, isAdmin(requester.id, c.env.ADMIN_USER_ID) ? 1 : 0, requester.id, requestLimit).run();
+    const inserted = await c.env.DB.prepare(GENERATION_REQUEST_INSERT_SQL)
+      .bind(id, target.id, requester.id, weekKey, isAdmin(requester.id, c.env.ADMIN_USER_ID) ? 1 : 0, requester.id, requestLimit).run();
     if ((inserted.meta.changes ?? 0) !== 1) {
       return c.json({ error: "generation request limit reached", weeklyUserLimit: requestLimit }, 429);
     }
@@ -119,7 +121,7 @@ queueRoutes.get("/generate/jobs/:id", async (c) => {
   if (row.requested_by !== requester.id && row.user_id !== requester.id && !isAdmin(requester.id, c.env.ADMIN_USER_ID)) {
     return c.json({ error: "forbidden" }, 403);
   }
-  return c.json({ job: publicJob(row) });
+  return c.json({ job: publicJob(stalePublicRow(row, maxQueueAgeSeconds(c.env))) });
 });
 
 queueRoutes.get("/generate/status", async (c) => {
@@ -145,7 +147,7 @@ async function getJob(db: D1Database, id: string): Promise<JobRow | null> {
   ).bind(id).first<JobRow>();
 }
 
-async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<void> {
+export async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<void> {
   await db.prepare(
     `UPDATE generation_jobs
      SET status='permanent_failed', last_error='generation runner unavailable; please retry', updated_at=unixepoch()
@@ -154,6 +156,22 @@ async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<v
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
      ) AND created_at < unixepoch()-?`
   ).bind(maxAgeSeconds).run();
+}
+
+async function expireStaleTargetJob(
+  db: D1Database,
+  maxAgeSeconds: number,
+  userId: string,
+  weekKey: string,
+): Promise<void> {
+  await db.prepare(
+    `UPDATE generation_jobs
+     SET status='permanent_failed', last_error='generation runner unavailable; please retry', updated_at=unixepoch()
+     WHERE user_id=? AND week_key=? AND (
+       status IN ('queued','retryable_failed') OR
+       (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
+     ) AND created_at < unixepoch()-?`
+  ).bind(userId, weekKey, maxAgeSeconds).run();
 }
 
 export function isAdmin(userId: string, adminUserId: string | undefined): boolean {
@@ -181,7 +199,7 @@ export function publicFailureCode(internalMessage: string | null): string {
   return "provider_unavailable";
 }
 
-export function maxQueueAgeSeconds(env: Env): number {
+export function maxQueueAgeSeconds(env: Pick<Env, "MAX_QUEUE_AGE_SECONDS">): number {
   return positiveInteger(env.MAX_QUEUE_AGE_SECONDS, DEFAULT_MAX_QUEUE_AGE_SECONDS);
 }
 
@@ -192,23 +210,4 @@ export function positiveInteger(value: string | undefined, fallback: number): nu
 
 export function isGenerateBodyTooLarge(bytes: number): boolean {
   return bytes > MAX_GENERATE_BODY_BYTES;
-}
-
-export function blocksDuplicate(status: string): boolean {
-  return (LIVE_STATUSES as readonly string[]).includes(status);
-}
-
-export function hasGenerationRequestCapacity(
-  userCount: number,
-  userLimit: number,
-  isAdmin = false,
-): boolean {
-  // Global provider capacity is enforced at claim time. Keeping it out of this
-  // admission decision lets first-time users queue instead of receiving a hard
-  // refusal after another user's burst.
-  return isAdmin || userCount < userLimit;
-}
-
-export function hasRunnerCapacity(globalStartedCount: number, globalLimit: number, alreadyStarted = false): boolean {
-  return alreadyStarted || globalStartedCount < globalLimit;
 }

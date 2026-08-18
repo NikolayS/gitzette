@@ -77,6 +77,10 @@ describe("typed publication manifest", () => {
     const hostile = activeManifest();
     hostile.evidence.items[0].url = "javascript:alert(1)";
     expect(() => validateManifest(hostile, "octocat", "2026-W32")).toThrow("non-GitHub evidence URL");
+
+    const credentialed = activeManifest();
+    credentialed.evidence.items[0].url = "https://user:token@github.com/octocat/widget/pull/1";
+    expect(() => validateManifest(credentialed, "octocat", "2026-W32")).toThrow("non-GitHub evidence URL");
   });
 
   test("rejects prompt-shaped and unknown fields at every model-controlled level", () => {

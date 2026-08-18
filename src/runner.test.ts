@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { Hono } from "hono";
-import { isArtifactTooLarge, isForwardStage, runnerRoutes } from "./runner";
+import { CLAIM_JOB_SQL, isArtifactTooLarge, isForwardStage, isWebpContentType, runnerRoutes } from "./runner";
 import { LIVE_STATUSES } from "./queue";
 
 const jobId = "2bb65583-b570-4a55-b4e4-5de336b10664";
@@ -117,6 +118,35 @@ describe("runner route boundary", () => {
     expect(isArtifactTooLarge(5 * 1024 * 1024 + 1)).toBe(true);
   });
 
+  test("normalizes the WebP media type without accepting another format", () => {
+    expect(isWebpContentType("image/webp")).toBe(true);
+    expect(isWebpContentType(" IMAGE/WEBP ; charset=binary")).toBe(true);
+    expect(isWebpContentType("image/png")).toBe(false);
+    expect(isWebpContentType(undefined)).toBe(false);
+  });
+
+  test("executes the production claim SQL with global capacity and reclaim semantics", async () => {
+    const db = await generationDatabase();
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      db.query("INSERT INTO users(id,username) VALUES ('1','started'),('2','candidate')").run();
+      db.query("INSERT INTO generation_jobs(id,user_id,requested_by,week_key,status,capacity_started_at) VALUES (?,?,?,?,?,?)")
+        .run("started", "1", "1", "2026-W30", "published", now);
+      db.query("INSERT INTO generation_jobs(id,user_id,requested_by,week_key,status) VALUES (?,?,?,?,?)")
+        .run("candidate", "2", "2", "2026-W31", "queued");
+
+      const claim = db.query(CLAIM_JOB_SQL);
+      expect(claim.get(now, "lease-1", now + 600, now, 5, now, now - 604_800, 1)).toBeNull();
+
+      db.query("UPDATE generation_jobs SET capacity_started_at=? WHERE id='candidate'").run(now - 10);
+      const reclaimed = claim.get(now, "lease-2", now + 600, now, 5, now, now - 604_800, 1) as { id: string; attempt: number };
+      expect(reclaimed.id).toBe("candidate");
+      expect(reclaimed.attempt).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects publish with an expired lease", async () => {
     const db = stubDb({ status: "validating", attempt: 1, lease_token: oldLease, lease_expires_at: Math.floor(Date.now() / 1000) - 1 });
     const response = await runnerRequest(db, `/runner/jobs/${jobId}/publish`, {
@@ -198,4 +228,11 @@ function quietManifest() {
 
 function quietUsage() {
   return { inputTokens: 0, outputTokens: 0, tokenSource: "none", imageCount: 0, wallTimeMs: 10 };
+}
+
+async function generationDatabase(): Promise<Database> {
+  const db = new Database(":memory:");
+  db.exec(await Bun.file("migrations/0000_base.sql").text());
+  db.exec(await Bun.file("migrations/0001_generation_queue.sql").text());
+  return db;
 }

@@ -290,6 +290,7 @@ const staleStatus = await json("/generate/status", { headers: sessionHeaders });
 expect(staleStatus.body.job.id).toBe(stale.body.job.id);
 expect(staleStatus.body.status).toBe("failed");
 expect(staleStatus.body.stage).toBe("permanent_failed");
+expect((await json(`/generate/jobs/${stale.body.job.id}`, { headers: sessionHeaders })).body.job.status).toBe("permanent_failed");
 
 // The enforced INSERT admits exactly N user requests and rejects N+1.
 const intruderHeaders = { cookie: "session=intruder-session", "content-type": "application/json" };
@@ -306,9 +307,16 @@ expect(delegated.body.job.username).toBe("target-user");
 expect((await json(`/generate/jobs/${delegated.body.job.id}`, { headers: { cookie: "session=target-session" } })).response.status).toBe(200);
 expect((await json(`/generate/jobs/${delegated.body.job.id}`, { headers: sessionHeaders })).response.status).toBe(200);
 
-// The production cron is wired to the Worker and remains idempotent if
-// Cloudflare redelivers the same weekly event after jobs become terminal.
-for (const expected of [9, 9]) {
+// One retained profile already has live work for the scheduled week. The
+// production cron must enqueue the other eight without rolling back the batch,
+// then remain idempotent when Cloudflare redelivers the event.
+const weeklyCollision = await json("/generate", {
+  method: "POST",
+  headers: sessionHeaders,
+  body: JSON.stringify({ weekKey: previousCompletedIsoWeekKey(), forUsername: "torvalds" }),
+});
+expect(weeklyCollision.response.status).toBe(202);
+for (const expected of [8, 8]) {
   const scheduled = await fetch(`${base}/__scheduled?cron=17+13+*+*+1`);
   expect(scheduled.status).toBe(200);
   const scheduledStatus = await fetch(base + "/status", { headers: { authorization: "Bearer e2e-status-token" } });

@@ -69,7 +69,10 @@ function assertString(value: unknown, field: string, max: number): asserts value
 function isGitHubUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && (url.hostname === "github.com" || url.hostname === "api.github.com");
+    return url.protocol === "https:"
+      && !url.username
+      && !url.password
+      && (url.hostname === "github.com" || url.hostname === "api.github.com");
   } catch {
     return false;
   }
