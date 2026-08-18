@@ -31,6 +31,15 @@ describe("WebP validation", () => {
     expect(webpDimensions(forged)).toBeNull();
   });
 
+  test("rejects a VP8 sync code forged outside its fixed frame-header offset", () => {
+    const forged = new Uint8Array(40);
+    forged.set(new TextEncoder().encode("RIFF"), 0);
+    new DataView(forged.buffer).setUint32(4, forged.byteLength - 8, true);
+    forged.set(new TextEncoder().encode("WEBPVP8 "), 8);
+    forged.set([0x9d, 0x01, 0x2a, 0x00, 0x01, 0x00, 0x01], 30);
+    expect(webpDimensions(forged)).toBeNull();
+  });
+
   test("enforces publication dimensions", () => {
     expect(hasPublicationDimensions({ width: 256, height: 2048 })).toBe(true);
     expect(hasPublicationDimensions({ width: 1, height: 1 })).toBe(false);

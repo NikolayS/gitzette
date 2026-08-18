@@ -62,7 +62,7 @@ class StubStatement {
       job.lease_expires_at = leaseExpiresAt;
       return { ...job } as T;
     }
-    if (this.query.startsWith("SELECT username FROM users")) return { username: "octocat" } as T;
+    if (this.query.startsWith("SELECT username FROM users")) return { username: this.db.username } as T;
     if (this.query.includes("SELECT j.*,u.username FROM generation_jobs")) {
       const [id, leaseToken] = this.args as [string, string];
       const job = this.db.job;
@@ -70,9 +70,22 @@ class StubStatement {
         && job.lease_token === leaseToken
         && (job.lease_expires_at ?? 0) >= Math.floor(Date.now() / 1000)
         && ["collecting", "writing", "illustrating", "validating"].includes(job.status);
-      return (held ? { ...job, username: "octocat" } : null) as T;
+      return (held ? { ...job, username: this.db.username } : null) as T;
     }
     throw new Error(`unexpected D1 first: ${this.query}`);
+  }
+
+  async run() {
+    if (this.query.includes("last_error='profile unavailable'")) {
+      const [id, leaseToken] = this.args as [string, string];
+      if (this.db.job.id !== id || this.db.job.lease_token !== leaseToken) return { meta: { changes: 0 } };
+      this.db.job.status = "permanent_failed";
+      this.db.job.capacity_started_at = null;
+      this.db.job.lease_token = null;
+      this.db.job.lease_expires_at = null;
+      return { meta: { changes: 1 } };
+    }
+    throw new Error(`unexpected D1 run: ${this.query}`);
   }
 }
 
@@ -80,7 +93,7 @@ class StubD1 {
   readonly versions = new Map<string, string>();
   readonly dispatches = new Map<string, string>();
 
-  constructor(readonly job: StubJob) {}
+  constructor(readonly job: StubJob, readonly username = "octocat") {}
 
   prepare(query: string) {
     return new StubStatement(this, query);
@@ -210,9 +223,43 @@ describe("runner route boundary", () => {
     expect(db.job.lease_expires_at).toBeNull();
     expect(r2.objects.size).toBe(0);
   });
+
+  test("terminalizes queued work for a profile removed from the managed schedule", async () => {
+    const db = stubDb({ status: "queued" }, "gitzette-opt-out-test");
+    const r2 = new StubR2([`staging/${jobId}/abandoned/image-1.webp`]);
+    const claim = await runnerRequest(db, "/runner/jobs/claim", { method: "POST" }, r2);
+    expect(claim.status).toBe(204);
+    expect(db.job.status).toBe("permanent_failed");
+    expect(db.job.capacity_started_at).toBeNull();
+    expect(db.job.lease_token).toBeNull();
+    expect(db.job.lease_expires_at).toBeNull();
+    expect(r2.objects.size).toBe(0);
+  });
+
+  test("terminalizes a suppressed profile that becomes unavailable mid-flight", async () => {
+    const db = stubDb({
+      status: "validating",
+      attempt: 1,
+      capacity_started_at: Math.floor(Date.now() / 1000),
+      lease_token: oldLease,
+      lease_expires_at: Math.floor(Date.now() / 1000) + 600,
+    }, "gitzette-opt-out-test");
+    const r2 = new StubR2([`staging/${jobId}/${oldLease}/image-1.webp`]);
+    const response = await runnerRequest(db, `/runner/jobs/${jobId}/publish`, {
+      method: "POST",
+      body: JSON.stringify({ leaseToken: oldLease, manifest: quietManifest(), usage: quietUsage() }),
+    }, r2);
+    expect(response.status).toBe(410);
+    expect(db.job.status).toBe("permanent_failed");
+    expect(db.job.capacity_started_at).toBeNull();
+    expect(db.job.lease_token).toBeNull();
+    expect(db.job.lease_expires_at).toBeNull();
+    expect(r2.objects.size).toBe(0);
+    expect(db.versions.size).toBe(0);
+  });
 });
 
-function stubDb(overrides: Partial<StubJob>): StubD1 {
+function stubDb(overrides: Partial<StubJob>, username = "octocat"): StubD1 {
   return new StubD1({
     id: jobId,
     user_id: "1",
@@ -224,7 +271,7 @@ function stubDb(overrides: Partial<StubJob>): StubD1 {
     lease_token: null,
     lease_expires_at: null,
     ...overrides,
-  });
+  }, username);
 }
 
 async function runnerRequest(db: StubD1, path: string, init: RequestInit, dispatches = new StubR2()): Promise<Response> {

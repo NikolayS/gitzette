@@ -14,6 +14,10 @@ secret, AI API keys, TARS state, messaging configuration, or a tool-capable
 agent session. The OpenClaw config denies every agent tool; text and images use
 the direct `openclaw infer` capability surface. It intentionally contains no
 Gateway block, and the systemd service never starts a Gateway process.
+The editor receives newest-first evidence capped at 64 KiB of serialized UTF-8,
+keeping the single prompt argument below Linux's per-argument limit even when
+the collector reaches its 500-item ceiling. The complete evidence bundle
+remains the publication validator's source of truth.
 
 Production layout:
 
@@ -72,7 +76,8 @@ configuration path and proves that a forbidden SVG coder invocation fails.
 CI runs on Ubuntu 24.04 with ImageMagick `6.9.12-98 Q16` packages pinned to
 `8:6.9.12.98+dfsg1-5.2build2`; production must use the same build and install
 `runner/imagemagick/policy.xml` at `/etc/ImageMagick-6/policy.xml` before the
-runner is enabled.
+runner is enabled. The runner verifies that this file contains a deny-all coder
+rule before accepting work.
 
 `ROLLING_7D_USER_GENERATION_LIMIT` is per requester and
 `ROLLING_7D_GLOBAL_GENERATION_LIMIT` protects the shared OAuth identity across

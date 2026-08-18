@@ -22,15 +22,11 @@ export function webpDimensions(bytes: Uint8Array): ImageDimensions | null {
     return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
   }
   if (chunk === "VP8 ") {
-    const limit = Math.min(bytes.byteLength - 7, 64);
-    for (let index = 20; index <= limit; index++) {
-      if (bytes[index] === 0x9d && bytes[index + 1] === 0x01 && bytes[index + 2] === 0x2a) {
-        return {
-          width: view.getUint16(index + 3, true) & 0x3fff,
-          height: view.getUint16(index + 5, true) & 0x3fff,
-        };
-      }
-    }
+    if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return null;
+    return {
+      width: view.getUint16(26, true) & 0x3fff,
+      height: view.getUint16(28, true) & 0x3fff,
+    };
   }
   return null;
 }

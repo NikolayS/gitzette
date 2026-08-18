@@ -3,6 +3,7 @@ import { getUser } from "./auth";
 import type { Env } from "./index";
 import { isGitHubUsername } from "./identifiers";
 import { isManagedProfileSuppressed } from "./highlighted";
+import { deleteR2Prefix } from "./artifacts";
 import { isCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
 export const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"] as const;
@@ -90,7 +91,8 @@ queueRoutes.post("/generate", async (c) => {
     return c.json({ error: "profile unavailable" }, 410);
   }
 
-  await expireStaleTargetJob(c.env.DB, maxQueueAgeSeconds(c.env), target.id, weekKey);
+  const expiredJobIds = await expireStaleTargetJob(c.env.DB, maxQueueAgeSeconds(c.env), target.id, weekKey);
+  await Promise.all(expiredJobIds.map((id) => deleteR2Prefix(c.env.DISPATCHES, `staging/${id}/`)));
 
   const live = await c.env.DB.prepare(
     `SELECT j.*, u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id
@@ -160,8 +162,8 @@ async function getJob(db: D1Database, id: string): Promise<JobRow | null> {
   ).bind(id).first<JobRow>();
 }
 
-export async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<void> {
-  await db.prepare(
+export async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Promise<string[]> {
+  const expired = await db.prepare(
     `UPDATE generation_jobs
      SET status='permanent_failed',
          schedule_key=CASE WHEN capacity_started_at IS NULL THEN NULL ELSE schedule_key END,
@@ -173,8 +175,10 @@ export async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Pr
      WHERE (
        status IN ('queued','retryable_failed') OR
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
-     ) AND created_at < unixepoch()-?`
-  ).bind(SCHEDULED_AGE_OUT_ERROR, maxAgeSeconds).run();
+     ) AND created_at < unixepoch()-?
+     RETURNING id`
+  ).bind(SCHEDULED_AGE_OUT_ERROR, maxAgeSeconds).all<{ id: string }>();
+  return (expired.results ?? []).map((job) => job.id);
 }
 
 async function expireStaleTargetJob(
@@ -182,8 +186,8 @@ async function expireStaleTargetJob(
   maxAgeSeconds: number,
   userId: string,
   weekKey: string,
-): Promise<void> {
-  await db.prepare(
+): Promise<string[]> {
+  const expired = await db.prepare(
     `UPDATE generation_jobs
      SET status='permanent_failed',
          schedule_key=CASE WHEN capacity_started_at IS NULL THEN NULL ELSE schedule_key END,
@@ -195,8 +199,10 @@ async function expireStaleTargetJob(
      WHERE user_id=? AND week_key=? AND (
        status IN ('queued','retryable_failed') OR
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
-     ) AND created_at < unixepoch()-?`
-  ).bind(SCHEDULED_AGE_OUT_ERROR, userId, weekKey, maxAgeSeconds).run();
+     ) AND created_at < unixepoch()-?
+     RETURNING id`
+  ).bind(SCHEDULED_AGE_OUT_ERROR, userId, weekKey, maxAgeSeconds).all<{ id: string }>();
+  return (expired.results ?? []).map((job) => job.id);
 }
 
 export function isAdmin(userId: string, adminUserId: string | undefined): boolean {

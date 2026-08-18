@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "./node_modules/.bin/wrangler dev",
     "deploy": "./node_modules/.bin/wrangler deploy",
     "db:init:local": "./node_modules/.bin/wrangler d1 migrations apply gitzette-db --local",
     "db:bootstrap": "bash scripts/bootstrap-production-db.sh",

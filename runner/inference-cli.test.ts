@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { RunnerConfig } from "./config";
 import { OpenClawInference } from "./inference";
+import type { EvidenceBundle } from "../src/edition";
 
 describe("OpenClaw CLI boundary", () => {
   test("uses an argv array, verifies the image envelope, and strips secrets", async () => {
@@ -43,6 +44,45 @@ describe("OpenClaw CLI boundary", () => {
 
     await expect(new OpenClawInference(config(directory), spawn).illustrate("subject", join(directory, "image.png")))
       .rejects.toThrow("image generator returned no provenance envelope");
+  });
+
+  test("bounds a 500-item editor prompt below the Linux argv limit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-cli-test-"));
+    let prompt = "";
+    const output = {
+      headline: "Bounded activity",
+      tagline: "The newest evidence fits.",
+      closingNote: "The older tail stays in the archive.",
+      stories: [
+        { headline: "First", deck: "First deck", paragraphs: ["First body"], evidenceIds: ["commit:0"], tag: "FEATURE", illustrationKey: "image-1.webp" },
+        { headline: "Second", deck: "Second deck", paragraphs: ["Second body"], evidenceIds: ["commit:0"], tag: "COMMUNITY", illustrationKey: "image-2.webp" },
+      ],
+    };
+    const spawn = ((argv: string[]) => {
+      prompt = argv[argv.indexOf("--prompt") + 1];
+      return Bun.spawn([
+        "/usr/bin/printf",
+        "%s",
+        JSON.stringify({ ok: true, provider: "openai", model: "gpt-5.6-sol", outputs: [{ text: JSON.stringify(output) }] }),
+      ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    }) as typeof Bun.spawn;
+    const evidence: EvidenceBundle = {
+      state: "active",
+      username: "octocat",
+      weekKey: "2026-W32",
+      items: Array.from({ length: 500 }, (_, index) => ({
+        id: `commit:${index}`,
+        type: "commit" as const,
+        title: `Change ${index} ${"x".repeat(480)}`,
+        url: `https://github.com/octocat/widget/commit/${index}`,
+        repo: `octocat/${"r".repeat(190)}`,
+      })),
+    };
+
+    await new OpenClawInference(config(directory), spawn).write(evidence);
+    expect(new TextEncoder().encode(prompt).byteLength).toBeLessThan(70 * 1024);
+    expect(prompt).toContain('"id":"commit:0"');
+    expect(prompt).not.toContain('"id":"commit:499"');
   });
 });
 

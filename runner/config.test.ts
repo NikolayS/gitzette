@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { inferenceEnv, loadConfig } from "./config";
 
 const base = {
@@ -46,6 +49,27 @@ describe("runner configuration boundary", () => {
     expect(() => loadConfig({ ...base, GITZETTE_CONTROL_PLANE_ORIGIN: "http://evil.example" })).toThrow("HTTPS");
     for (const value of ["0", "1", "301", "NaN", "2.5"]) {
       expect(() => loadConfig({ ...base, GITZETTE_POLL_SECONDS: value })).toThrow("invalid GITZETTE_POLL_SECONDS");
+    }
+  });
+
+  test("recognizes credential suffixes only at identifier boundaries", () => {
+    expect(() => loadConfig({ ...base, MONKEY: "allowed" })).not.toThrow();
+    expect(() => loadConfig({ ...base, FOO_API_KEY: "forbidden" })).toThrow("OAuth-only");
+  });
+
+  test("requires an installed deny-by-default ImageMagick coder policy", () => {
+    expect(() => loadConfig({ ...base, GITZETTE_IMAGEMAGICK_POLICY: "/definitely/missing/policy.xml" }))
+      .toThrow("deny-by-default coder policy is missing");
+    expect(() => loadConfig({ ...base, GITZETTE_IMAGEMAGICK_POLICY: "/etc/passwd" }))
+      .toThrow("deny-by-default coder policy is missing");
+    const directory = mkdtempSync(join(tmpdir(), "gitzette-policy-test-"));
+    const commentedPolicy = join(directory, "policy.xml");
+    try {
+      writeFileSync(commentedPolicy, '<!-- <policy domain="coder" rights="none" pattern="*" /> -->');
+      expect(() => loadConfig({ ...base, GITZETTE_IMAGEMAGICK_POLICY: commentedPolicy }))
+        .toThrow("deny-by-default coder policy is missing");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 });

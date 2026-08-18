@@ -124,9 +124,9 @@ An active edition cannot publish without two or three unique illustrations. Each
 - exist under the current job's lease-scoped staging prefix;
 - match its declared digest at publication.
 
-The host runner performs the richer visual checks: transparent-background cleanup, crop/padding, alpha coverage, contrast, accidental text, perceptual uniqueness, and WebP compression. Failed images are retried; the edition is not degraded to zero-image success.
+The host runner performs the richer visual checks: transparent-background cleanup, crop/padding, alpha coverage, contrast, accidental text, perceptual uniqueness, and WebP compression. Any failed image fails the leased job attempt, and the whole job is retried under a fresh lease; the edition is not degraded to zero-image success.
 
-Final image objects are content-addressed by SHA-256 and served immutably from `/img/{digest}.webp`.
+Final image objects are namespaced by owner and content-addressed by SHA-256, then served immutably from `/img/{userId}-{digest}.webp`.
 
 ## Atomic publication
 

@@ -3,8 +3,10 @@ import { renderEdition, validateManifest, type PublicationManifest } from "./edi
 import { hasPublicationDimensions, webpDimensions } from "./image";
 import { bearerToken, secretMatches } from "./credentials";
 import type { Env } from "./index";
+import { isManagedProfileSuppressed } from "./highlighted";
 import { maxQueueAgeSeconds } from "./queue";
 import { validateJobUsage, type JobUsage } from "./usage";
+import { deleteR2Prefix } from "./artifacts";
 
 const DEFAULT_LEASE_SECONDS = 10 * 60;
 const DEFAULT_GLOBAL_WEEKLY_LIMIT = 100;
@@ -71,7 +73,7 @@ runnerRoutes.post("/jobs/claim", async (c) => {
      RETURNING id`
   ).bind(now, MAX_ATTEMPTS, now).all<{ id: string }>();
   await Promise.all((exhausted.results ?? []).map((job) =>
-    deleteStagingPrefix(c.env.DISPATCHES, `staging/${job.id}/`)
+    deleteR2Prefix(c.env.DISPATCHES, `staging/${job.id}/`)
   ));
   const row = await c.env.DB.prepare(CLAIM_JOB_SQL)
     .bind(
@@ -87,8 +89,14 @@ runnerRoutes.post("/jobs/claim", async (c) => {
     )
     .first<Omit<ClaimedJob, "username">>();
   if (!row) return c.body(null, 204);
-  await deleteStagingPrefix(c.env.DISPATCHES, `staging/${row.id}/`);
   const user = await c.env.DB.prepare("SELECT username FROM users WHERE id=?").bind(row.user_id).first<{ username: string }>();
+  if (isManagedProfileSuppressed(user!.username)) {
+    if (!await terminalizeSuppressedJob(c.env, row.id, row.lease_token)) {
+      return c.json({ error: "lease changed" }, 409);
+    }
+    return c.body(null, 204);
+  }
+  await deleteR2Prefix(c.env.DISPATCHES, `staging/${row.id}/`);
   return c.json({ job: { ...row, username: user!.username, weekKey: row.week_key, leaseToken: row.lease_token, leaseExpiresAt: row.lease_expires_at } });
 });
 
@@ -153,7 +161,7 @@ runnerRoutes.post("/jobs/:id/fail", async (c) => {
   const stagingPrefix = status === "permanent_failed"
     ? `staging/${job.id}/`
     : `staging/${job.id}/${body.leaseToken}/`;
-  await deleteStagingPrefix(c.env.DISPATCHES, stagingPrefix);
+  await deleteR2Prefix(c.env.DISPATCHES, stagingPrefix);
   return c.json({ status });
 });
 
@@ -164,6 +172,12 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
   if (job.status !== "validating") return c.json({ error: "job is not ready to publish" }, 409);
+  if (isManagedProfileSuppressed(job.username)) {
+    if (!await terminalizeSuppressedJob(c.env, job.id, body.leaseToken)) {
+      return c.json({ error: "lease changed" }, 409);
+    }
+    return c.json({ error: "profile unavailable" }, 410);
+  }
 
   let manifest: PublicationManifest;
   try { manifest = validateManifest(body.manifest, job.username, job.week_key); }
@@ -230,9 +244,7 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
   ).bind(versionId, job.id).first();
   if (!committed) return c.json({ error: "lease lost during commit" }, 409);
 
-  await Promise.all(manifest.images.map((image) =>
-    c.env.DISPATCHES.delete(`staging/${job.id}/${body.leaseToken}/${image.key}`)
-  ));
+  await deleteR2Prefix(c.env.DISPATCHES, `staging/${job.id}/`);
   return c.json({ status: "published", username: job.username, weekKey: job.week_key, url: `/${job.username}/${job.week_key}`, versionId });
 });
 
@@ -251,6 +263,21 @@ async function updateLeasedJob(db: D1Database, id: string, leaseToken: string, f
        AND status=?`
   ).bind(stage, leaseDurationSeconds, id, leaseToken, fromStage).run();
   return (result.meta.changes ?? 0) === 1;
+}
+
+async function terminalizeSuppressedJob(
+  env: Pick<Env, "DB" | "DISPATCHES">,
+  id: string,
+  leaseToken: string,
+): Promise<boolean> {
+  const result = await env.DB.prepare(
+    `UPDATE generation_jobs SET status='permanent_failed',last_error='profile unavailable',
+       capacity_started_at=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=unixepoch()
+     WHERE id=? AND lease_token=?`
+  ).bind(id, leaseToken).run();
+  if ((result.meta.changes ?? 0) !== 1) return false;
+  await deleteR2Prefix(env.DISPATCHES, `staging/${id}/`);
+  return true;
 }
 
 function leaseSeconds(env: Env): number {
@@ -284,13 +311,4 @@ async function requestJson<T>(c: { req: { json<TValue>(): Promise<TValue> } }): 
   } catch {
     return null;
   }
-}
-
-async function deleteStagingPrefix(bucket: R2Bucket, prefix: string): Promise<void> {
-  let cursor: string | undefined;
-  do {
-    const page = await bucket.list({ prefix, cursor, limit: 1000 });
-    if (page.objects.length > 0) await bucket.delete(page.objects.map((object) => object.key));
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
 }

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { DEFAULT_POLL_SECONDS } from "./backoff";
 
 export type RunnerConfig = {
@@ -17,7 +17,8 @@ export type RunnerConfig = {
 
 const FORBIDDEN_AI_ENV = /(?:API|AUTH|ACCESS|OAUTH)[-_]?(?:KEY|TOKEN|SECRET)|(?:KEY|TOKEN|SECRET)[-_]?(?:API|AUTH|ACCESS|OAUTH)|_API_BASE|_BASE_URL|BEDROCK|VERTEX|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_AI|AZURE_OPENAI_ENDPOINT|OPENAI|ANTHROPIC|CLAUDE|GEMINI|REPLICATE|HUGGINGFACE|HF_TOKEN/i;
 const ALLOWED_RUNNER_CREDENTIALS = new Set(["GITZETTE_RUNNER_SECRET", "GITZETTE_GITHUB_TOKEN"]);
-const CREDENTIAL_SUFFIX = /(?:KEY|TOKEN|SECRET|CREDENTIALS?)$/i;
+const CREDENTIAL_SUFFIX = /(?:^|_)(?:API_)?(?:KEY|TOKEN|SECRET|CREDENTIALS?)$/i;
+const DENY_ALL_CODER_POLICY = /<policy\b(?=[^>]*\bdomain=["']coder["'])(?=[^>]*\brights=["']none["'])(?=[^>]*\bpattern=["']\*["'])[^>]*\/?>/;
 
 function required(env: Record<string, string | undefined>, name: string): string {
   const value = env[name]?.trim();
@@ -50,6 +51,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const imageMagickBin = env.GITZETTE_IMAGEMAGICK_BIN ?? "/usr/bin/convert";
   const imageMagickCompareBin = env.GITZETTE_IMAGEMAGICK_COMPARE_BIN ?? "/usr/bin/compare";
   if (!existsSync(imageMagickBin) || !existsSync(imageMagickCompareBin)) throw new Error("ImageMagick runtime is missing");
+  const imageMagickPolicy = env.GITZETTE_IMAGEMAGICK_POLICY ?? "/etc/ImageMagick-6/policy.xml";
+  const activeImageMagickPolicy = existsSync(imageMagickPolicy)
+    ? readFileSync(imageMagickPolicy, "utf8").replace(/<!--[\s\S]*?-->/g, "")
+    : "";
+  if (!DENY_ALL_CODER_POLICY.test(activeImageMagickPolicy)) {
+    throw new Error("ImageMagick deny-by-default coder policy is missing");
+  }
 
   return {
     controlPlaneOrigin: origin.origin,

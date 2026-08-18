@@ -2,6 +2,7 @@ import type { Env } from "./index";
 import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
 import { expireStaleJobs, LIVE_STATUSES, maxQueueAgeSeconds } from "./queue";
 import { previousCompletedIsoWeekKey } from "./week";
+import { deleteR2Prefix } from "./artifacts";
 
 export const WEEKLY_GENERATION_CRON = "17 13 * * 1";
 
@@ -13,8 +14,16 @@ export type WeeklyScheduleResult = {
 };
 
 export async function enqueueWeeklyProfiles(
-  env: Pick<Env, "DB" | "ADMIN_USER_ID" | "MAX_QUEUE_AGE_SECONDS">,
+  env: Pick<Env, "DB" | "DISPATCHES" | "ADMIN_USER_ID" | "MAX_QUEUE_AGE_SECONDS">,
   scheduledTime: number,
+): Promise<WeeklyScheduleResult> {
+  return enqueueWeeklyProfilesAfterSweep(env, scheduledTime, false);
+}
+
+async function enqueueWeeklyProfilesAfterSweep(
+  env: Pick<Env, "DB" | "DISPATCHES" | "ADMIN_USER_ID" | "MAX_QUEUE_AGE_SECONDS">,
+  scheduledTime: number,
+  staleSweepComplete: boolean,
 ): Promise<WeeklyScheduleResult> {
   if (!env.ADMIN_USER_ID) throw new Error("weekly generation requires ADMIN_USER_ID");
 
@@ -33,7 +42,7 @@ export async function enqueueWeeklyProfiles(
     throw new Error(`weekly generation profiles are missing: ${missing.join(",")}`);
   }
 
-  await expireStaleJobs(env.DB, maxQueueAgeSeconds(env));
+  if (!staleSweepComplete) await expireStaleArtifacts(env);
 
   const weekKey = previousCompletedIsoWeekKey(new Date(scheduledTime));
   const statements = WEEKLY_PROFILE_USERNAMES.map((username) => {
@@ -75,11 +84,16 @@ export async function runWeeklySchedule(
   if (controller.cron !== WEEKLY_GENERATION_CRON) {
     throw new Error(`unexpected generation cron: ${controller.cron}`);
   }
-  await expireStaleJobs(env.DB, maxQueueAgeSeconds(env));
+  await expireStaleArtifacts(env);
   if (env.WEEKLY_GENERATION_ENABLED !== "true") {
     console.log(JSON.stringify({ event: "weekly_generation_disabled" }));
     return;
   }
-  const result = await enqueueWeeklyProfiles(env, controller.scheduledTime);
+  const result = await enqueueWeeklyProfilesAfterSweep(env, controller.scheduledTime, true);
   console.log(JSON.stringify({ event: "weekly_generation_enqueued", ...result }));
+}
+
+async function expireStaleArtifacts(env: Pick<Env, "DB" | "DISPATCHES" | "MAX_QUEUE_AGE_SECONDS">): Promise<void> {
+  const expiredJobIds = await expireStaleJobs(env.DB, maxQueueAgeSeconds(env));
+  await Promise.all(expiredJobIds.map((id) => deleteR2Prefix(env.DISPATCHES, `staging/${id}/`)));
 }

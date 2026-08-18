@@ -44,6 +44,10 @@ jobs:
             echo "reviewed head lacks successful app-bound typecheck" >&2
             exit 1
           fi
+          if ! jq -e 'any(.check_runs[]; .name == "base-controlled samorev publisher" and .conclusion == "success" and .app.id == 15368)' <<<"$check_runs" >/dev/null; then
+            echo "reviewed head lacks successful app-bound samorev publisher" >&2
+            exit 1
+          fi
 
           statuses="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/status")"
           if ! jq -e 'any(.statuses[]; .context == "samorev" and .state == "success" and .creator.login == "samo-agent") and any(.statuses[]; .context == "samorev-gate" and .state == "success")' <<<"$statuses" >/dev/null; then
