@@ -10,6 +10,7 @@ import {
   runWeeklySchedule,
   WEEKLY_GENERATION_CRON,
   WEEKLY_GENERATION_CRONS,
+  WEEKLY_GENERATION_RETRY_CRON,
 } from "./schedule";
 import { AOE_LAG_MS } from "./week";
 
@@ -224,6 +225,47 @@ describe("weekly profile scheduling", () => {
     }
   });
 
+  test("the secondary weekly trigger re-enqueues primary work after the age-out window", async () => {
+    const sqlite = await generationDatabase();
+    try {
+      const db = new SqliteD1(sqlite);
+      const bucket = new StubR2();
+      sqlite.query("INSERT INTO users(id,username) VALUES (?,?)").run("1", "admin");
+      for (const profile of profiles) {
+        sqlite.query("INSERT INTO users(id,username) VALUES (?,?)").run(profile.id, profile.username);
+      }
+      const env = {
+        DB: db,
+        DISPATCHES: bucket,
+        ADMIN_USER_ID: "1",
+        MAX_QUEUE_AGE_SECONDS: "21600",
+        WEEKLY_GENERATION_ENABLED: "true",
+      } as never;
+
+      await runWeeklySchedule(
+        { cron: WEEKLY_GENERATION_CRON, scheduledTime } as ScheduledController,
+        env,
+      );
+      sqlite.query("UPDATE generation_jobs SET created_at=unixepoch()-21601 WHERE status='queued'").run();
+      await runWeeklySchedule(
+        { cron: WEEKLY_GENERATION_RETRY_CRON, scheduledTime: Date.parse("2026-08-17T20:17:00Z") } as ScheduledController,
+        env,
+      );
+
+      expect(sqlite.query(
+        "SELECT status,COUNT(*) AS count FROM generation_jobs GROUP BY status ORDER BY status",
+      ).all()).toEqual([
+        { status: "permanent_failed", count: 9 },
+        { status: "queued", count: 9 },
+      ]);
+      expect(sqlite.query(
+        "SELECT COUNT(*) AS count FROM generation_jobs WHERE schedule_key IS NOT NULL",
+      ).get()).toEqual({ count: 9 });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("treats the configured string false as disabled until the runner is enabled", async () => {
     const db = new StubD1(true, profiles);
     await runWeeklySchedule(
@@ -305,6 +347,12 @@ describe("weekly profile scheduling", () => {
       expect([dayOfMonth, month, dayOfWeek]).toEqual(["*", "*", "1"]);
       expect(Number(hour) * 60 + Number(minute)).toBeGreaterThanOrEqual(AOE_LAG_MS / 60_000);
     }
+    const configuredMaxAge = Number(config.match(/^MAX_QUEUE_AGE_SECONDS\s*=\s*"(\d+)"\s*$/m)?.[1]);
+    const weeklyMinutes = WEEKLY_GENERATION_CRONS.map((cron) => {
+      const [minute, hour] = cron.split(" ").map(Number);
+      return hour * 60 + minute;
+    });
+    expect(weeklyMinutes[1] - weeklyMinutes[0]).toBeGreaterThan(configuredMaxAge / 60);
     expect(JOB_EXPIRY_CRON.split(" ").slice(1)).toEqual(["*", "*", "*", "*"]);
     await expect(runWeeklySchedule({ cron: "* * * * *", scheduledTime } as ScheduledController, {} as never))
       .rejects.toThrow("unexpected generation cron");

@@ -5,8 +5,9 @@ import { previousCompletedIsoWeekKey } from "./week";
 import { deleteR2Prefix } from "./artifacts";
 
 export const JOB_EXPIRY_CRON = "7 * * * *";
-export const WEEKLY_GENERATION_CRONS = ["17 13 * * 1", "17 19 * * 1"] as const;
+export const WEEKLY_GENERATION_CRONS = ["17 13 * * 1", "17 20 * * 1"] as const;
 export const WEEKLY_GENERATION_CRON = WEEKLY_GENERATION_CRONS[0];
+export const WEEKLY_GENERATION_RETRY_CRON = WEEKLY_GENERATION_CRONS[1];
 const weeklyGenerationCrons = new Set<string>(WEEKLY_GENERATION_CRONS);
 
 export type WeeklyScheduleResult = {

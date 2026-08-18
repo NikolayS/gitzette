@@ -114,23 +114,26 @@ issue when it fails. GitHub may disable scheduled workflows after 60 days with
 no repository activity; operators must treat a missing weekly run as a failure
 and use `workflow_dispatch` to restore the cadence.
 
-The separate Cloudflare Cron Trigger runs weekly generation at 13:17 UTC on
-Monday, after the prior week is complete in every time zone. The reviewed
-production configuration keeps `WEEKLY_GENERATION_ENABLED=false`, so trigger
-delivery is inert until the dedicated runner OAuth account is provisioned and
-its canaries pass. Enable it only in a subsequent reviewed deployment. Once
-enabled, it enqueues the nine retained weekly profiles exactly once per
-profile/week, including across terminal-status trigger redelivery. A failed
-profile/week is retried explicitly through the admin generation path instead
-of replaying the cron batch. `/status` exposes the latest scheduled week and
-its rolling-seven-day scheduled-job count. It also lists every weekly slot that
-aged out before provider work began during the last 14 days. A nonzero list is
-an operator alert. These rows carry the distinct terminal failure code
+The Cloudflare scheduled handler dispatches by `controller.cron`: `7 * * * *`
+only expires stale jobs and staging every hour, `17 13 * * 1` performs the
+primary Monday enqueue after the prior week is complete in every time zone, and
+`17 20 * * 1` performs an idempotent retry after the six-hour age-out window.
+The reviewed production configuration keeps `WEEKLY_GENERATION_ENABLED=false`,
+so weekly enqueue is inert until the dedicated runner OAuth account is
+provisioned and its canaries pass; hourly expiry remains active. Enable weekly
+enqueue only in a subsequent reviewed deployment. Once enabled, it enqueues the
+nine retained profiles once per profile/week, with the retry restoring only
+primary-run work that aged out before provider capacity began. `/status`
+exposes the latest scheduled week and its rolling-seven-day scheduled-job count.
+It also lists every weekly slot that aged out before provider work began during
+the last 14 days. A nonzero list is an operator alert. These rows carry the
+distinct terminal failure code
 `scheduled generation aged out before provider start`. Sign in as the immutable
 `ADMIN_USER_ID`, then `POST /generate` with
 `{"forUsername":"<profile>","weekKey":"<week>"}` for every listed slot while
 that ISO week is still eligible. Verify publication before clearing the
-incident; the next Monday cron targets a different week and is not recovery.
+incident; after the Monday retry has run, the next Monday targets a different
+week and is not recovery.
 
 Before changing `WEEKLY_GENERATION_ENABLED` to `true`, run
 `bash scripts/check-weekly-profiles.sh` with production Cloudflare credentials.
