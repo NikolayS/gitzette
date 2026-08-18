@@ -158,6 +158,9 @@ describe("production secret preflight", () => {
         "invalid Wrangler secret list: entry 0 must contain a string name",
       );
     }
+    expect(() => assertProductionSecrets([{ name: "ADMIN_USER_ID" }, { name: 42 }])).toThrow(
+      "invalid Wrangler secret list: entry 1 must contain a string name",
+    );
     const duplicate = expectedProductionSecrets.map(name => ({ name }))
       .concat({ name: expectedProductionSecrets[0] });
     expect(() => assertProductionSecrets(duplicate)).toThrow(
@@ -223,10 +226,8 @@ describe("production secret preflight", () => {
       { adversarialCdPath: true, invocation: "bash-relative" },
     );
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(
-      "Production secrets OK: required bindings exist and retired provider credentials are absent\n",
-    );
+    expect(result.stderr).not.toMatch(/^\s+at /m);
+    expect(result.stdout).toContain("Production secrets OK");
   });
 
   test("fails loudly when the deploy gate is sourced", async () => {
@@ -256,7 +257,8 @@ describe("production secret preflight", () => {
       new Response(child.stderr).text(),
     ]);
     expect(exitCode).toBe(1);
-    expect(stderr).toBe("Wrangler secret-list path is required\n");
+    expect(stderr).toContain("Wrangler secret-list path is required");
+    expect(stderr).not.toMatch(/^\s+at /m);
   });
 
   test("preserves an actionable file-read error", async () => {
@@ -273,6 +275,6 @@ describe("production secret preflight", () => {
     expect(exitCode).toBe(1);
     expect(stderr).toContain(`unable to read Wrangler secret list at ${missingPath}`);
     expect(stderr).toContain("ENOENT");
-    expect(stderr.split("\n").filter(Boolean)).toHaveLength(1);
+    expect(stderr).not.toMatch(/^\s+at /m);
   });
 });

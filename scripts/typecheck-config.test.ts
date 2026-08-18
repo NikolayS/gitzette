@@ -38,9 +38,9 @@ describe("TypeScript project coverage", () => {
     const testCommand = runnerCommand?.split(/\s*&&\s*/)
       .find(command => /^bun\s+test(?:\s|$)/.test(command.trim()));
     expect(testCommand).toBeDefined();
-    expect(testCommand).not.toMatch(/[|<>]/);
     const argumentSource = testCommand?.trim().replace(/^bun\s+test(?:\s+|$)/, "") ?? "";
     expect(argumentSource.length).toBeGreaterThan(0);
+    expect(argumentSource).toMatch(/^[A-Za-z0-9_./*?\[\]{} -]+$/);
     const child = Bun.spawn(["bash", "-c", `printf '%s\\0' ${argumentSource}`], {
       cwd: resolve("."),
       stdout: "pipe",

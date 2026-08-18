@@ -55,9 +55,9 @@ async function main(): Promise<void> {
   assertProductionSecrets(document);
 }
 
-function formatError(error: unknown): string {
+function formatError(error: unknown, depth = 0): string {
   if (!(error instanceof Error)) return String(error).replace(/\s+/g, " ").trim();
-  const cause = error.cause === undefined ? "" : formatError(error.cause);
+  const cause = error.cause === undefined || depth >= 4 ? "" : formatError(error.cause, depth + 1);
   return `${error.message}${cause ? ` (${cause})` : ""}`.replace(/\s+/g, " ").trim();
 }
 

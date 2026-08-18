@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
   echo "check-production-secrets.sh must be executed, not sourced" >&2
-  return 1
+  # exit is the fallback when return is not legal.
+  # shellcheck disable=SC2317
+  return 1 2>/dev/null || exit 1
 fi
 
 set -euo pipefail
