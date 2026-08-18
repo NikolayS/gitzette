@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { Hono } from "hono";
 import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
@@ -37,7 +37,7 @@ class StubStatement {
   async all<T>() {
     if (this.query.startsWith("UPDATE generation_jobs")) {
       this.db.staleSweepCalls += 1;
-      return { results: [] } as unknown as D1Result<T>;
+      return { results: this.db.expiredJobIds.map((id) => ({ id })) } as unknown as D1Result<T>;
     }
     if (!this.query.startsWith("SELECT id,username FROM users")) throw new Error(`unexpected all: ${this.query}`);
     return { results: this.db.profiles } as D1Result<T>;
@@ -52,6 +52,7 @@ class StubD1 {
   constructor(
     readonly adminExists: boolean,
     readonly profiles: Profile[],
+    readonly expiredJobIds: string[] = [],
   ) {}
 
   prepare(query: string) {
@@ -72,7 +73,10 @@ class StubD1 {
 class StubR2 {
   readonly objects = new Set<string>();
 
+  constructor(private readonly failingPrefixes: ReadonlySet<string> = new Set()) {}
+
   async list({ prefix }: { prefix: string }) {
+    if (this.failingPrefixes.has(prefix)) throw new Error(`cleanup unavailable for ${prefix}`);
     return {
       objects: [...this.objects].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
       truncated: false,
@@ -225,7 +229,7 @@ describe("weekly profile scheduling", () => {
     }
   });
 
-  test("the secondary weekly trigger re-enqueues primary work after the age-out window", async () => {
+  test("the secondary weekly trigger self-sweeps and re-enqueues without an hourly invocation", async () => {
     const sqlite = await generationDatabase();
     try {
       const db = new SqliteD1(sqlite);
@@ -284,6 +288,36 @@ describe("weekly profile scheduling", () => {
     );
     expect(db.staleSweepCalls).toBe(1);
     expect(db.batchCalls).toBe(0);
+  });
+
+  test("isolates one cleanup failure while the retry sweeps and enqueues remaining work", async () => {
+    const failedId = "2bb65583-b570-4a55-b4e4-5de336b10664";
+    const cleanedId = "839d37cd-7e82-4a10-8442-100176b96805";
+    const db = new StubD1(true, profiles, [failedId, cleanedId]);
+    const bucket = new StubR2(new Set([`staging/${failedId}/`]));
+    bucket.objects.add(`staging/${cleanedId}/lease/image-1.webp`);
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    let cleanupLog = "";
+    try {
+      await runWeeklySchedule(
+        { cron: WEEKLY_GENERATION_RETRY_CRON, scheduledTime: Date.parse("2026-08-17T20:17:00Z") } as ScheduledController,
+        {
+          DB: db,
+          DISPATCHES: bucket,
+          ADMIN_USER_ID: "2",
+          MAX_QUEUE_AGE_SECONDS: "21600",
+          WEEKLY_GENERATION_ENABLED: "true",
+        } as never,
+      );
+    } finally {
+      cleanupLog = String(error.mock.calls[0]?.[0] ?? "");
+      error.mockRestore();
+    }
+
+    expect(db.staleSweepCalls).toBe(1);
+    expect(db.batchCalls).toBe(1);
+    expect(bucket.objects.size).toBe(0);
+    expect(cleanupLog).toContain(`"jobId":"${failedId}"`);
   });
 
   test("expires manual work and removes staging while weekly enqueue stays disabled", async () => {

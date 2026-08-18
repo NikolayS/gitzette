@@ -95,7 +95,11 @@ is complete everywhere, it schedules that week for the nine retained weekly
 profiles: NikolayS, DHH, dcramer, karpathy, levkk, mitchellh, simonw, steipete,
 and torvalds. At 20:17 UTC (`17 20 * * 1`), more than the six-hour queue age-out
 window later, it repeats the same idempotent enqueue so primary-run work that
-never received provider capacity can be scheduled again. A durable unique key
+never received provider capacity can be scheduled again. Both weekly branches
+run their own stale-job sweep before enqueue, so retry correctness does not
+depend on the hourly trigger arriving on time. Cleanup failures are logged per
+job and cannot prevent other expired jobs or the weekly retry from progressing.
+A durable unique key
 per profile/week makes successful trigger redelivery a no-op and prevents an
 already-finished edition from being regenerated. Weekly enqueue fails without
 writing if the immutable admin principal or a retained profile is missing.

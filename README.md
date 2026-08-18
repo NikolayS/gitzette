@@ -118,6 +118,9 @@ The Cloudflare scheduled handler dispatches by `controller.cron`: `7 * * * *`
 only expires stale jobs and staging every hour, `17 13 * * 1` performs the
 primary Monday enqueue after the prior week is complete in every time zone, and
 `17 20 * * 1` performs an idempotent retry after the six-hour age-out window.
+Both weekly branches perform their own stale-job sweep before enqueue; they do
+not depend on the hourly trigger arriving on time. A staging cleanup failure is
+logged per job and cannot poison the rest of the sweep or the weekly retry.
 The reviewed production configuration keeps `WEEKLY_GENERATION_ENABLED=false`,
 so weekly enqueue is inert until the dedicated runner OAuth account is
 provisioned and its canaries pass; hourly expiry remains active. Enable weekly

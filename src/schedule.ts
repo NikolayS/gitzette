@@ -106,5 +106,15 @@ export async function runWeeklySchedule(
 
 async function expireStaleArtifacts(env: Pick<Env, "DB" | "DISPATCHES" | "MAX_QUEUE_AGE_SECONDS">): Promise<void> {
   const expiredJobIds = await expireStaleJobs(env.DB, maxQueueAgeSeconds(env));
-  await Promise.all(expiredJobIds.map((id) => deleteR2Prefix(env.DISPATCHES, `staging/${id}/`)));
+  for (const id of expiredJobIds) {
+    try {
+      await deleteR2Prefix(env.DISPATCHES, `staging/${id}/`);
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "stale_artifact_cleanup_failed",
+        jobId: id,
+        error: error instanceof Error ? error.message.slice(0, 500) : "unknown cleanup error",
+      }));
+    }
+  }
 }

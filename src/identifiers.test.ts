@@ -24,6 +24,7 @@ describe("external identifiers", () => {
     expect(isUuid("00000000-0000-1000-8000-000000000000")).toBe(false);
     expect(isUuid("00000000-0000-9000-8000-000000000000")).toBe(false);
     expect(isUuid("00000000-0000-4000-7000-000000000000")).toBe(false);
+    expect(isUuid("2BB65583-B570-4A55-B4E4-5DE336B10664")).toBe(false);
     expect(isUuid("")).toBe(false);
   });
 });
