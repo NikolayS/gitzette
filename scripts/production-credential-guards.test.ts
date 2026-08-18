@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = new URL("../", import.meta.url).pathname.replace(/\/$/, "");
+const repoRoot = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 describe("production migration credential guards", () => {
   test("fails explicitly before Wrangler when the applied-schema token is absent", async () => {
