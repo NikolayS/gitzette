@@ -10,7 +10,7 @@ describe("control-plane client", () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const request = async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), init });
-      return Response.json({ job: { id, username: "octocat", weekKey: "2026-W32", leaseToken: lease, leaseExpiresAt: 1_800_000_000, attempt: 1 } });
+      return Response.json({ job: { id, username: "OctoCat", weekKey: "2026-W32", leaseToken: lease, leaseExpiresAt: 1_800_000_000, attempt: 1 } });
     };
     const client = new ControlPlaneClient("https://gitzette.online", "secret", request as unknown as typeof fetch);
     expect((await client.claim())?.username).toBe("octocat");

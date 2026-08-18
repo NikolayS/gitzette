@@ -6,5 +6,9 @@ export function isUuid(value: string): boolean {
 }
 
 export function isGitHubUsername(value: string): boolean {
-  return GITHUB_USERNAME.test(value);
+  return normalizeGitHubUsername(value) !== null;
+}
+
+export function normalizeGitHubUsername(value: string): string | null {
+  return GITHUB_USERNAME.test(value) ? value.toLowerCase() : null;
 }

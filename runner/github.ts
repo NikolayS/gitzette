@@ -1,5 +1,5 @@
 import type { EvidenceBundle, EvidenceItem } from "../src/edition";
-import { isGitHubUsername } from "../src/identifiers";
+import { normalizeGitHubUsername } from "../src/identifiers";
 import type { Collector } from "./types";
 import { parseIsoWeekKey } from "../src/week";
 
@@ -18,15 +18,16 @@ export class GitHubCollector implements Collector {
   constructor(private readonly token: string, private readonly request: RequestFn = fetch) {}
 
   async collect(username: string, weekKey: string): Promise<EvidenceBundle> {
-    if (!isGitHubUsername(username)) throw new Error("invalid GitHub username");
+    const canonicalUsername = normalizeGitHubUsername(username);
+    if (!canonicalUsername) throw new Error("invalid GitHub username");
     const { from, toInclusive } = isoWeek(weekKey);
-    const repositories = await this.contributionRepositories(username, from, toInclusive);
+    const repositories = await this.contributionRepositories(canonicalUsername, from, toInclusive);
     const [commits, mergedPrs, createdPrs, issues, discussions, releases] = await Promise.all([
-      this.search("commits", `author:${username} committer-date:${from}..${toInclusive}`),
-      this.search("issues", `author:${username} is:pr is:merged merged:${from}..${toInclusive}`),
-      this.search("issues", `author:${username} is:pr created:${from}..${toInclusive}`),
-      this.search("issues", `author:${username} is:issue created:${from}..${toInclusive}`),
-      this.discussions(username, from, toInclusive),
+      this.search("commits", `author:${canonicalUsername} committer-date:${from}..${toInclusive}`),
+      this.search("issues", `author:${canonicalUsername} is:pr is:merged merged:${from}..${toInclusive}`),
+      this.search("issues", `author:${canonicalUsername} is:pr created:${from}..${toInclusive}`),
+      this.search("issues", `author:${canonicalUsername} is:issue created:${from}..${toInclusive}`),
+      this.discussions(canonicalUsername, from, toInclusive),
       mapConcurrent(repositories, 5, (repo) => this.releases(repo, from, toInclusive)),
     ]);
 
@@ -47,7 +48,7 @@ export class GitHubCollector implements Collector {
     }
 
     const evidence = [...items.values()].slice(0, 500);
-    return { state: evidence.length > 0 ? "active" : "quiet", username, weekKey, items: evidence };
+    return { state: evidence.length > 0 ? "active" : "quiet", username: canonicalUsername, weekKey, items: evidence };
   }
 
   private async contributionRepositories(username: string, from: string, to: string): Promise<string[]> {

@@ -235,10 +235,11 @@ describe("weekly profile scheduling", () => {
       const bucket = new StubR2();
       sqlite.query("INSERT INTO users(id,username) VALUES ('1','admin')").run();
       sqlite.query("INSERT INTO sessions(token,user_id,expires_at) VALUES ('disabled-weekly','1',unixepoch()+3600)").run();
+      const staleJobId = "2bb65583-b570-4a55-b4e4-5de336b10664";
       sqlite.query(
         "INSERT INTO generation_jobs(id,user_id,requested_by,week_key,status,created_at) VALUES (?,?,?,?,?,unixepoch()-2)",
-      ).run("stale-manual", "1", "1", "2026-W33", "queued");
-      bucket.objects.add("staging/stale-manual/lease/image-1.webp");
+      ).run(staleJobId, "1", "1", "2026-W33", "queued");
+      bucket.objects.add(`staging/${staleJobId}/lease/image-1.webp`);
 
       const env = {
         DB: db,
@@ -253,7 +254,7 @@ describe("weekly profile scheduling", () => {
         env,
       );
 
-      expect(sqlite.query("SELECT status,last_error FROM generation_jobs WHERE id='stale-manual'").get())
+      expect(sqlite.query("SELECT status,last_error FROM generation_jobs WHERE id=?").get(staleJobId))
         .toEqual({ status: "permanent_failed", last_error: "generation runner unavailable; please retry" });
       expect(bucket.objects.size).toBe(0);
 

@@ -1,7 +1,7 @@
 import type { ClaimedJob, Publisher, RunnerStage } from "./types";
 import type { PublicationManifest } from "../src/edition";
 import type { JobUsage } from "../src/usage";
-import { isGitHubUsername, isUuid } from "../src/identifiers";
+import { normalizeGitHubUsername, isUuid } from "../src/identifiers";
 import { isCompletedIsoWeekKey } from "../src/week";
 
 
@@ -86,11 +86,12 @@ function parseClaim(value: Record<string, unknown>): ClaimedJob {
     attempt: value.attempt,
   };
   if (typeof job.id !== "string" || !isUuid(job.id)) throw new Error("invalid job id");
-  if (typeof job.username !== "string" || !isGitHubUsername(job.username)) throw new Error("invalid job username");
+  const username = typeof job.username === "string" ? normalizeGitHubUsername(job.username) : null;
+  if (!username) throw new Error("invalid job username");
   if (typeof job.weekKey !== "string" || !isCompletedIsoWeekKey(job.weekKey)) throw new Error("invalid job week");
   if (typeof job.leaseToken !== "string" || !isUuid(job.leaseToken)) throw new Error("invalid lease token");
   if (!Number.isInteger(job.leaseExpiresAt) || !Number.isInteger(job.attempt)) throw new Error("invalid job lease metadata");
-  return job as ClaimedJob;
+  return { ...job, username } as ClaimedJob;
 }
 
 async function readJson(response: Response): Promise<unknown> {

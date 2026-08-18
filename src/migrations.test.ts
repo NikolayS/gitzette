@@ -13,11 +13,28 @@ describe("weekly generation data migration", () => {
 
       db.exec(await Bun.file("migrations/0002_weekly_generation_schedule.sql").text());
       db.exec(await Bun.file("migrations/0003_remove_legacy_generating_dispatch.sql").text());
+      db.exec(await Bun.file("migrations/0004_normalize_github_usernames.sql").text());
 
       expect(db.query("SELECT week_key,r2_key FROM dispatches ORDER BY week_key").all())
         .toEqual([{ week_key: "2026-W30", r2_key: "editions/octocat/2026-W30/live.html" }]);
       expect(db.query("SELECT COUNT(*) AS count FROM dispatches WHERE week_key='generating'").get())
         .toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("normalizes existing GitHub identity keys without changing user ids", async () => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(await Bun.file("migrations/0000_base.sql").text());
+      db.query("INSERT INTO users(id,username) VALUES ('1','Alice')").run();
+      db.query("INSERT INTO article_feedback(username,week_key,headline,body,rating) VALUES ('Alice','2026-W32','h','b',1)").run();
+
+      db.exec(await Bun.file("migrations/0004_normalize_github_usernames.sql").text());
+
+      expect(db.query("SELECT id,username FROM users").get()).toEqual({ id: "1", username: "alice" });
+      expect(db.query("SELECT username FROM article_feedback").get()).toEqual({ username: "alice" });
     } finally {
       db.close();
     }

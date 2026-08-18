@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { getUser } from "./auth";
 import type { Env } from "./index";
-import { isGitHubUsername } from "./identifiers";
+import { normalizeGitHubUsername } from "./identifiers";
 import { isManagedProfileSuppressed } from "./highlighted";
 import { deleteR2Prefix } from "./artifacts";
 import { isCompletedIsoWeekKey, isGeneratableCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
@@ -81,11 +81,14 @@ queueRoutes.post("/generate", async (c) => {
   let target = requester;
   if (body.forUsername !== undefined) {
     if (!isAdmin(requester.id, c.env.ADMIN_USER_ID)) return c.json({ error: "forbidden" }, 403);
-    if (typeof body.forUsername !== "string" || !isGitHubUsername(body.forUsername)) {
+    const forUsername = typeof body.forUsername === "string"
+      ? normalizeGitHubUsername(body.forUsername)
+      : null;
+    if (!forUsername) {
       return c.json({ error: "invalid forUsername" }, 400);
     }
-    const existing = await c.env.DB.prepare("SELECT id, username, avatar_url FROM users WHERE username = ? COLLATE NOCASE")
-      .bind(body.forUsername).first<typeof requester>();
+    const existing = await c.env.DB.prepare("SELECT id, username, avatar_url FROM users WHERE username = ?")
+      .bind(forUsername).first<typeof requester>();
     if (!existing) return c.json({ error: "target user must exist before enqueue" }, 404);
     target = existing;
   }

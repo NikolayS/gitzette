@@ -28,9 +28,10 @@ describe("canonical GitHub collector", () => {
       if (url.includes("/search/commits")) return Response.json({ incomplete_results: false, items: [{ sha: "abc", html_url: "https://github.com/octocat/widget/commit/abc", commit: { message: "Fix parser\nbody" }, repository: { full_name: "octocat/widget" } }] });
       return Response.json({ incomplete_results: false, items: [] });
     };
-    const evidence = await new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32");
+    const evidence = await new GitHubCollector("token", request as typeof fetch).collect("OctoCat", "2026-W32");
     expect(urls.every((url) => new URL(url).hostname === "api.github.com")).toBe(true);
     expect(evidence.state).toBe("active");
+    expect(evidence.username).toBe("octocat");
     expect(evidence.items.map((item) => item.id)).toEqual(["commit:abc", "repository:octocat/widget"]);
   });
 

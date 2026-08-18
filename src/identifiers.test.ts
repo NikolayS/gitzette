@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { isGitHubUsername, isUuid } from "./identifiers";
+import { isGitHubUsername, isUuid, normalizeGitHubUsername } from "./identifiers";
 
 describe("external identifiers", () => {
   test("accepts valid GitHub usernames at the length boundary", () => {
     expect(isGitHubUsername("octocat")).toBe(true);
     expect(isGitHubUsername("a".repeat(39))).toBe(true);
+  });
+
+  test("canonicalizes valid GitHub usernames to one lowercase identity", () => {
+    expect(normalizeGitHubUsername("Alice")).toBe("alice");
+    expect(normalizeGitHubUsername("alice")).toBe("alice");
+    expect(normalizeGitHubUsername("bad_name")).toBeNull();
   });
 
   test("rejects invalid GitHub hyphen placement and length", () => {

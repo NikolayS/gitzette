@@ -1,7 +1,12 @@
+import { isUuid } from "./identifiers";
+
 const MAX_DELETE_ROUNDS = 20;
 
 export async function deleteR2Prefix(bucket: R2Bucket, prefix: string): Promise<void> {
-  if (!prefix || !prefix.endsWith("/")) throw new Error("R2 cleanup prefix must be nonempty and delimiter-terminated");
+  const match = /^staging\/([^/]+)\/(?:([^/]+)\/)?$/.exec(prefix);
+  if (!match || !isUuid(match[1]) || (match[2] !== undefined && !isUuid(match[2]))) {
+    throw new Error("R2 cleanup prefix must identify one staging job or lease");
+  }
   let previousPage = "";
   for (let round = 0; round < MAX_DELETE_ROUNDS; round += 1) {
     const page = await bucket.list({ prefix, limit: 1000 });

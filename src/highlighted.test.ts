@@ -18,6 +18,15 @@ describe("managed profile publication policy", () => {
     expect(isManagedProfileSuppressed("ordinary-user")).toBe(false);
   });
 
+  test("keeps an explicit tombstone suppressed after removal from both registries", () => {
+    expect(isProfileSuppressedByPolicy(
+      "retired-user",
+      new Set(),
+      new Set(),
+      new Set(["retired-user"]),
+    )).toBe(true);
+  });
+
   test("hides removed profile routes and blocks enqueue", async () => {
     const pages = new Hono().route("/", pageRoutes as never);
     const pageEnv = {

@@ -1,9 +1,6 @@
-// Keep every profile ever selected for automatic publication in this registry.
-// Removing a profile from WEEKLY_PROFILE_USERNAMES while retaining it here
-// suppresses its existing public routes as well as future automatic work.
 export const MANAGED_PROFILE_USERNAMES = [
-  "NikolayS",
-  "DHH",
+  "nikolays",
+  "dhh",
   "dcramer",
   "karpathy",
   "levkk",
@@ -11,12 +8,11 @@ export const MANAGED_PROFILE_USERNAMES = [
   "simonw",
   "steipete",
   "torvalds",
-  "gitzette-opt-out-test",
 ] as const;
 
 export const WEEKLY_PROFILE_USERNAMES = [
-  "NikolayS",
-  "DHH",
+  "nikolays",
+  "dhh",
   "dcramer",
   "karpathy",
   "levkk",
@@ -24,6 +20,12 @@ export const WEEKLY_PROFILE_USERNAMES = [
   "simonw",
   "steipete",
   "torvalds",
+] as const;
+
+// Tombstones are independent of the active and managed registries. Removing a
+// retired profile from either registry must never restore its public routes.
+export const SUPPRESSED_PROFILE_USERNAMES = [
+  "gitzette-opt-out-test",
 ] as const;
 
 const HOME_PROFILE_CANDIDATES = [
@@ -38,21 +40,23 @@ const HOME_PROFILE_CANDIDATES = [
 
 const managedProfiles = normalizedSet(MANAGED_PROFILE_USERNAMES);
 const weeklyProfiles = normalizedSet(WEEKLY_PROFILE_USERNAMES);
+const suppressedProfiles = normalizedSet(SUPPRESSED_PROFILE_USERNAMES);
 
 export const HOME_PROFILE_USERNAMES = HOME_PROFILE_CANDIDATES
   .filter((username) => weeklyProfiles.has(username.toLowerCase()));
 
 export function isManagedProfileSuppressed(username: string): boolean {
-  return isProfileSuppressedByPolicy(username, managedProfiles, weeklyProfiles);
+  return isProfileSuppressedByPolicy(username, managedProfiles, weeklyProfiles, suppressedProfiles);
 }
 
 export function isProfileSuppressedByPolicy(
   username: string,
   managed: ReadonlySet<string>,
   active: ReadonlySet<string>,
+  suppressed: ReadonlySet<string> = new Set(),
 ): boolean {
   const normalized = username.toLowerCase();
-  return managed.has(normalized) && !active.has(normalized);
+  return suppressed.has(normalized) || (managed.has(normalized) && !active.has(normalized));
 }
 
 function normalizedSet(usernames: readonly string[]): Set<string> {

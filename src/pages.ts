@@ -3,6 +3,7 @@ import { getUser } from "./auth";
 import { bearerToken, secretMatches } from "./credentials";
 import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
 import { HOME_PROFILE_USERNAMES, isManagedProfileSuppressed } from "./highlighted";
+import { normalizeGitHubUsername } from "./identifiers";
 import type { Env } from "./index";
 import { SCHEDULED_AGE_OUT_ERROR } from "./queue";
 
@@ -524,10 +525,11 @@ pageRoutes.get("/status", async (c) => {
 
 // public profile page — lists all dispatches (or latest if only one)
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
-  const { username } = c.req.param();
+  const username = normalizeGitHubUsername(c.req.param("username"));
+  if (!username) return c.text("not found", 404);
   if (isManagedProfileSuppressed(username)) return c.text("not found", 404);
   const viewer = await getUser(c);
-  const isOwner = viewer?.username === username;
+  const isOwner = viewer ? normalizeGitHubUsername(viewer.username) === username : false;
 
   // Check if user exists + fetch avatar
   const userRow = await c.env.DB.prepare(
@@ -573,10 +575,12 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
 
 // specific week: /username/2026-W13
 pageRoutes.get("/:username{[a-zA-Z0-9_-]+}/:week_key{\\d{4}-W\\d{1,2}}", async (c) => {
-  const { username, week_key } = c.req.param();
+  const { week_key } = c.req.param();
+  const username = normalizeGitHubUsername(c.req.param("username"));
+  if (!username) return c.text("not found", 404);
   if (isManagedProfileSuppressed(username)) return c.text("not found", 404);
   const viewer = await getUser(c);
-  const isOwner = viewer?.username === username;
+  const isOwner = viewer ? normalizeGitHubUsername(viewer.username) === username : false;
 
   const dispatchMeta = await c.env.DB.prepare(
     `SELECT d.r2_key, d.generated_at

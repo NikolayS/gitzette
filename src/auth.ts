@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "./index";
+import { normalizeGitHubUsername } from "./identifiers";
 
 export const authRoutes = new Hono<{ Bindings: Env }>();
 
@@ -47,7 +48,10 @@ authRoutes.get("/callback", async (c) => {
       "User-Agent": "gitzette.online",
     },
   });
+  if (!userRes.ok) return c.text("GitHub user lookup failed", 502);
   const ghUser = await userRes.json() as { id: number; login: string; avatar_url: string };
+  const username = typeof ghUser.login === "string" ? normalizeGitHubUsername(ghUser.login) : null;
+  if (!Number.isInteger(ghUser.id) || !username) return c.text("GitHub user profile invalid", 502);
 
   const userId = String(ghUser.id);
 
@@ -55,7 +59,7 @@ authRoutes.get("/callback", async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO users (id, username, avatar_url) VALUES (?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET username=excluded.username, avatar_url=excluded.avatar_url`
-  ).bind(userId, ghUser.login, ghUser.avatar_url).run();
+  ).bind(userId, username, ghUser.avatar_url).run();
 
   // create session (7 days)
   const token = crypto.randomUUID();
@@ -69,7 +73,7 @@ authRoutes.get("/callback", async (c) => {
     maxAge: 7 * 86400, path: "/", sameSite: "Lax",
   });
 
-  return c.redirect(`/${ghUser.login}`);
+  return c.redirect(`/${username}`);
 });
 
 // sign out

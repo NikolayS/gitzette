@@ -60,10 +60,14 @@ describe("dispatch social metadata", () => {
 
 describe("legacy dispatch reads", () => {
   test("serves a valid pre-2026 ISO week without applying generation admission", async () => {
+    const boundUsernames: string[] = [];
     const db = {
       prepare(query: string) {
         return {
-          bind() { return this; },
+          bind(...args: unknown[]) {
+            if (query.includes("u.username = ?")) boundUsernames.push(String(args[0]));
+            return this;
+          },
           async first() {
             if (query.includes("SELECT d.r2_key, d.generated_at")) {
               return { r2_key: "editions/octocat/2025-W52/legacy.html", generated_at: 1 };
@@ -86,9 +90,12 @@ describe("legacy dispatch reads", () => {
     };
     const app = new Hono().route("/", pageRoutes as never);
 
-    const response = await app.request("/octocat/2025-W52", {}, { DB: db, DISPATCHES: dispatches } as never);
+    const response = await app.request("/OctoCat/2025-W52", {}, { DB: db, DISPATCHES: dispatches } as never);
+    const canonical = await app.request("/octocat/2025-W52", {}, { DB: db, DISPATCHES: dispatches } as never);
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Legacy week remains readable");
+    expect(canonical.status).toBe(200);
+    expect(await response.text()).toBe(await canonical.text());
+    expect(boundUsernames).toEqual(["octocat", "octocat", "octocat", "octocat", "octocat", "octocat"]);
   });
 });
