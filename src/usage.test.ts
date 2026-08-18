@@ -20,6 +20,7 @@ describe("generation usage telemetry", () => {
     expect(() => validateJobUsage({ ...valid, imageCount: 4 })).toThrow("invalid job usage");
     expect(() => validateJobUsage({ ...valid, wallTimeMs: -1 })).toThrow("invalid job usage");
     expect(() => validateJobUsage({ ...valid, tokenSource: "none" })).toThrow("requires zero tokens");
+    expect(() => validateJobUsage({ ...valid, tokenSource: ["provider"] })).toThrow("invalid job usage");
     expect(() => validateJobUsage({ ...valid, usd: 1 })).toThrow("unknown job usage field");
   });
 });

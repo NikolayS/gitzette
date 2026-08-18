@@ -263,7 +263,8 @@ async function fetchAndServeDispatch(
   // Fix unclosed <a class="headline-link"> tags in legacy dispatch HTML (#49)
   const processedHtml = fixUnclosedHeadlineLinks(html);
 
-  if (processedHtml.startsWith("<!DOCTYPE") || processedHtml.startsWith("<html")) {
+  const documentStart = processedHtml.trimStart().toLowerCase();
+  if (documentStart.startsWith("<!doctype") || documentStart.startsWith("<html")) {
     const breadcrumb = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow:hidden;">
           <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:22px;color:#f7f4ee;text-decoration:none;line-height:1;border:none;">gitzette</a>
           <span style="color:#555;font-family:'IBM Plex Mono',monospace;font-size:13px;">/</span>
@@ -293,12 +294,14 @@ async function fetchAndServeDispatch(
           }
           clearTimeout(_regenTimer);_regenPending=false;
           btn.disabled=true; btn.textContent='generating...';
-          await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:'${week_key}'})});
+          const res=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:'${week_key}'})});
+          const data=await res.json();
+          if(!res.ok||data.error){btn.textContent=data.message||data.error||'generation failed';setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000);return;}
           let n=0;
           const iv=setInterval(async()=>{
             n++; btn.textContent='generating... ('+(n*5)+'s)';
-            const s=await fetch('/generate/status').then(r=>r.json());
-            if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(iv);location.reload();}
+            const s=await fetch('/generate/status?weekKey=${week_key}').then(r=>r.json());
+            if(s.status==='ready'&&s.week_key==='${week_key}'){clearInterval(iv);location.reload();}
             if(n>60){clearInterval(iv);btn.textContent='reload manually';}
           },5000);
         }
@@ -841,8 +844,8 @@ ${headTags()}
     let n=0;
     const poll=setInterval(async()=>{
       n++;
-      const s=await fetch('/generate/status').then(r=>r.json());
-      if(s.status==='ready'&&s.week_key!=='generating'){clearInterval(poll);location.reload();}
+      const s=await fetch('/generate/status?weekKey=${dispatch.week_key}').then(r=>r.json());
+      if(s.status==='ready'&&s.week_key==='${dispatch.week_key}'){clearInterval(poll);location.reload();}
       else if(n>60){clearInterval(poll);btn.textContent='reload manually';}
       else btn.textContent='generating... ('+(n*5)+'s)';
     },5000);
@@ -874,8 +877,9 @@ ${headTags()}
     async function startGen(){
       const btn=document.getElementById('genbtn');
       const msg=document.getElementById('gen-msg');
+      const requestedWeek=${week_key ? `'${week_key}'` : "null"};
       btn.disabled=true; btn.textContent='checking...';
-      const res=await fetch('/generate',{method:'POST'});
+      const res=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:requestedWeek?JSON.stringify({weekKey:requestedWeek}):'{}'});
       const data=await res.json();
       if(data.error==='no_activity'){
         btn.style.display='none';
@@ -894,7 +898,8 @@ ${headTags()}
       const iv=setInterval(async()=>{
         n++;
         btn.textContent='generating... ('+n*5+'s)';
-        const s=await fetch('/generate/status').then(r=>r.json());
+        const statusUrl=requestedWeek?'/generate/status?weekKey='+encodeURIComponent(requestedWeek):'/generate/status';
+        const s=await fetch(statusUrl).then(r=>r.json());
         if(s.status==='ready'){clearInterval(iv);location.reload();}
         if(s.status==='failed'){clearInterval(iv);btn.disabled=false;btn.textContent='try again';msg.textContent='Something went wrong on our end. Try again.';msg.style.display='block';}
         if(n>24){clearInterval(iv);btn.textContent='reload manually';}

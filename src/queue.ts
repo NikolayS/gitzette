@@ -127,10 +127,18 @@ queueRoutes.get("/generate/jobs/:id", async (c) => {
 queueRoutes.get("/generate/status", async (c) => {
   const requester = await getUser(c);
   if (!requester) return c.json({ error: "not authenticated" }, 401);
-  const row = await c.env.DB.prepare(
+  const weekKey = c.req.query("weekKey");
+  if (weekKey !== undefined && !isCompletedIsoWeekKey(weekKey)) {
+    return c.json({ error: "invalid or incomplete weekKey" }, 400);
+  }
+  const statement = c.env.DB.prepare(
     `SELECT j.*, u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id
-     WHERE j.user_id=? ORDER BY j.created_at DESC, j.rowid DESC LIMIT 1`
-  ).bind(requester.id).first<JobRow>();
+     WHERE j.user_id=?${weekKey === undefined ? "" : " AND j.week_key=?"}
+     ORDER BY j.created_at DESC, j.rowid DESC LIMIT 1`
+  );
+  const row = weekKey === undefined
+    ? await statement.bind(requester.id).first<JobRow>()
+    : await statement.bind(requester.id, weekKey).first<JobRow>();
   if (!row) return c.json({ status: "none" });
   const effectiveRow = stalePublicRow(row, maxQueueAgeSeconds(c.env));
   const job = publicJob(effectiveRow);

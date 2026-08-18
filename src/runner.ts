@@ -3,6 +3,7 @@ import { renderEdition, validateManifest, type PublicationManifest } from "./edi
 import { hasPublicationDimensions, webpDimensions } from "./image";
 import { bearerToken, secretMatches } from "./credentials";
 import type { Env } from "./index";
+import { maxQueueAgeSeconds } from "./queue";
 import { validateJobUsage, type JobUsage } from "./usage";
 
 const DEFAULT_LEASE_SECONDS = 10 * 60;
@@ -26,6 +27,7 @@ WHERE id=(
     status IN ('queued','retryable_failed') OR
     (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < ?)
   )
+  AND created_at >= ?
   AND (
     capacity_started_at IS NOT NULL OR (
       SELECT COUNT(*) FROM generation_jobs
@@ -68,7 +70,17 @@ runnerRoutes.post("/jobs/claim", async (c) => {
      WHERE attempt>=? AND status IN ('collecting','writing','illustrating','validating') AND lease_expires_at<?`
   ).bind(now, MAX_ATTEMPTS, now).run();
   const row = await c.env.DB.prepare(CLAIM_JOB_SQL)
-    .bind(now, leaseToken, leaseExpires, now, MAX_ATTEMPTS, now, now - ROLLING_CAPACITY_SECONDS, globalLimit)
+    .bind(
+      now,
+      leaseToken,
+      leaseExpires,
+      now,
+      MAX_ATTEMPTS,
+      now,
+      now - maxQueueAgeSeconds(c.env),
+      now - ROLLING_CAPACITY_SECONDS,
+      globalLimit,
+    )
     .first<Omit<ClaimedJob, "username">>();
   if (!row) return c.body(null, 204);
   await deleteStagingPrefix(c.env.DISPATCHES, `staging/${row.id}/`);

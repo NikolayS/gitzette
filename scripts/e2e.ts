@@ -177,6 +177,11 @@ expect(html).toContain("The final byte gets read");
 expect(html).toContain("&lt;script&gt;hostile repository text&lt;/script&gt;");
 expect(html).not.toContain("<script>hostile repository text</script>");
 expect((html.match(/<img /g) || []).length).toBe(2);
+expect(html).toContain('property="og:title"');
+expect((html.match(/<html/gi) || []).length).toBe(1);
+const ownerHtml = await (await fetch(`${base}/octocat/2026-W32`, { headers: { cookie: "session=e2e-session" } })).text();
+expect(ownerHtml).toContain("/generate/status?weekKey=2026-W32");
+expect(ownerHtml).toContain("if(!res.ok||data.error)");
 expect((await json(`/generate/jobs/${jobId}`, { headers: sessionHeaders })).body.job.status).toBe("published");
 const browserStatus = await json("/generate/status", { headers: sessionHeaders });
 expect(browserStatus.body.status).toBe("ready");
@@ -206,6 +211,10 @@ const quietHtml = await (await fetch(`${base}/octocat/2026-W31`)).text();
 expect(quietHtml).toContain("A Quiet Week for @octocat");
 expect(quietHtml).not.toContain("This model copy must be discarded");
 expect(quietHtml).not.toContain("<img ");
+const weekStatus = await json("/generate/status?weekKey=2026-W32", { headers: sessionHeaders });
+expect(weekStatus.body.status).toBe("ready");
+expect(weekStatus.body.week_key).toBe("2026-W32");
+expect((await json("/generate/status?weekKey=banana", { headers: sessionHeaders })).response.status).toBe(400);
 
 // The real runner engine processes an active edition through ImageMagick,
 // uploads both artifacts, and publishes through the local Worker/D1/R2 stack.
@@ -285,12 +294,13 @@ expect((await json(`/generate/jobs/${regenId}`, { headers: sessionHeaders })).bo
 // changing browser polling from an endless spinner to a retryable failure.
 const stale = await json("/generate", { method: "POST", headers: sessionHeaders, body: JSON.stringify({ weekKey: "2026-W30" }) });
 expect(stale.response.status).toBe(202);
-await Bun.sleep(3_000);
+await Bun.sleep(21_000);
 const staleStatus = await json("/generate/status", { headers: sessionHeaders });
 expect(staleStatus.body.job.id).toBe(stale.body.job.id);
 expect(staleStatus.body.status).toBe("failed");
 expect(staleStatus.body.stage).toBe("permanent_failed");
 expect((await json(`/generate/jobs/${stale.body.job.id}`, { headers: sessionHeaders })).body.job.status).toBe("permanent_failed");
+expect((await json("/runner/jobs/claim", { method: "POST", headers: runnerHeaders })).response.status).toBe(204);
 
 // The enforced INSERT admits exactly N user requests and rejects N+1.
 const intruderHeaders = { cookie: "session=intruder-session", "content-type": "application/json" };

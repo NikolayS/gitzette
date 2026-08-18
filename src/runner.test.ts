@@ -14,6 +14,7 @@ type StubJob = {
   status: string;
   attempt: number;
   capacity_started_at: number | null;
+  created_at: number;
   lease_token: string | null;
   lease_expires_at: number | null;
 };
@@ -47,12 +48,13 @@ class StubStatement {
 
   async first<T>() {
     if (this.query.startsWith("UPDATE generation_jobs") && this.query.includes("RETURNING id,user_id")) {
-      const [capacityStartedAt, leaseToken, leaseExpiresAt, _updatedAt, maxAttempts, expiredAt, capacityWindowStart, globalLimit] = this.args as [number, string, number, number, number, number, number, number];
+      const [capacityStartedAt, leaseToken, leaseExpiresAt, _updatedAt, maxAttempts, expiredAt, queueCutoff, capacityWindowStart, globalLimit] = this.args as [number, string, number, number, number, number, number, number, number];
       const job = this.db.job;
       const reclaimable = ["queued", "retryable_failed"].includes(job.status)
         || (["collecting", "writing", "illustrating", "validating"].includes(job.status) && (job.lease_expires_at ?? 0) < expiredAt);
       const startedCount = job.capacity_started_at !== null && job.capacity_started_at >= capacityWindowStart ? 1 : 0;
-      if (job.attempt >= maxAttempts || !reclaimable || (job.capacity_started_at === null && startedCount >= globalLimit)) return null;
+      if (job.attempt >= maxAttempts || !reclaimable || job.created_at < queueCutoff
+        || (job.capacity_started_at === null && startedCount >= globalLimit)) return null;
       job.status = "collecting";
       job.attempt += 1;
       job.capacity_started_at ??= capacityStartedAt;
@@ -136,10 +138,13 @@ describe("runner route boundary", () => {
         .run("candidate", "2", "2", "2026-W31", "queued");
 
       const claim = db.query(CLAIM_JOB_SQL);
-      expect(claim.get(now, "lease-1", now + 600, now, 5, now, now - 604_800, 1)).toBeNull();
+      expect(claim.get(now, "lease-1", now + 600, now, 5, now, now - 21_600, now - 604_800, 1)).toBeNull();
 
-      db.query("UPDATE generation_jobs SET capacity_started_at=? WHERE id='candidate'").run(now - 10);
-      const reclaimed = claim.get(now, "lease-2", now + 600, now, 5, now, now - 604_800, 1) as { id: string; attempt: number };
+      db.query("UPDATE generation_jobs SET capacity_started_at=?,created_at=? WHERE id='candidate'").run(now - 10, now - 21_601);
+      expect(claim.get(now, "lease-2", now + 600, now, 5, now, now - 21_600, now - 604_800, 1)).toBeNull();
+
+      db.query("UPDATE generation_jobs SET created_at=? WHERE id='candidate'").run(now);
+      const reclaimed = claim.get(now, "lease-3", now + 600, now, 5, now, now - 21_600, now - 604_800, 1) as { id: string; attempt: number };
       expect(reclaimed.id).toBe("candidate");
       expect(reclaimed.attempt).toBe(1);
     } finally {
@@ -196,6 +201,7 @@ function stubDb(overrides: Partial<StubJob>): StubD1 {
     status: "queued",
     attempt: 0,
     capacity_started_at: null,
+    created_at: Math.floor(Date.now() / 1000),
     lease_token: null,
     lease_expires_at: null,
     ...overrides,

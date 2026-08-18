@@ -63,7 +63,8 @@ export function validateJobUsage(value: unknown): JobUsage {
     || !isBoundedInteger(input.outputTokens, MAX_TOKENS_PER_JOB)
     || !isBoundedInteger(input.imageCount, MAX_IMAGES_PER_JOB)
     || !isBoundedInteger(input.wallTimeMs, MAX_WALL_TIME_MS)
-    || !["none", "estimated", "provider"].includes(String(input.tokenSource))) {
+    || typeof input.tokenSource !== "string"
+    || !["none", "estimated", "provider"].includes(input.tokenSource)) {
     throw new Error("invalid job usage");
   }
   if (input.tokenSource === "none" && (input.inputTokens !== 0 || input.outputTokens !== 0)) {
