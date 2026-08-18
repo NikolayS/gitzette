@@ -9,6 +9,13 @@ type SpawnFn = typeof Bun.spawn;
 export const EDITOR_PROMPT_VERSION = "gitzette-editor-v2";
 export const MAX_EDITOR_EVIDENCE_BYTES = 64 * 1024;
 
+export class OpenClawInferenceError extends Error {
+  constructor(readonly exitCode: number, readonly detail: string) {
+    super(`OpenClaw inference failed (${exitCode}): ${detail}`);
+    this.name = "OpenClawInferenceError";
+  }
+}
+
 export class OpenClawInference implements Inference {
   constructor(private readonly config: RunnerConfig, private readonly spawn: SpawnFn = Bun.spawn) {}
 
@@ -73,7 +80,7 @@ export class OpenClawInference implements Inference {
         new Response(process.stderr).text(),
         process.exited,
       ]);
-      if (exitCode !== 0) throw new Error(`OpenClaw inference failed (${exitCode}): ${stderr.slice(-1000)}`);
+      if (exitCode !== 0) throw new OpenClawInferenceError(exitCode, stderr.slice(-1000));
       if (stdout.length > 2_000_000) throw new Error("OpenClaw inference response too large");
       return stdout;
     } finally {

@@ -27,7 +27,7 @@ export class RunnerEngine {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.publisher.fail(job, message, true);
-      return isOAuthAuthFailure(message) ? "auth_failed" : "failed";
+      return isOAuthAuthFailure(error) ? "auth_failed" : "failed";
     } finally {
       await rm(jobDir(this.config, job), { recursive: true, force: true });
     }

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Edition, EvidenceBundle, PublicationManifest } from "../src/edition";
 import type { RunnerConfig } from "./config";
+import { OpenClawInferenceError } from "./inference";
 import { RunnerEngine } from "./run";
 import type { ClaimedJob, Collector, Inference, Publisher, RunnerStage } from "./types";
 import type { JobUsage, TokenUsage } from "../src/usage";
@@ -94,7 +95,7 @@ describe("runner engine", () => {
     const publisher = new FakePublisher();
     const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
     const inference: Inference = {
-      write: async () => { throw new Error("OpenClaw inference failed (1): OAuth session expired"); },
+      write: async () => { throw new OpenClawInferenceError(1, "OAuth session expired"); },
       illustrate: async () => tokenUsage(0, 0),
       reviewIllustration: async () => tokenUsage(0, 0),
     };
