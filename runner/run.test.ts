@@ -18,13 +18,17 @@ class FakePublisher implements Publisher {
   published?: PublicationManifest;
   publishedUsage?: JobUsage;
   failure?: string;
+  failureRetryable?: boolean;
   constructor(private queued: ClaimedJob | null = job) {}
   async claim() { const value = this.queued; this.queued = null; return value; }
   async heartbeat() { this.heartbeats++; }
   async stage(_job: ClaimedJob, stage: RunnerStage) { this.stages.push(stage); }
   async upload(_job: ClaimedJob, key: string) { this.uploads.push(key); }
   async publish(_job: ClaimedJob, manifest: PublicationManifest, usage: JobUsage) { this.published = manifest; this.publishedUsage = usage; }
-  async fail(_job: ClaimedJob, message: string) { this.failure = message; }
+  async fail(_job: ClaimedJob, message: string, retryable: boolean) {
+    this.failure = message;
+    this.failureRetryable = retryable;
+  }
 }
 
 const edition: Edition = {
@@ -100,7 +104,8 @@ describe("runner engine", () => {
       reviewIllustration: async () => tokenUsage(0, 0),
     };
     expect(await new RunnerEngine(config(directory), publisher, collector, inference).runOnce()).toBe("auth_failed");
-    expect(publisher.failure).toContain("OAuth session expired");
+    expect(publisher.failure).toContain("runner_auth_unavailable: OpenClaw inference failed");
+    expect(publisher.failureRetryable).toBe(false);
   });
 
   test("renews the lease while a model call is still running", async () => {

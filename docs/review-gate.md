@@ -70,6 +70,17 @@ the coherent cutover does not activate generation. Splitting it would either
 ship an unconsumed schema/API or require temporary compatibility paths that are
 larger and less reviewable than the final boundary.
 
+The apparent support files are part of that same deployable boundary. The
+Actions workflow pins the base-controlled reviewer and least-privilege release
+identity before public-PR code can run. `bun.lock` fixes the dependencies used
+by both the Worker and isolated host runner. The runner `tsconfig` makes its
+tests part of the required typecheck. The dispatch specification and runbooks
+define the migration, credential, activation, takedown, smoke, and rollback
+gates that keep the shipped scheduler and runner inert until an operator enables
+them. Landing any of those separately would break exact dependency
+reproducibility or detach the operational safety contract from the code it
+controls; none is an independently activatable feature.
+
 Every push invalidates the prior verdict and approval. The reviewer is invoked
 with the PR URL and `--fetch`, so it receives the complete base-to-exact-head
 delta; it is never invoked on `HEAD^..HEAD`. The posted report records the exact

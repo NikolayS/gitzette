@@ -7,7 +7,7 @@ describe("OAuth auth failure classification", () => {
   test("classifies a real OpenClaw failure through the typed producer contract", async () => {
     const spawn = (() => Bun.spawn([
       "/usr/bin/python3", "-c",
-      "import sys; sys.stderr.write('OAuth session expired'); sys.exit(1)",
+      "import sys; sys.stderr.write('{\"error\":{\"status\":401,\"message\":\"provider wording changed\"}}'); sys.exit(1)",
     ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })) as typeof Bun.spawn;
     let failure: unknown;
     try {
@@ -18,12 +18,20 @@ describe("OAuth auth failure classification", () => {
       failure = error;
     }
     expect(failure).toBeInstanceOf(OpenClawInferenceError);
+    expect((failure as OpenClawInferenceError).kind).toBe("auth");
     expect(isOAuthAuthFailure(failure)).toBe(true);
   });
 
-  test("does not treat numeric data, quota, overload, or unrelated errors as auth failures", () => {
+  test("prefers structured status and code fields, with bounded message fallback", () => {
+    expect(isOAuthAuthFailure(new OpenClawInferenceError(1, '{"error":{"statusCode":"403"}}'))).toBe(true);
+    expect(isOAuthAuthFailure(new OpenClawInferenceError(1, '{"error":{"code":"invalid_oauth"}}'))).toBe(true);
+    expect(isOAuthAuthFailure(new OpenClawInferenceError(1, '{"error":"unauthenticated"}'))).toBe(true);
     expect(isOAuthAuthFailure(new OpenClawInferenceError(1, "HTTP 401 unauthorized"))).toBe(true);
     expect(isOAuthAuthFailure(new OpenClawInferenceError(1, "status code: 403"))).toBe(true);
+  });
+
+  test("does not treat numeric data, quota, overload, or unrelated errors as auth failures", () => {
+    expect(isOAuthAuthFailure(new OpenClawInferenceError(1, '{"error":{"status":529,"code":"overloaded"}}'))).toBe(false);
     expect(isOAuthAuthFailure(new OpenClawInferenceError(1, "model emitted 401 tokens in 403 ms"))).toBe(false);
     expect(isOAuthAuthFailure(new OpenClawInferenceError(1, "session limit reached"))).toBe(false);
     expect(isOAuthAuthFailure(new OpenClawInferenceError(1, "HTTP 529 overloaded"))).toBe(false);

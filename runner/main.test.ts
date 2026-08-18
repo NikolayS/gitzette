@@ -64,10 +64,30 @@ describe("runner polling loop", () => {
       log: () => {},
       logError: (message) => alerts.push(message),
     });
-    expect(alerts).toHaveLength(1);
-    expect(JSON.parse(alerts[0])).toMatchObject({
+    const authAlerts = alerts.map((message) => JSON.parse(message)).filter((event) => event.event === "oauth_auth_failure_alert");
+    expect(authAlerts).toHaveLength(1);
+    expect(authAlerts[0]).toMatchObject({
       event: "oauth_auth_failure_alert",
       consecutiveAuthFailures: 3,
+    });
+  });
+
+  test("alerts after five consecutive failures even when classification is unknown", async () => {
+    const alerts: string[] = [];
+    let calls = 0;
+    let stopping = false;
+    await runPollLoop({
+      async runOnce() { calls += 1; return "failed"; },
+    }, 10, {
+      isStopping: () => stopping,
+      async sleep() { if (calls === 6) stopping = true; },
+      log: () => {},
+      logError: (message) => alerts.push(message),
+    });
+    expect(alerts).toHaveLength(1);
+    expect(JSON.parse(alerts[0])).toMatchObject({
+      event: "runner_failure_alert",
+      consecutiveFailures: 5,
     });
   });
 });

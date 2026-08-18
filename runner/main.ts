@@ -9,6 +9,7 @@ import { failureBackoffSeconds } from "./backoff";
 type LoopEngine = { runOnce(): Promise<RunnerResult> };
 
 export const AUTH_FAILURE_ALERT_THRESHOLD = 3;
+export const FAILURE_ALERT_THRESHOLD = 5;
 
 type LoopControls = {
   isStopping(): boolean;
@@ -38,6 +39,14 @@ export async function runPollLoop(engine: LoopEngine, pollSeconds: number, contr
       consecutiveFailures += 1;
       consecutiveAuthFailures = 0;
       controls.logError(JSON.stringify({ at: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) }));
+    }
+    if (consecutiveFailures === FAILURE_ALERT_THRESHOLD) {
+      controls.logError(JSON.stringify({
+        at: new Date().toISOString(),
+        event: "runner_failure_alert",
+        consecutiveFailures,
+        action: "disable runner and investigate the provider, credential, and control plane",
+      }));
     }
     // Fail closed under provider throttling or broad outages. Repeated failures
     // exponentially pause claims, capped at 15 minutes, instead of rapidly
