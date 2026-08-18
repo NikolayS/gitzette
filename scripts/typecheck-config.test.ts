@@ -4,8 +4,6 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import ts from "typescript";
 
-const discoveryProbe = process.env.GITZETTE_TEST_DISCOVERY_PROBE === "1";
-
 describe("TypeScript project coverage", () => {
   test("the runner project typechecks every runner test file", () => {
     const configPath = resolve("runner/tsconfig.json");
@@ -13,7 +11,9 @@ describe("TypeScript project coverage", () => {
     expect(loaded.error).toBeUndefined();
     const parsed = ts.parseJsonConfigFileContent(loaded.config, ts.sys, resolve("runner"));
     const files = new Set(parsed.fileNames.map((name) => resolve(name)));
-    for (const name of ts.sys.readDirectory(resolve("runner"), [".ts"], undefined, ["**/*.test.ts"])) {
+    const discovered = ts.sys.readDirectory(resolve("runner"), [".ts"], undefined, ["**/*.test.ts"]);
+    expect(discovered.length).toBeGreaterThan(0);
+    for (const name of discovered) {
       expect(files.has(resolve(name)), `runner test omitted from typecheck: ${name}`).toBe(true);
     }
   });
@@ -24,16 +24,14 @@ describe("TypeScript project coverage", () => {
     expect(loaded.error).toBeUndefined();
     const parsed = ts.parseJsonConfigFileContent(loaded.config, ts.sys, resolve("."));
     const files = new Set(parsed.fileNames.map((name) => resolve(name)));
-    for (const name of ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.ts"], 1)) {
+    const discovered = ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.ts"], 1);
+    expect(discovered.length).toBeGreaterThan(0);
+    for (const name of discovered) {
       expect(files.has(resolve(name)), `script omitted from typecheck: ${name}`).toBe(true);
     }
   });
 
   test("the test command discovers every top-level script test", async () => {
-    if (discoveryProbe) {
-      expect(true).toBe(true);
-      return;
-    }
     const packageJson = JSON.parse(await Bun.file(resolve("package.json")).text()) as {
       scripts?: Record<string, string>;
     };
@@ -48,12 +46,12 @@ describe("TypeScript project coverage", () => {
       const child = Bun.spawn([
         "bash",
         "-c",
-        `${testCommand} --reporter=junit --reporter-outfile="$GITZETTE_TEST_DISCOVERY_REPORT"`,
+        `${testCommand} --test-name-pattern '^__gitzette_discovery_only__$' `
+          + `--reporter=junit --reporter-outfile="$GITZETTE_TEST_DISCOVERY_REPORT"`,
       ], {
         cwd: resolve("."),
         env: {
           ...process.env,
-          GITZETTE_TEST_DISCOVERY_PROBE: "1",
           GITZETTE_TEST_DISCOVERY_REPORT: reportPath,
         },
         stdout: "pipe",
@@ -64,20 +62,25 @@ describe("TypeScript project coverage", () => {
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ]);
-      if (exitCode !== 0) {
+      if (exitCode !== 0 && exitCode !== 1) {
         throw new Error(`configured test command failed with ${exitCode}\n${stdout}\n${stderr}`);
       }
       const report = await Bun.file(reportPath).text();
+      expect(report).toContain('failures="0"');
       const executedFiles = new Set(
-        [...report.matchAll(/<testsuite[^>]+file="([^"]+\.test\.ts)"/g)]
+        [...report.matchAll(/<(?:testsuite|testcase)[^>]+file="([^"]+\.test\.ts)"/g)]
           .map(match => resolve(match[1])),
       );
+      if (executedFiles.size === 0) {
+        throw new Error("Bun JUnit report did not identify discovered test files");
+      }
       const discovered = ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.test.ts"], 1);
+      expect(discovered.length).toBeGreaterThan(0);
       for (const name of discovered) {
         expect(executedFiles.has(resolve(name)), `script test not executed: ${name}`).toBe(true);
       }
     } finally {
       await rm(reportDirectory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

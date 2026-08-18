@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,13 +13,11 @@ afterEach(async () => {
 });
 
 type FakeWranglerMode = "success" | "failure" | "empty";
-type WrapperPath = "direct" | "symlink";
-type WrapperInvocation = "bash-absolute" | "bash-bare" | "direct-absolute" | "direct-relative" | "path";
+type WrapperInvocation = "bash-absolute" | "bash-bare" | "direct-absolute" | "direct-relative";
 type SecretCheckOptions = {
   includeToken?: boolean;
   invocation?: WrapperInvocation;
   mode?: FakeWranglerMode;
-  wrapperPath?: WrapperPath;
 };
 
 async function runRawSecretCheck(
@@ -30,7 +28,6 @@ async function runRawSecretCheck(
     includeToken = true,
     invocation = "bash-absolute",
     mode = "success",
-    wrapperPath = "direct",
   } = options;
   const root = await mkdtemp(join(tmpdir(), "gitzette-secret-check-"));
   temporaryRepositories.push(root);
@@ -60,17 +57,11 @@ esac
 `);
   await chmod(fakeWrangler, 0o755);
 
-  let scriptPath = join(root, "scripts", "check-production-secrets.sh");
-  if (wrapperPath === "symlink") {
-    await mkdir(join(root, "bin"), { recursive: true });
-    scriptPath = join(root, "bin", "production-secrets");
-    await symlink("../scripts/check-production-secrets.sh", scriptPath);
-  }
+  const scriptPath = join(root, "scripts", "check-production-secrets.sh");
   const argvLog = join(root, "wrangler-argv.log");
 
   const environment: Record<string, string> = {
     PATH: [
-      invocation === "path" ? dirname(scriptPath) : undefined,
       join(root, "node_modules", ".bin"),
       dirname(process.execPath),
       process.env.PATH,
@@ -98,9 +89,6 @@ esac
     case "direct-relative":
       command = ["./scripts/check-production-secrets.sh"];
       cwd = root;
-      break;
-    case "path":
-      command = [scriptPath.split("/").at(-1) ?? scriptPath];
       break;
   }
   const child = Bun.spawn(command, {
@@ -199,39 +187,6 @@ describe("production secret preflight", () => {
     expect(result.fakeInvoked).toBe(false);
   });
 
-  test("resolves the checked entrypoint through a symlinked wrapper", async () => {
-    const result = await runRawSecretCheck(
-      JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
-      { wrapperPath: "symlink" },
-    );
-    expect(result.exitCode).toBe(0);
-    expect(result.fakeInvoked).toBe(true);
-    expect(result.stdout).toContain("Production secrets OK");
-  });
-
-  test("bounds circular symlink resolution", async () => {
-    const root = await mkdtemp(join(tmpdir(), "gitzette-secret-cycle-"));
-    temporaryRepositories.push(root);
-    const first = join(root, "cycle-a");
-    await symlink("cycle-b", first);
-    await symlink("cycle-a", join(root, "cycle-b"));
-    const wrapper = join(repoRoot, "scripts", "check-production-secrets.sh");
-    const child = Bun.spawn([
-      "bash",
-      "-c",
-      `source "$1"; gitzette_production_secrets_script_directory "$2"`,
-      "--",
-      wrapper,
-      first,
-    ], { stdout: "pipe", stderr: "pipe" });
-    const [exitCode, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stderr).text(),
-    ]);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("symlink resolution exceeded 40 hops");
-  });
-
   test("runs directly through the shebang from the CI working directory", async () => {
     const secretList = JSON.stringify(expectedProductionSecrets.map(name => ({ name })));
     for (const invocation of ["direct-absolute", "direct-relative"] as const) {
@@ -241,17 +196,7 @@ describe("production secret preflight", () => {
     }
   });
 
-  test("resolves a bare wrapper name from PATH outside the repository", async () => {
-    const result = await runRawSecretCheck(
-      JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
-      { invocation: "path" },
-    );
-    expect(result.exitCode).toBe(0);
-    expect(result.fakeInvoked).toBe(true);
-    expect(result.stdout).toContain("Production secrets OK");
-  });
-
-  test("resolves bash bare-name fallback from the current directory", async () => {
+  test("resolves bash bare-name invocation from the script directory", async () => {
     const result = await runRawSecretCheck(
       JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
       { invocation: "bash-bare" },
