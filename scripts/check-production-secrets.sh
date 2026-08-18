@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 production_secrets_script_source="${BASH_SOURCE[0]}"
-production_secrets_symlink_hops=0
 while [[ -L "$production_secrets_script_source" ]]; do
-  production_secrets_symlink_hops=$((production_secrets_symlink_hops + 1))
-  if [[ "$production_secrets_symlink_hops" -gt 40 ]]; then
-    echo "too many symlinks resolving check-production-secrets.sh" >&2
-    exit 1
-  fi
   production_secrets_script_directory="$(cd -P -- "$(dirname -- "$production_secrets_script_source")" && pwd)"
-  production_secrets_script_source="$(readlink "$production_secrets_script_source")"
+  production_secrets_script_source="$(readlink -- "$production_secrets_script_source")"
   if [[ "$production_secrets_script_source" != /* ]]; then
     production_secrets_script_source="$production_secrets_script_directory/$production_secrets_script_source"
   fi
 done
 production_secrets_script_directory="$(cd -P -- "$(dirname -- "$production_secrets_script_source")" && pwd)"
-unset production_secrets_script_source production_secrets_symlink_hops
+unset production_secrets_script_source
 # shellcheck source=scripts/require-wrangler.sh
 source "$production_secrets_script_directory/require-wrangler.sh"
 

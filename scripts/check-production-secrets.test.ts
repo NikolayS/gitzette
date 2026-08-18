@@ -124,12 +124,17 @@ describe("production secret preflight", () => {
   });
 
   test("rejects malformed Wrangler secret-list shapes", () => {
-    for (const document of [
-      {}, [null], [[]], [{}], [{ name: 42 }],
-      expectedProductionSecrets.map(name => ({ name })).concat({ name: expectedProductionSecrets[0] }),
-    ]) {
-      expect(() => assertProductionSecrets(document)).toThrow("invalid Wrangler secret list");
+    expect(() => assertProductionSecrets({})).toThrow("invalid Wrangler secret list: expected an array");
+    for (const document of [[null], [[]], [{}], [{ name: 42 }]]) {
+      expect(() => assertProductionSecrets(document)).toThrow(
+        "invalid Wrangler secret list: entry 0 must contain a string name",
+      );
     }
+    const duplicate = expectedProductionSecrets.map(name => ({ name }))
+      .concat({ name: expectedProductionSecrets[0] });
+    expect(() => assertProductionSecrets(duplicate)).toThrow(
+      `invalid Wrangler secret list: duplicate secret name(s) [${expectedProductionSecrets[0]}]`,
+    );
   });
 
   test("keeps the production allowlist immutable", () => {
@@ -140,7 +145,7 @@ describe("production secret preflight", () => {
   test("rejects malformed JSON from Wrangler", async () => {
     const result = await runRawSecretCheck("{");
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("invalid Wrangler secret list");
+    expect(result.stderr).toContain("invalid Wrangler secret list: malformed JSON");
     expect(result.stdout).toBe("");
   });
 
@@ -178,7 +183,7 @@ describe("production secret preflight", () => {
   test("fails promptly on a circular wrapper symlink", async () => {
     const result = await runRawSecretCheck("[]", { wrapperPath: "cycle" });
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toMatch(/too many (?:levels of symbolic links|symlinks)/i);
+    expect(result.stderr).toMatch(/too many levels of symbolic links/i);
     expect(result.fakeInvoked).toBe(false);
   });
 
