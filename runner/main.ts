@@ -2,11 +2,13 @@ import { loadConfig } from "./config";
 import { ControlPlaneClient } from "./control-plane";
 import { GitHubCollector } from "./github";
 import { OpenClawInference } from "./inference";
-import { RunnerEngine } from "./run";
+import { RunnerEngine, type RunnerResult } from "./run";
 import { ensurePrivateDirectory } from "./fs";
 import { failureBackoffSeconds } from "./backoff";
 
-type LoopEngine = { runOnce(): Promise<"idle" | "processed" | "failed"> };
+type LoopEngine = { runOnce(): Promise<RunnerResult> };
+
+export const AUTH_FAILURE_ALERT_THRESHOLD = 3;
 
 type LoopControls = {
   isStopping(): boolean;
@@ -17,13 +19,24 @@ type LoopControls = {
 
 export async function runPollLoop(engine: LoopEngine, pollSeconds: number, controls: LoopControls): Promise<void> {
   let consecutiveFailures = 0;
+  let consecutiveAuthFailures = 0;
   while (!controls.isStopping()) {
     try {
       const result = await engine.runOnce();
       if (result !== "idle") controls.log(JSON.stringify({ at: new Date().toISOString(), result }));
-      consecutiveFailures = result === "failed" ? consecutiveFailures + 1 : 0;
+      consecutiveFailures = result === "failed" || result === "auth_failed" ? consecutiveFailures + 1 : 0;
+      consecutiveAuthFailures = result === "auth_failed" ? consecutiveAuthFailures + 1 : 0;
+      if (consecutiveAuthFailures === AUTH_FAILURE_ALERT_THRESHOLD) {
+        controls.logError(JSON.stringify({
+          at: new Date().toISOString(),
+          event: "oauth_auth_failure_alert",
+          consecutiveAuthFailures,
+          action: "disable runner and restore the dedicated OAuth session",
+        }));
+      }
     } catch (error) {
       consecutiveFailures += 1;
+      consecutiveAuthFailures = 0;
       controls.logError(JSON.stringify({ at: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) }));
     }
     // Fail closed under provider throttling or broad outages. Repeated failures

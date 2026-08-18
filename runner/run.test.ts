@@ -89,6 +89,19 @@ describe("runner engine", () => {
     expect(publisher.failure).toContain("prompt");
   });
 
+  test("classifies a revoked OpenClaw OAuth session separately", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
+    const inference: Inference = {
+      write: async () => { throw new Error("OpenClaw inference failed (1): OAuth session expired"); },
+      illustrate: async () => tokenUsage(0, 0),
+      reviewIllustration: async () => tokenUsage(0, 0),
+    };
+    expect(await new RunnerEngine(config(directory), publisher, collector, inference).runOnce()).toBe("auth_failed");
+    expect(publisher.failure).toContain("OAuth session expired");
+  });
+
   test("renews the lease while a model call is still running", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
     const publisher = new FakePublisher();

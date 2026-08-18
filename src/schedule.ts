@@ -3,6 +3,7 @@ import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
 import { expireStaleJobs, LIVE_STATUSES, maxQueueAgeSeconds } from "./queue";
 import { previousCompletedIsoWeekKey } from "./week";
 import { deleteR2Prefix } from "./artifacts";
+import { isProfileSuppressed } from "./profile-suppression";
 
 export const JOB_EXPIRY_CRON = "7 * * * *";
 export const WEEKLY_GENERATION_CRONS = ["17 13 * * 1", "17 20 * * 1"] as const;
@@ -37,25 +38,32 @@ async function enqueueWeeklyProfilesAfterSweep(
 
   const placeholders = WEEKLY_PROFILE_USERNAMES.map(() => "?").join(",");
   const profiles = await env.DB.prepare(
-    `SELECT id,username FROM users WHERE username COLLATE NOCASE IN (${placeholders})`,
-  ).bind(...WEEKLY_PROFILE_USERNAMES).all<{ id: string; username: string }>();
+    `SELECT id,username,
+       EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=users.username COLLATE NOCASE) AS suppressed
+     FROM users WHERE username COLLATE NOCASE IN (${placeholders})`,
+  ).bind(...WEEKLY_PROFILE_USERNAMES).all<{ id: string; username: string; suppressed: number }>();
   const byUsername = new Map((profiles.results ?? []).map((row) => [row.username.toLowerCase(), row]));
   const missing = WEEKLY_PROFILE_USERNAMES.filter((username) => !byUsername.has(username.toLowerCase()));
   if (missing.length > 0) {
     console.error(JSON.stringify({ event: "weekly_generation_profiles_missing", missing }));
     throw new Error(`weekly generation profiles are missing: ${missing.join(",")}`);
   }
+  const eligibleUsernames = WEEKLY_PROFILE_USERNAMES.filter((username) =>
+    !isProfileSuppressed(byUsername.get(username.toLowerCase())!),
+  );
 
   if (!staleSweepComplete) await expireStaleArtifacts(env);
 
   const weekKey = previousCompletedIsoWeekKey(new Date(scheduledTime));
-  const statements = WEEKLY_PROFILE_USERNAMES.map((username) => {
+  const statements = eligibleUsernames.map((username) => {
     const profile = byUsername.get(username.toLowerCase())!;
     return env.DB.prepare(
       `INSERT INTO generation_jobs
        (id,user_id,requested_by,week_key,status,schedule_key)
        SELECT ?,?,?,?,'queued',?
        WHERE NOT EXISTS (
+         SELECT 1 FROM profile_suppressions WHERE username=? COLLATE NOCASE
+       ) AND NOT EXISTS (
          SELECT 1 FROM generation_jobs
          WHERE user_id=? AND week_key=? AND status IN (${LIVE_STATUSES.map(() => "?").join(",")})
        )
@@ -66,6 +74,7 @@ async function enqueueWeeklyProfilesAfterSweep(
       admin.id,
       weekKey,
       `${weekKey}:${profile.id}`,
+      username,
       profile.id,
       weekKey,
       ...LIVE_STATUSES,
@@ -75,9 +84,9 @@ async function enqueueWeeklyProfilesAfterSweep(
   const queued = results.reduce((total, result) => total + (result.meta.changes ?? 0), 0);
   return {
     weekKey,
-    targets: WEEKLY_PROFILE_USERNAMES.length,
+    targets: eligibleUsernames.length,
     queued,
-    deduplicated: WEEKLY_PROFILE_USERNAMES.length - queued,
+    deduplicated: eligibleUsernames.length - queued,
   };
 }
 

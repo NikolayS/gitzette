@@ -50,4 +50,24 @@ describe("runner polling loop", () => {
     expect(calls).toBe(2);
     expect(delays).toEqual([20_000, 40_000]);
   });
+
+  test("alerts exactly when three consecutive OAuth auth failures are reached", async () => {
+    const results = ["auth_failed", "auth_failed", "auth_failed", "failed", "auth_failed"] as const;
+    const alerts: string[] = [];
+    let calls = 0;
+    let stopping = false;
+    await runPollLoop({
+      async runOnce() { return results[calls++]; },
+    }, 10, {
+      isStopping: () => stopping,
+      async sleep() { if (calls === results.length) stopping = true; },
+      log: () => {},
+      logError: (message) => alerts.push(message),
+    });
+    expect(alerts).toHaveLength(1);
+    expect(JSON.parse(alerts[0])).toMatchObject({
+      event: "oauth_auth_failure_alert",
+      consecutiveAuthFailures: 3,
+    });
+  });
 });

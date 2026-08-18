@@ -46,6 +46,7 @@ describe("applied migration replay boundary", () => {
       "0002_weekly_generation_schedule.sql",
       "0003_remove_legacy_generating_dispatch.sql",
       "0004_normalize_github_usernames.sql",
+      "0005_profile_suppressions.sql",
     ]);
   });
 });

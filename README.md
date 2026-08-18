@@ -153,24 +153,35 @@ an ID or use the admin enqueue path as a seeding mechanism.
 The contact for an automated-profile opt-out or takedown is
 [@NikolayS](https://github.com/NikolayS); open an issue in this repository with
 the profile name and requested removal. The request must be acknowledged within
-one hour and fully suppressed within four hours, including outside business
-hours. `@NikolayS` owns the response; the designated production on-call
-maintainer with Cloudflare production access executes the out-of-hours disable
-and reviewed deploy. An operator must disable the weekly scheduler and runner,
-then remove the username from
+one hour. After verifying the request, the on-call must activate the runtime
+suppression within 15 minutes and complete artifact removal within four hours,
+including outside business hours. `@NikolayS` owns the response; the designated
+production on-call maintainer with Cloudflare production access executes it.
+
+The first response is a D1 write, not a code deployment:
+
+```bash
+./node_modules/.bin/wrangler d1 execute gitzette-db --remote --command \
+  "INSERT INTO profile_suppressions(username,reason) VALUES(lower('octocat'),'verified opt-out') ON CONFLICT(username) DO UPDATE SET reason=excluded.reason,suppressed_at=unixepoch()"
+```
+
+This immediately removes the profile from home/profile/edition/image routes,
+blocks manual and weekly enqueue, terminalizes newly claimed work, and prevents
+an in-flight lease from publishing. Disable the weekly scheduler and runner as
+additional containment, then remove the username from
 `WEEKLY_PROFILE_USERNAMES` while retaining it in
-`MANAGED_PROFILE_USERNAMES`. That reviewed deployment suppresses the profile
-from the home page, blocks new generation, and makes both the profile and every
-existing edition route return 404. New illustration objects carry their owner
-ID and username in R2 custom metadata, so the image route also returns 404 after
-suppression. For historical objects without that metadata, R2 deletion is a
-mandatory part of the takedown: enumerate every `edition_versions.r2_key` and
-legacy `dispatches.r2_key` for the profile, fetch those exact edition objects,
-record every referenced `illustrations/*` key, and delete each exact edition and
-illustration key with the locked Wrangler `r2 object delete ... --remote`
-command. Never use a bucket-wide prefix or wildcard. The operator must run the
-production smoke test and verify the profile route, every edition route, and
-every recorded `/img/*` URL return 404 before closing the request. Retaining the
-name in the managed registry is deliberate: it prevents historical D1/R2
-records from becoming public again. A later opt-in requires a new reviewed
-allowlist change.
+`MANAGED_PROFILE_USERNAMES` in a reviewed follow-up. Do not delete the D1
+suppression row during that deployment.
+
+New illustration objects carry their owner ID and username in R2 custom
+metadata, so the image route also returns 404 after suppression. For historical
+objects without that metadata, R2 deletion is mandatory: enumerate every
+`edition_versions.r2_key` and legacy `dispatches.r2_key` for the profile, fetch
+those exact edition objects, record every referenced `illustrations/*` key, and
+delete each exact edition and illustration key with the locked Wrangler
+`r2 object delete ... --remote` command. Never use a bucket-wide prefix or
+wildcard. Run the production smoke test and verify the profile route, every
+edition route, and every recorded `/img/*` URL return 404 before closing the
+request. The suppression row and managed registry entry prevent historical D1/R2
+records from becoming public again. A later opt-in requires a reviewed decision
+and explicit deletion of the suppression row.

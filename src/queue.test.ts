@@ -33,10 +33,12 @@ describe("generation queue policy", () => {
     try {
       db.query("INSERT INTO users(id,username) VALUES ('1','requester')").run();
       const insert = db.query(GENERATION_REQUEST_INSERT_SQL);
-      expect(insert.run("a", "1", "1", "2026-W30", 0, "1", 2).changes).toBe(1);
-      expect(insert.run("b", "1", "1", "2026-W31", 0, "1", 2).changes).toBe(1);
-      expect(insert.run("c", "1", "1", "2026-W32", 0, "1", 2).changes).toBe(0);
-      expect(insert.run("d", "1", "1", "2026-W32", 1, "1", 2).changes).toBe(1);
+      expect(insert.run("a", "1", "1", "2026-W30", "1", 0, "1", 2).changes).toBe(1);
+      expect(insert.run("b", "1", "1", "2026-W31", "1", 0, "1", 2).changes).toBe(1);
+      expect(insert.run("c", "1", "1", "2026-W32", "1", 0, "1", 2).changes).toBe(0);
+      expect(insert.run("d", "1", "1", "2026-W32", "1", 1, "1", 2).changes).toBe(1);
+      db.query("INSERT INTO profile_suppressions(username,reason) VALUES ('requester','opt-out')").run();
+      expect(insert.run("e", "1", "1", "2026-W33", "1", 1, "1", 2).changes).toBe(0);
     } finally {
       db.close();
     }
@@ -115,6 +117,7 @@ async function generationDatabase(): Promise<Database> {
   db.exec(await Bun.file("migrations/0002_weekly_generation_schedule.sql").text());
   db.exec(await Bun.file("migrations/0003_remove_legacy_generating_dispatch.sql").text());
   db.exec(await Bun.file("migrations/0004_normalize_github_usernames.sql").text());
+  db.exec(await Bun.file("migrations/0005_profile_suppressions.sql").text());
   return db;
 }
 

@@ -87,14 +87,16 @@ authRoutes.get("/logout", async (c) => {
 });
 
 // helper: resolve session → user
-export async function getUser(c: any): Promise<{ id: string; username: string; avatar_url: string } | null> {
+export async function getUser(c: any): Promise<{ id: string; username: string; avatar_url: string; suppressed: number } | null> {
   const token = getCookie(c, "session");
   if (!token) return null;
   const now = Math.floor(Date.now() / 1000);
   const row = await c.env.DB.prepare(
-    `SELECT u.id, u.username, u.avatar_url FROM sessions s
+    `SELECT u.id, u.username, u.avatar_url,
+       EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=u.username COLLATE NOCASE) AS suppressed
+     FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token = ? AND s.expires_at > ?`
-  ).bind(token, now).first() as { id: string; username: string; avatar_url: string } | null;
+  ).bind(token, now).first() as { id: string; username: string; avatar_url: string; suppressed: number } | null;
   return row ?? null;
 }

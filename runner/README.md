@@ -54,6 +54,22 @@ and require an available OpenAI OAuth route with no fallback before running the
 text and image canaries. Missing, expired, or rate-limited auth keeps the
 service disabled. Never add an API key to make a canary pass.
 
+Before activation, the operator must attach a written authorization/terms-of-use
+determination for automated use of the dedicated account to the release record.
+This repository does not assert that approval exists. Without that record the
+runner and weekly scheduler remain disabled, even if device-code login works.
+
+The journal event `oauth_auth_failure_alert` is emitted after three consecutive
+OpenClaw auth-class failures. Treat it as a total generation outage: disable the
+runner, inspect the dedicated identity with the sealed `auth status` command,
+revoke the broken session if it still appears active, and repeat device-code
+login as `gitzette-runner`. Then rerun auth status plus the text and image
+canaries before re-enabling the service. Never copy another account's state or
+install an API-key fallback. The restore target is four hours from the first
+alert; an outage may exceed that target when the provider or account owner is
+unavailable. Existing editions remain served, and queued work fails closed or
+ages out during the accepted generation outage.
+
 Provisioning must verify the credential boundary before enabling the service:
 
 ```bash

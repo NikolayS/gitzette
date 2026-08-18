@@ -39,7 +39,7 @@ class StubStatement {
       this.db.staleSweepCalls += 1;
       return { results: this.db.expiredJobIds.map((id) => ({ id })) } as unknown as D1Result<T>;
     }
-    if (!this.query.startsWith("SELECT id,username FROM users")) throw new Error(`unexpected all: ${this.query}`);
+    if (!this.query.startsWith("SELECT id,username")) throw new Error(`unexpected all: ${this.query}`);
     return { results: this.db.profiles } as D1Result<T>;
   }
 }
@@ -155,6 +155,30 @@ describe("weekly profile scheduling", () => {
         queued: 0,
         deduplicated: 9,
       });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("skips a runtime-suppressed profile without treating its user row as missing", async () => {
+    const sqlite = await generationDatabase();
+    try {
+      const db = new SqliteD1(sqlite);
+      sqlite.query("INSERT INTO users(id,username) VALUES (?,?)").run("1", "admin");
+      for (const profile of profiles) {
+        sqlite.query("INSERT INTO users(id,username) VALUES (?,?)").run(profile.id, profile.username);
+      }
+      sqlite.query("INSERT INTO profile_suppressions(username,reason) VALUES (?,?)").run("DHH", "verified opt-out");
+
+      expect(await enqueueWeeklyProfiles({ DB: db as never, DISPATCHES: new StubR2() as never, ADMIN_USER_ID: "1" }, scheduledTime)).toEqual({
+        weekKey: "2026-W33",
+        targets: 8,
+        queued: 8,
+        deduplicated: 0,
+      });
+      expect(sqlite.query(
+        "SELECT COUNT(*) AS count FROM generation_jobs j JOIN users u ON u.id=j.user_id WHERE u.username='dhh' COLLATE NOCASE",
+      ).get()).toEqual({ count: 0 });
     } finally {
       sqlite.close();
     }
@@ -445,5 +469,7 @@ async function generationDatabase(): Promise<Database> {
   db.exec(await Bun.file("migrations/0001_generation_queue.sql").text());
   db.exec(await Bun.file("migrations/0002_weekly_generation_schedule.sql").text());
   db.exec(await Bun.file("migrations/0003_remove_legacy_generating_dispatch.sql").text());
+  db.exec(await Bun.file("migrations/0004_normalize_github_usernames.sql").text());
+  db.exec(await Bun.file("migrations/0005_profile_suppressions.sql").text());
   return db;
 }

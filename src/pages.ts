@@ -3,6 +3,7 @@ import { getUser } from "./auth";
 import { bearerToken, secretMatches } from "./credentials";
 import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
 import { HOME_PROFILE_USERNAMES, isManagedProfileSuppressed } from "./highlighted";
+import { isProfileSuppressed, isRuntimeProfileSuppressed } from "./profile-suppression";
 import { normalizeGitHubUsername } from "./identifiers";
 import type { Env } from "./index";
 import { SCHEDULED_AGE_OUT_ERROR } from "./queue";
@@ -438,6 +439,9 @@ pageRoutes.get("/", async (c) => {
      FROM dispatches d
      JOIN users u ON u.id = d.user_id
      WHERE d.r2_key IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM profile_suppressions ps WHERE ps.username=u.username COLLATE NOCASE
+       )
      ORDER BY d.generated_at DESC LIMIT 100`
   ).all<{ username: string; week_key: string; generated_at: number }>();
 
@@ -455,6 +459,7 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
   if (!obj) return c.text("not found", 404);
   const ownerUsername = obj.customMetadata?.ownerUsername;
   if (ownerUsername && isManagedProfileSuppressed(ownerUsername)) return c.text("not found", 404);
+  if (ownerUsername && await isRuntimeProfileSuppressed(c.env.DB, ownerUsername)) return c.text("not found", 404);
   const buf = await obj.arrayBuffer();
   const contentType = slug.endsWith(".webp") ? "image/webp"
     : slug.endsWith(".png") ? "image/png" : "image/jpeg";
@@ -533,8 +538,10 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
 
   // Check if user exists + fetch avatar
   const userRow = await c.env.DB.prepare(
-    `SELECT id, avatar_url FROM users WHERE username = ?`
-  ).bind(username).first<{ id: number; avatar_url: string | null }>();
+    `SELECT id,avatar_url,
+       EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=users.username COLLATE NOCASE) AS suppressed
+     FROM users WHERE username=?`
+  ).bind(username).first<{ id: number; avatar_url: string | null; suppressed: number }>();
 
   if (!userRow) {
     // Check if this is a real GitHub user — if so, offer to generate
@@ -547,6 +554,7 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
     } catch { /* ignore */ }
     return c.html(notFoundPage(username, ghUser), 404);
   }
+  if (isProfileSuppressed({ username, suppressed: userRow.suppressed })) return c.text("not found", 404);
 
   // Query all published dispatches. Legacy generating sentinels are removed by
   // migration 0003 and cannot block profile rendering.
@@ -586,7 +594,10 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}/:week_key{\\d{4}-W\\d{1,2}}", async (
     `SELECT d.r2_key, d.generated_at
      FROM dispatches d
      JOIN users u ON u.id = d.user_id
-     WHERE u.username = ? AND d.week_key = ?`
+     WHERE u.username = ? AND d.week_key = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM profile_suppressions ps WHERE ps.username=u.username COLLATE NOCASE
+       )`
   ).bind(username, week_key).first<{ r2_key: string | null; generated_at: number }>();
 
   if (!dispatchMeta?.r2_key) {

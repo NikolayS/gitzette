@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { getUser } from "./auth";
 import type { Env } from "./index";
 import { normalizeGitHubUsername } from "./identifiers";
-import { isManagedProfileSuppressed } from "./highlighted";
+import { isProfileSuppressed, isRuntimeProfileSuppressed } from "./profile-suppression";
 import { deleteR2Prefix } from "./artifacts";
 import { isCompletedIsoWeekKey, isGeneratableCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
@@ -14,12 +14,16 @@ export const SCHEDULED_AGE_OUT_ERROR = "scheduled generation aged out before pro
 const DEFAULT_MAX_QUEUE_AGE_SECONDS = 6 * 60 * 60;
 
 export const GENERATION_REQUEST_INSERT_SQL = `INSERT INTO generation_jobs
-  (id,user_id,requested_by,week_key,status)
+ (id,user_id,requested_by,week_key,status)
  SELECT ?,?,?,?,'queued'
- WHERE ? OR (
+ WHERE NOT EXISTS (
+   SELECT 1 FROM profile_suppressions ps
+   JOIN users u ON u.username=ps.username COLLATE NOCASE
+   WHERE u.id=?
+ ) AND (? OR (
    SELECT COUNT(*) FROM generation_jobs
    WHERE requested_by=? AND created_at>=unixepoch('now','-7 days')
- ) < ?`;
+ ) < ?)`;
 
 type JobRow = {
   id: string;
@@ -87,12 +91,16 @@ queueRoutes.post("/generate", async (c) => {
     if (!forUsername) {
       return c.json({ error: "invalid forUsername" }, 400);
     }
-    const existing = await c.env.DB.prepare("SELECT id, username, avatar_url FROM users WHERE username = ?")
+    const existing = await c.env.DB.prepare(
+      `SELECT id,username,avatar_url,
+         EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=users.username COLLATE NOCASE) AS suppressed
+       FROM users WHERE username=?`,
+    )
       .bind(forUsername).first<typeof requester>();
     if (!existing) return c.json({ error: "target user must exist before enqueue" }, 404);
     target = existing;
   }
-  if (isManagedProfileSuppressed(target.username)) {
+  if (isProfileSuppressed(target)) {
     return c.json({ error: "profile unavailable" }, 410);
   }
 
@@ -109,8 +117,11 @@ queueRoutes.post("/generate", async (c) => {
   const requestLimit = Math.max(1, Number.parseInt(c.env.ROLLING_7D_USER_GENERATION_LIMIT || "3", 10) || 3);
   try {
     const inserted = await c.env.DB.prepare(GENERATION_REQUEST_INSERT_SQL)
-      .bind(id, target.id, requester.id, weekKey, isAdmin(requester.id, c.env.ADMIN_USER_ID) ? 1 : 0, requester.id, requestLimit).run();
+      .bind(id, target.id, requester.id, weekKey, target.id, isAdmin(requester.id, c.env.ADMIN_USER_ID) ? 1 : 0, requester.id, requestLimit).run();
     if ((inserted.meta.changes ?? 0) !== 1) {
+      if (await isRuntimeProfileSuppressed(c.env.DB, target.username)) {
+        return c.json({ error: "profile unavailable" }, 410);
+      }
       return c.json({ error: "generation request limit reached", weeklyUserLimit: requestLimit }, 429);
     }
   } catch (error) {

@@ -3,7 +3,7 @@ import { renderEdition, validateManifest, type PublicationManifest } from "./edi
 import { hasPublicationDimensions, webpDimensions } from "./image";
 import { bearerToken, secretMatches } from "./credentials";
 import type { Env } from "./index";
-import { isManagedProfileSuppressed } from "./highlighted";
+import { isProfileSuppressed } from "./profile-suppression";
 import { maxQueueAgeSeconds } from "./queue";
 import { validateJobUsage, type JobUsage } from "./usage";
 import { deleteR2Prefix } from "./artifacts";
@@ -51,6 +51,8 @@ type ClaimedJob = {
   lease_expires_at: number;
 };
 
+type HeldJob = ClaimedJob & { suppressed: number };
+
 export const runnerRoutes = new Hono<{ Bindings: Env }>();
 
 runnerRoutes.use("*", async (c, next) => {
@@ -89,8 +91,12 @@ runnerRoutes.post("/jobs/claim", async (c) => {
     )
     .first<Omit<ClaimedJob, "username">>();
   if (!row) return c.body(null, 204);
-  const user = await c.env.DB.prepare("SELECT username FROM users WHERE id=?").bind(row.user_id).first<{ username: string }>();
-  if (isManagedProfileSuppressed(user!.username)) {
+  const user = await c.env.DB.prepare(
+    `SELECT username,
+       EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=users.username COLLATE NOCASE) AS suppressed
+     FROM users WHERE id=?`,
+  ).bind(row.user_id).first<{ username: string; suppressed: number }>();
+  if (isProfileSuppressed(user!)) {
     if (!await terminalizeSuppressedJob(c.env, row.id, row.lease_token)) {
       return c.json({ error: "lease changed" }, 409);
     }
@@ -172,7 +178,7 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
   const job = await heldJob(c.env.DB, c.req.param("id"), body.leaseToken);
   if (!job) return c.json({ error: "lease not held" }, 409);
   if (job.status !== "validating") return c.json({ error: "job is not ready to publish" }, 409);
-  if (isManagedProfileSuppressed(job.username)) {
+  if (isProfileSuppressed(job)) {
     if (!await terminalizeSuppressedJob(c.env, job.id, body.leaseToken)) {
       return c.json({ error: "lease changed" }, 409);
     }
@@ -220,9 +226,13 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
       c.env.DB.prepare(
         `INSERT INTO edition_versions
          (id,job_id,user_id,week_key,r2_key,evidence_json,edition_json,image_count,generator_version,model,prompt_version)
-         SELECT ?,id,user_id,week_key,?,?,?,?,?,?,?
-         FROM generation_jobs
-         WHERE id=? AND lease_token=? AND lease_expires_at>=unixepoch() AND status='validating'`
+         SELECT ?,j.id,j.user_id,j.week_key,?,?,?,?,?,?,?
+         FROM generation_jobs j
+         JOIN users u ON u.id=j.user_id
+         WHERE j.id=? AND j.lease_token=? AND j.lease_expires_at>=unixepoch() AND j.status='validating'
+           AND NOT EXISTS (
+             SELECT 1 FROM profile_suppressions ps WHERE ps.username=u.username COLLATE NOCASE
+           )`
       ).bind(versionId, r2Key, JSON.stringify(manifest.evidence), JSON.stringify(manifest.edition), manifest.images.length, manifest.generatorVersion, manifest.model, manifest.promptVersion, job.id, body.leaseToken),
       c.env.DB.prepare(
         `INSERT INTO dispatches (user_id,week_key,r2_key,generated_at)
@@ -232,7 +242,12 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
       c.env.DB.prepare(
         `UPDATE generation_jobs SET status='published',published_at=unixepoch(),updated_at=unixepoch(),
            input_tokens=?,output_tokens=?,token_source=?,image_count=?,wall_time_ms=?,lease_token=NULL,lease_expires_at=NULL
-         WHERE id=? AND lease_token=? AND lease_expires_at>=unixepoch()`
+         WHERE id=? AND lease_token=? AND lease_expires_at>=unixepoch()
+           AND NOT EXISTS (
+             SELECT 1 FROM profile_suppressions ps
+             JOIN users u ON u.username=ps.username COLLATE NOCASE
+             WHERE u.id=generation_jobs.user_id
+           )`
       ).bind(usage.inputTokens, usage.outputTokens, usage.tokenSource, usage.imageCount, usage.wallTimeMs, job.id, body.leaseToken),
     ]);
   } catch (error) {
@@ -242,18 +257,28 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
   const committed = await c.env.DB.prepare(
     "SELECT 1 FROM edition_versions WHERE id=? AND job_id=?"
   ).bind(versionId, job.id).first();
-  if (!committed) return c.json({ error: "lease lost during commit" }, 409);
+  if (!committed) {
+    await c.env.DISPATCHES.delete(r2Key);
+    const current = await heldJob(c.env.DB, job.id, body.leaseToken);
+    if (current && isProfileSuppressed(current)) {
+      await terminalizeSuppressedJob(c.env, job.id, body.leaseToken);
+      return c.json({ error: "profile unavailable" }, 410);
+    }
+    return c.json({ error: "lease lost during commit" }, 409);
+  }
 
   await deleteR2Prefix(c.env.DISPATCHES, `staging/${job.id}/`);
   return c.json({ status: "published", username: job.username, weekKey: job.week_key, url: `/${job.username}/${job.week_key}`, versionId });
 });
 
-async function heldJob(db: D1Database, id: string, leaseToken: string): Promise<ClaimedJob | null> {
+async function heldJob(db: D1Database, id: string, leaseToken: string): Promise<HeldJob | null> {
   return db.prepare(
-    `SELECT j.*,u.username FROM generation_jobs j JOIN users u ON u.id=j.user_id
+    `SELECT j.*,u.username,
+       EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=u.username COLLATE NOCASE) AS suppressed
+     FROM generation_jobs j JOIN users u ON u.id=j.user_id
      WHERE j.id=? AND j.lease_token=? AND j.lease_expires_at>=unixepoch()
        AND j.status IN ('collecting','writing','illustrating','validating')`
-  ).bind(id, leaseToken).first<ClaimedJob>();
+  ).bind(id, leaseToken).first<HeldJob>();
 }
 
 async function updateLeasedJob(db: D1Database, id: string, leaseToken: string, fromStage: string, stage: string, leaseDurationSeconds: number): Promise<boolean> {

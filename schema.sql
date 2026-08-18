@@ -8,6 +8,14 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- Runtime opt-out/takedown state, intentionally independent of users so a
+-- future profile can be suppressed before its first OAuth or scheduler write.
+CREATE TABLE profile_suppressions (
+  username TEXT PRIMARY KEY COLLATE NOCASE,
+  reason TEXT NOT NULL CHECK (length(trim(reason)) BETWEEN 1 AND 500),
+  suppressed_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
 CREATE TABLE IF NOT EXISTS generations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT NOT NULL REFERENCES users(id),

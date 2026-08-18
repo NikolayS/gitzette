@@ -61,6 +61,30 @@ Only after that exact-head review exits zero and CI is green may `samo-agent`
 submit the CODEOWNER approval. Merge immediately after verifying the head SHA
 has not changed.
 
+## Full-delta review proof
+
+PR #65 is one fail-closed cutover because its migrations, Worker lease routes,
+host runner, and exact-head release gates have no independently deployable
+intermediate state. The runner and weekly scheduler remain disabled, so merging
+the coherent cutover does not activate generation. Splitting it would either
+ship an unconsumed schema/API or require temporary compatibility paths that are
+larger and less reviewable than the final boundary.
+
+Every push invalidates the prior verdict and approval. The reviewer is invoked
+with the PR URL and `--fetch`, so it receives the complete base-to-exact-head
+delta; it is never invoked on `HEAD^..HEAD`. The posted report records the exact
+head, total changed files/diff bytes, and CI result. A clean exit is followed by
+an exact-head status and a fresh commit-bound approval. The current review has
+already demonstrated full-delta coverage by finding interactions across D1
+migrations, Worker scheduling/publication, the host runner, TypeScript project
+configuration, and operational documentation in different fix rounds.
+
+The mechanically verified full local gate is also complete-chain rather than
+latest-commit-only: `bun run test:all` replays every migration, compares the
+result with `schema.sql`, exercises Worker+D1+R2 E2E, and typechecks Worker,
+scripts, runner source, and every runner test. `scripts/typecheck-config.test.ts`
+fails if a runner test falls out of that TypeScript project.
+
 ## Policy audit and bootstrap
 
 `config/main-branch-protection.json` is the reviewed policy.

@@ -6,6 +6,9 @@ import { EDITOR_PROMPT_VERSION } from "./inference";
 import { perceptualDistance, postProcessImage, sha256, validateVisual } from "./images";
 import type { ClaimedJob, Collector, Inference, Publisher } from "./types";
 import { combineTokenUsage, type JobUsage, type TokenUsage } from "../src/usage";
+import { isOAuthAuthFailure } from "./auth-failure";
+
+export type RunnerResult = "idle" | "processed" | "failed" | "auth_failed";
 
 export class RunnerEngine {
   constructor(
@@ -15,7 +18,7 @@ export class RunnerEngine {
     private readonly inference: Inference,
   ) {}
 
-  async runOnce(): Promise<"idle" | "processed" | "failed"> {
+  async runOnce(): Promise<RunnerResult> {
     const job = await this.publisher.claim();
     if (!job) return "idle";
     try {
@@ -24,7 +27,7 @@ export class RunnerEngine {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.publisher.fail(job, message, true);
-      return "failed";
+      return isOAuthAuthFailure(message) ? "auth_failed" : "failed";
     } finally {
       await rm(jobDir(this.config, job), { recursive: true, force: true });
     }
