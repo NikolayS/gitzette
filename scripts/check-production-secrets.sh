@@ -11,6 +11,6 @@ fi
 secret_json="$(mktemp)"
 trap 'rm -f "$secret_json"' EXIT
 "$wrangler_bin" secret list --format json >"$secret_json"
-bun scripts/check-production-secrets.ts "$secret_json"
+bun "$(dirname -- "${BASH_SOURCE[0]}")/check-production-secrets.ts" "$secret_json"
 
 echo "Production secrets OK: required bindings exist and retired provider credentials are absent"
