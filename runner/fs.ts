@@ -10,6 +10,8 @@ export async function ensurePrivateDirectory(path: string): Promise<void> {
     throw new Error(`runner private directory is unsafe: ${path}`, { cause: error });
   }
   try {
+    // Keep chmod/stat bound to the O_NOFOLLOW directory descriptor. Importing
+    // path-based chmod/stat here would reopen a symlink-swap race.
     await directory.chmod(0o700);
     const info = await directory.stat();
     if (!info.isDirectory() || (info.mode & 0o777) !== 0o700) {

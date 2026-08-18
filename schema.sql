@@ -101,7 +101,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_scheduled_once
   WHERE schedule_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS artifact_cleanup_jobs (
-  job_id TEXT PRIMARY KEY REFERENCES generation_jobs(id) ON DELETE CASCADE,
+  job_id TEXT PRIMARY KEY,
+  prefix TEXT NOT NULL UNIQUE CHECK (prefix = 'staging/' || job_id || '/'),
   attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   last_error TEXT NOT NULL CHECK (length(last_error) BETWEEN 1 AND 500),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())

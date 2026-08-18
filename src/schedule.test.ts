@@ -40,8 +40,11 @@ class StubStatement {
       this.db.staleSweepCalls += 1;
       return { results: this.db.expiredJobIds.map((id) => ({ id })) } as unknown as D1Result<T>;
     }
-    if (this.query.startsWith("SELECT job_id FROM artifact_cleanup_jobs")) {
-      return { results: [...this.db.pendingCleanupIds].map((job_id) => ({ job_id })) } as unknown as D1Result<T>;
+    if (this.query.startsWith("SELECT job_id,prefix FROM artifact_cleanup_jobs")) {
+      return { results: [...this.db.pendingCleanupIds].map((job_id) => ({
+        job_id,
+        prefix: `staging/${job_id}/`,
+      })) } as unknown as D1Result<T>;
     }
     if (!this.query.startsWith("SELECT id,username")) throw new Error(`unexpected all: ${this.query}`);
     return { results: this.db.profiles } as D1Result<T>;
@@ -422,8 +425,11 @@ describe("weekly profile scheduling", () => {
         env,
       );
       expect(objects.size).toBe(1);
-      expect(sqlite.query("SELECT job_id,attempts FROM artifact_cleanup_jobs").get())
-        .toEqual({ job_id: staleJobId, attempts: 1 });
+      expect(sqlite.query("SELECT job_id,prefix,attempts FROM artifact_cleanup_jobs").get())
+        .toEqual({ job_id: staleJobId, prefix: `staging/${staleJobId}/`, attempts: 1 });
+      sqlite.query("DELETE FROM generation_jobs WHERE id=?").run(staleJobId);
+      expect(sqlite.query("SELECT job_id,prefix,attempts FROM artifact_cleanup_jobs").get())
+        .toEqual({ job_id: staleJobId, prefix: `staging/${staleJobId}/`, attempts: 1 });
 
       await runWeeklySchedule(
         { cron: JOB_EXPIRY_CRON, scheduledTime: scheduledTime + 60 * 60 * 1000 } as ScheduledController,

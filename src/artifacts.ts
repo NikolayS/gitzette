@@ -3,22 +3,33 @@ import { isUuid } from "./identifiers";
 const MAX_DELETE_ROUNDS = 20;
 
 type ArtifactCleanupEnv = { DB: D1Database; DISPATCHES: R2Bucket };
+export type ArtifactCleanupTarget = { jobId: string; prefix: string };
 
 export async function deleteJobStaging(env: ArtifactCleanupEnv, jobId: string): Promise<void> {
-  if (!isUuid(jobId)) throw new Error("R2 cleanup job id must be a UUID");
+  return deleteArtifactCleanupTarget(env, { jobId, prefix: `staging/${jobId}/` });
+}
+
+export async function deleteArtifactCleanupTarget(
+  env: ArtifactCleanupEnv,
+  target: ArtifactCleanupTarget,
+): Promise<void> {
+  if (!isUuid(target.jobId) || target.prefix !== `staging/${target.jobId}/`) {
+    throw new Error("R2 cleanup target must identify one staging job");
+  }
   try {
-    await deleteR2Prefix(env.DISPATCHES, `staging/${jobId}/`);
-    await env.DB.prepare("DELETE FROM artifact_cleanup_jobs WHERE job_id=?").bind(jobId).run();
+    await deleteR2Prefix(env.DISPATCHES, target.prefix);
+    await env.DB.prepare("DELETE FROM artifact_cleanup_jobs WHERE job_id=?").bind(target.jobId).run();
   } catch (error) {
     const message = error instanceof Error ? error.message.slice(0, 500) : "unknown cleanup error";
     await env.DB.prepare(
-      `INSERT INTO artifact_cleanup_jobs(job_id,attempts,last_error,updated_at)
-       VALUES (?,1,?,unixepoch())
+      `INSERT INTO artifact_cleanup_jobs(job_id,prefix,attempts,last_error,updated_at)
+       VALUES (?,?,1,?,unixepoch())
        ON CONFLICT(job_id) DO UPDATE SET
+         prefix=excluded.prefix,
          attempts=artifact_cleanup_jobs.attempts+1,
          last_error=excluded.last_error,
          updated_at=excluded.updated_at`,
-    ).bind(jobId, message).run();
+    ).bind(target.jobId, target.prefix, message).run();
     throw error;
   }
 }

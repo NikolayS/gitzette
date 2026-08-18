@@ -2,7 +2,7 @@ import type { Env } from "./index";
 import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
 import { expireStaleJobs, LIVE_STATUSES, maxQueueAgeSeconds } from "./queue";
 import { parseIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
-import { deleteJobStaging } from "./artifacts";
+import { deleteArtifactCleanupTarget } from "./artifacts";
 import { isPublicationBlockedForProfile } from "./profile-suppression";
 
 export const JOB_EXPIRY_CRON = "7 * * * *";
@@ -131,20 +131,23 @@ export async function runWeeklySchedule(
 async function expireStaleArtifacts(env: Pick<Env, "DB" | "DISPATCHES" | "MAX_QUEUE_AGE_SECONDS">): Promise<void> {
   const expiredJobIds = await expireStaleJobs(env.DB, maxQueueAgeSeconds(env));
   const pending = await env.DB.prepare(
-    "SELECT job_id FROM artifact_cleanup_jobs ORDER BY updated_at,job_id LIMIT 100",
-  ).all<{ job_id: string }>();
-  const cleanupJobIds = new Set([
-    ...expiredJobIds,
-    ...(pending.results ?? []).map((row) => row.job_id),
-  ]);
-  for (const id of cleanupJobIds) {
+    "SELECT job_id,prefix FROM artifact_cleanup_jobs ORDER BY updated_at,job_id LIMIT 100",
+  ).all<{ job_id: string; prefix: string }>();
+  const cleanupTargets = new Map((pending.results ?? []).map((row) => [
+    row.job_id,
+    { jobId: row.job_id, prefix: row.prefix },
+  ]));
+  for (const jobId of expiredJobIds) {
+    cleanupTargets.set(jobId, { jobId, prefix: `staging/${jobId}/` });
+  }
+  for (const target of cleanupTargets.values()) {
     try {
-      await deleteJobStaging(env, id);
+      await deleteArtifactCleanupTarget(env, target);
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : "unknown cleanup error";
       console.error(JSON.stringify({
         event: "stale_artifact_cleanup_failed",
-        jobId: id,
+        jobId: target.jobId,
         error: message,
       }));
     }

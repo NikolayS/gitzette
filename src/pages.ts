@@ -533,12 +533,12 @@ pageRoutes.get("/status", async (c) => {
     ).bind(SCHEDULED_AGE_OUT_ERROR).all<{ username: string; week_key: string; updated_at: number }>(),
     unfulfilledQuery,
     c.env.DB.prepare(
-      `SELECT q.job_id,u.username,q.attempts,q.last_error,q.updated_at
+      `SELECT q.job_id,u.username,q.prefix,q.attempts,q.last_error,q.updated_at
        FROM artifact_cleanup_jobs q
-       JOIN generation_jobs j ON j.id=q.job_id
-       JOIN users u ON u.id=j.user_id
+       LEFT JOIN generation_jobs j ON j.id=q.job_id
+       LEFT JOIN users u ON u.id=j.user_id
        ORDER BY q.updated_at,q.job_id LIMIT 100`,
-    ).all<{ job_id: string; username: string; attempts: number; last_error: string; updated_at: number }>(),
+    ).all<{ job_id: string; username: string | null; prefix: string; attempts: number; last_error: string; updated_at: number }>(),
   ]);
   const now = Math.floor(Date.now() / 1000);
   return c.html(statusPage({
@@ -767,7 +767,7 @@ function statusPage(stats: {
   latestScheduledWeek: string;
   agedOutSchedules: { username: string; week_key: string; updated_at: number }[];
   unfulfilledSchedules: { username: string; week_key: string }[];
-  artifactCleanupPending: { job_id: string; username: string; attempts: number; last_error: string; updated_at: number }[];
+  artifactCleanupPending: { job_id: string; username: string | null; prefix: string; attempts: number; last_error: string; updated_at: number }[];
 }): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -853,7 +853,7 @@ ${headTags()}
   <div class="stat">
     <div class="label">Operator alert · artifact cleanup pending</div>
     <div class="value">${stats.artifactCleanupPending.length}</div>
-    ${stats.artifactCleanupPending.map((row) => `<div>@${row.username} · ${row.job_id} · attempt ${row.attempts} · updated ${row.updated_at}</div>`).join("")}
+    ${stats.artifactCleanupPending.map((row) => `<div>${row.username ? `@${row.username} · ` : ""}${row.prefix} · attempt ${row.attempts} · updated ${row.updated_at}</div>`).join("")}
   </div>
   ${creatorFooter()}
 </body>

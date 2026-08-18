@@ -8,6 +8,12 @@ const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
 
 describe("runner private directories", () => {
+  test("pins the systemd-owned state directory to mode 0700", async () => {
+    const unit = await Bun.file("runner/gitzette-runner.service").text();
+    expect(unit).toMatch(/^StateDirectory=gitzette-runner$/m);
+    expect(unit).toMatch(/^StateDirectoryMode=0700$/m);
+  });
+
   test("creates a private directory and tightens an existing permissive one", async () => {
     const root = await mkdtemp(join(tmpdir(), "gitzette-runner-fs-"));
     roots.push(root);

@@ -35,6 +35,8 @@ jobs:
           .required_pull_request_reviews.required_approving_review_count == 1 and
           .allow_force_pushes == false and .allow_deletions == false'
           config/main-branch-protection.json
+      - name: Verify generated Worker binding types
+        run: bun run check:worker-types
       - run: bun run test:all
       - run: bash scripts/evaluate-samorev-status.test.sh
       - run: bash scripts/normalize-branch-protection.test.sh

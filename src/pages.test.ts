@@ -14,6 +14,7 @@ function statusEnv(statusToken: string | undefined) {
           week_key: "2026-W32",
           updated_at: 1,
           job_id: "2bb65583-b570-4a55-b4e4-5de336b10664",
+          prefix: "staging/2bb65583-b570-4a55-b4e4-5de336b10664/",
           attempts: 2,
           last_error: "cleanup unavailable",
         }] }),
@@ -49,7 +50,7 @@ describe("private status route boundary", () => {
     expect(body).toContain("Operator alert · deferred weekly slots aged out · last 14 days");
     expect(body).toContain("Operator alert · unfulfilled weekly slots after final retry");
     expect(body).toContain("Operator alert · artifact cleanup pending");
-    expect(body).toContain("2bb65583-b570-4a55-b4e4-5de336b10664 · attempt 2");
+    expect(body).toContain("staging/2bb65583-b570-4a55-b4e4-5de336b10664/ · attempt 2");
     expect(body).toContain("@torvalds · 2026-W32");
   });
 });

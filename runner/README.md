@@ -35,6 +35,13 @@ Production layout:
 - service: `gitzette-runner.service`, with no inbound listener and a restrictive
   systemd filesystem/capability policy
 
+`StateDirectoryMode=0700` protects the systemd-created root. At runtime,
+`ensurePrivateDirectory` opens every state/work directory with `O_NOFOLLOW`,
+then uses that same file descriptor's `chmod(0700)` and `stat()` methods to
+tighten a pre-existing `0755` directory without a path re-resolution race. The
+runner filesystem test pins both the unit directive and the permissive-directory
+regression.
+
 The service must remain disabled until the Worker migration is deployed and the
 narrow `RUNNER_SECRET` is configured on both sides. Never put an AI API key in
 the environment file; startup rejects broad credential patterns and known AI

@@ -131,10 +131,25 @@ actionlint, shellcheck, the high audit, and the secret scan before the linked
 | `30b0be6` | structured OAuth outage signals and strict D1 response parsing | migrations, queue/publication, scheduler, renderer, and deploy gate | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5333994431) |
 | `806ae6a` | credential scrub, cleanup activation, OAuth persistence, disclosure | runner inference/lease core, migration chain, publication transaction, and review foundation | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5334155893) |
 | `c62ecea` | baseline derivation, post-retry visibility, prompt sandbox, scope extraction | migrations, Worker queue/lease/publication, host runner runtime, and protected review state machine | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5334329357) |
+| `0a78b55` | fail-closed suppression types and durable artifact cleanup retry | Worker routes, runner isolation, migration chain, deploy permissions, and base-controlled review state machine | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5334570243) |
 
 Each report records the complete base-to-head byte count, not only the focus
 column. A later fix head invalidates the prior row and must add a new exact-head
 report before approval.
+
+The merge base and current protected `main` are both
+`1aca7074f59b193466697a0290a11bd44bffed6e`. At that base, the
+`.github/workflows/samorev-gate.yml` blob is
+`9e21e49543ceee34d0d11d04721c2dd245b39b39`; the workflow checks out `main`,
+never PR-head code, before running the publisher. Verify rather than trusting
+this prose:
+
+```bash
+git fetch origin main
+test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+git rev-parse origin/main:.github/workflows/samorev-gate.yml
+gh api 'repos/NikolayS/gitzette/contents/.github/workflows/samorev-gate.yml?ref=1aca7074f59b193466697a0290a11bd44bffed6e' --jq .sha
+```
 
 ## Policy audit and bootstrap
 
