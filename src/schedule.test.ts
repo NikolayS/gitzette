@@ -225,6 +225,35 @@ describe("weekly profile scheduling", () => {
     expect(db.staleSweepCalls).toBe(1);
   });
 
+  test("expires manual work and removes staging while weekly enqueue stays disabled", async () => {
+    const sqlite = await generationDatabase();
+    try {
+      const db = new SqliteD1(sqlite);
+      const bucket = new StubR2();
+      sqlite.query("INSERT INTO users(id,username) VALUES ('1','admin')").run();
+      sqlite.query(
+        "INSERT INTO generation_jobs(id,user_id,requested_by,week_key,status,created_at) VALUES (?,?,?,?,?,unixepoch()-2)",
+      ).run("stale-manual", "1", "1", "2026-W33", "queued");
+      bucket.objects.add("staging/stale-manual/lease/image-1.webp");
+
+      await runWeeklySchedule(
+        { cron: WEEKLY_GENERATION_CRON, scheduledTime } as ScheduledController,
+        {
+          DB: db,
+          DISPATCHES: bucket,
+          MAX_QUEUE_AGE_SECONDS: "1",
+          WEEKLY_GENERATION_ENABLED: "false",
+        } as never,
+      );
+
+      expect(sqlite.query("SELECT status,last_error FROM generation_jobs WHERE id='stale-manual'").get())
+        .toEqual({ status: "permanent_failed", last_error: "generation runner unavailable; please retry" });
+      expect(bucket.objects.size).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("couples the configured trigger to the only accepted handler cron", async () => {
     const config = await Bun.file("wrangler.toml").text();
     const configuredCrons = [...config.matchAll(/^crons\s*=\s*\["([^"]+)"\]\s*$/gm)];

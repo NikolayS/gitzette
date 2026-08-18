@@ -55,7 +55,7 @@ async function enqueueWeeklyProfilesAfterSweep(
          SELECT 1 FROM generation_jobs
          WHERE user_id=? AND week_key=? AND status IN (${LIVE_STATUSES.map(() => "?").join(",")})
        )
-       ON CONFLICT(schedule_key) DO NOTHING`,
+       ON CONFLICT(schedule_key) WHERE schedule_key IS NOT NULL DO NOTHING`,
     ).bind(
       crypto.randomUUID(),
       profile.id,

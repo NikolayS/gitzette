@@ -17,11 +17,15 @@ export function appliedMigrationNames(committedNames: string[], ledgerDocument: 
   return applied;
 }
 
+export function appliedMigrationsFromDirectory(migrationDirectory: string, ledgerDocument: unknown): string[] {
+  return appliedMigrationNames(readdirSync(migrationDirectory), ledgerDocument);
+}
+
 if (import.meta.main) {
   const [migrationDirectory, ledgerPath] = process.argv.slice(2);
   if (!migrationDirectory || !ledgerPath) {
     throw new Error("usage: bun scripts/applied-migrations.ts <migration-directory> <ledger-json>");
   }
   const ledger = JSON.parse(await Bun.file(ledgerPath).text());
-  process.stdout.write(JSON.stringify(appliedMigrationNames(readdirSync(migrationDirectory), ledger)));
+  process.stdout.write(JSON.stringify(appliedMigrationsFromDirectory(migrationDirectory, ledger)));
 }
