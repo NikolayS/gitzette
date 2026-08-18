@@ -1,5 +1,5 @@
 ALTER TABLE generation_jobs ADD COLUMN schedule_key TEXT;
 
-CREATE UNIQUE INDEX generation_jobs_scheduled_once
+CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_scheduled_once
   ON generation_jobs(schedule_key)
-  WHERE schedule_key IS NOT NULL;
+  WHERE schedule_key IS NOT NULL AND status != 'permanent_failed';

@@ -43,7 +43,7 @@ export async function enqueueWeeklyProfiles(
          SELECT 1 FROM generation_jobs
          WHERE user_id=? AND week_key=? AND status IN (${LIVE_STATUSES.map(() => "?").join(",")})
        )
-       ON CONFLICT(schedule_key) WHERE schedule_key IS NOT NULL DO NOTHING`,
+       ON CONFLICT(schedule_key) WHERE schedule_key IS NOT NULL AND status != 'permanent_failed' DO NOTHING`,
     ).bind(
       crypto.randomUUID(),
       profile.id,
@@ -71,6 +71,10 @@ export async function runWeeklySchedule(
 ): Promise<void> {
   if (controller.cron !== WEEKLY_GENERATION_CRON) {
     throw new Error(`unexpected generation cron: ${controller.cron}`);
+  }
+  if (env.WEEKLY_GENERATION_ENABLED !== "true") {
+    console.log(JSON.stringify({ event: "weekly_generation_disabled" }));
+    return;
   }
   const result = await enqueueWeeklyProfiles(env, controller.scheduledTime);
   console.log(JSON.stringify({ event: "weekly_generation_enqueued", ...result }));

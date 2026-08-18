@@ -23,6 +23,7 @@ bucket_name = "gitzette-dispatches"
 ROLLING_7D_USER_GENERATION_LIMIT = "3"
 ROLLING_7D_GLOBAL_GENERATION_LIMIT = "100"
 MAX_QUEUE_AGE_SECONDS = "21600"
+WEEKLY_GENERATION_ENABLED = "false"
 
 # secrets (set via: wrangler secret put GITHUB_CLIENT_ID etc.)
 # GITHUB_CLIENT_ID

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
 import { enqueueWeeklyProfiles, runWeeklySchedule, WEEKLY_GENERATION_CRON } from "./schedule";
+import { AOE_LAG_MS } from "./week";
 
 type Profile = { id: string; username: string };
 
@@ -130,9 +131,53 @@ describe("weekly profile scheduling", () => {
     }
   });
 
+  test("re-enqueues a scheduled profile after its prior job permanently fails", async () => {
+    const sqlite = await generationDatabase();
+    try {
+      const db = new SqliteD1(sqlite);
+      sqlite.query("INSERT INTO users(id,username) VALUES (?,?)").run("1", "admin");
+      for (const profile of profiles) {
+        sqlite.query("INSERT INTO users(id,username) VALUES (?,?)").run(profile.id, profile.username);
+      }
+
+      expect((await enqueueWeeklyProfiles({ DB: db as never, ADMIN_USER_ID: "1" }, scheduledTime)).queued).toBe(9);
+      const scheduleKey = `2026-W33:${profiles[0].id}`;
+      sqlite.query("UPDATE generation_jobs SET status='permanent_failed' WHERE schedule_key=?").run(scheduleKey);
+
+      expect(await enqueueWeeklyProfiles({ DB: db as never, ADMIN_USER_ID: "1" }, scheduledTime)).toEqual({
+        weekKey: "2026-W33",
+        targets: 9,
+        queued: 1,
+        deduplicated: 8,
+      });
+      expect(sqlite.query(
+        "SELECT status,COUNT(*) AS count FROM generation_jobs WHERE schedule_key=? GROUP BY status ORDER BY status",
+      ).all(scheduleKey)).toEqual([
+        { status: "permanent_failed", count: 1 },
+        { status: "queued", count: 1 },
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("keeps the production scheduler inert until the runner is enabled", async () => {
+    const db = new StubD1(true, profiles);
+    await runWeeklySchedule(
+      { cron: WEEKLY_GENERATION_CRON, scheduledTime } as ScheduledController,
+      { DB: db, WEEKLY_GENERATION_ENABLED: "false" } as never,
+    );
+    expect(db.batchCalls).toBe(0);
+  });
+
   test("couples the configured trigger to the only accepted handler cron", async () => {
     const config = await Bun.file("wrangler.toml").text();
-    expect(config).toContain(`crons = ["${WEEKLY_GENERATION_CRON}"]`);
+    const configuredCrons = [...config.matchAll(/^crons\s*=\s*\["([^"]+)"\]\s*$/gm)];
+    expect(configuredCrons).toHaveLength(1);
+    expect(configuredCrons[0][1]).toBe(WEEKLY_GENERATION_CRON);
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = WEEKLY_GENERATION_CRON.split(" ");
+    expect([dayOfMonth, month, dayOfWeek]).toEqual(["*", "*", "1"]);
+    expect(Number(hour) * 60 + Number(minute)).toBeGreaterThanOrEqual(AOE_LAG_MS / 60_000);
     await expect(runWeeklySchedule({ cron: "* * * * *", scheduledTime } as ScheduledController, {} as never))
       .rejects.toThrow("unexpected generation cron");
   });

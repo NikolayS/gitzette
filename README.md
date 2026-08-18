@@ -114,6 +114,11 @@ no repository activity; operators must treat a missing weekly run as a failure
 and use `workflow_dispatch` to restore the cadence.
 
 The separate Cloudflare Cron Trigger runs weekly generation at 13:17 UTC on
-Monday, after the prior week is complete in every time zone. It enqueues the
-nine retained weekly profiles exactly once per profile/week; `/status` exposes
-the latest scheduled week and its rolling-seven-day scheduled-job count.
+Monday, after the prior week is complete in every time zone. The reviewed
+production configuration keeps `WEEKLY_GENERATION_ENABLED=false`, so trigger
+delivery is inert until the dedicated runner OAuth account is provisioned and
+its canaries pass. Enable it only in a subsequent reviewed deployment. Once
+enabled, it enqueues the nine retained weekly profiles exactly once per
+profile/week; a permanently failed scheduled job can be re-enqueued, and
+`/status` exposes the latest scheduled week and its rolling-seven-day
+scheduled-job count.

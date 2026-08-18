@@ -1,21 +1,39 @@
 # Production migration runbook
 
-Run production migrations only through `bun run db:migrate` or the protected
-tag deployment. The command first checks the one-time pre-cutover baseline,
-then proves live D1 matches a clean replay of every migration already recorded
-in its ledger. Only then does it apply pending migrations and compare live D1
-with the complete reviewed chain.
+Run existing production migrations only through `bun run db:migrate` or the
+protected tag deployment. The command first checks the one-time pre-cutover
+baseline, then proves live D1 matches a clean replay of every migration already
+recorded in its ledger. Only then does it apply pending migrations and compare
+live D1 with the complete reviewed chain.
 
 ## Failed post-apply assertion
 
-D1 cannot roll back an already-applied multi-statement migration atomically. If
-the remote apply succeeds but the final schema assertion fails, do not deploy
-the new Worker and do not edit the migration ledger. A maintainer authorized for
-the protected production environment must preserve the command output, compare
-live D1 with the clean local replay produced by
+D1 rolls back the migration file that reports an apply error; previously
+successful migration files remain applied. Wrangler also captures a backup
+before applying migrations. Do not edit the migration ledger or retry by hand.
+Preserve the failed command output, fix the unapplied migration in review, and
+rerun the protected command. See Cloudflare's
+[`d1 migrations apply` contract](https://developers.cloudflare.com/d1/wrangler-commands/#d1-migrations-apply).
+
+If the remote apply succeeds but the final schema assertion fails, do not deploy
+the new Worker. A maintainer authorized for the protected production environment
+must preserve the command output, compare live D1 with the clean local replay produced by
 `scripts/check-production-schema.sh`, and repair live D1 with a new reviewed
 forward migration. Then rerun `bun run db:migrate`; deploy only after both the
 pre-apply and post-apply schema assertions pass.
+
+## Brand-new production database
+
+`cutover-state.ts` classifies any database without a `d1_migrations` table as
+`cutover`, including a truly empty D1 database. The normal `db:migrate` path then
+requires the captured pre-cutover production schema, so it intentionally rejects
+an empty replacement database.
+
+For a newly created, never-used production D1 database, run
+`bun run db:bootstrap` instead. It proves there are zero application tables,
+applies the complete reviewed migration chain remotely, and runs the same final
+schema-equivalence assertion as `db:migrate`. It fails closed on any non-empty
+database; never use it to bypass the captured-baseline gate on an existing D1.
 
 ## Script entry points
 

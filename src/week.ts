@@ -1,6 +1,6 @@
 const WEEK_KEY = /^(20\d{2})-W(0[1-9]|[1-4]\d|5[0-3])$/;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-const AOE_LAG_MS = 12 * 60 * 60 * 1000;
+export const AOE_LAG_MS = 12 * 60 * 60 * 1000;
 
 export type IsoWeek = {
   key: string;
