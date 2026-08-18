@@ -13,9 +13,11 @@ afterEach(async () => {
 });
 
 type FakeWranglerMode = "success" | "failure" | "empty";
-type WrapperPath = "direct" | "symlink" | "cycle";
+type WrapperPath = "direct" | "symlink";
+type WrapperInvocation = "bash-absolute" | "direct-absolute" | "direct-relative" | "path";
 type SecretCheckOptions = {
   includeToken?: boolean;
+  invocation?: WrapperInvocation;
   mode?: FakeWranglerMode;
   wrapperPath?: WrapperPath;
 };
@@ -24,7 +26,12 @@ async function runRawSecretCheck(
   secretList: string,
   options: SecretCheckOptions = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string; wranglerLog: string; fakeInvoked: boolean }> {
-  const { includeToken = true, mode = "success", wrapperPath = "direct" } = options;
+  const {
+    includeToken = true,
+    invocation = "bash-absolute",
+    mode = "success",
+    wrapperPath = "direct",
+  } = options;
   const root = await mkdtemp(join(tmpdir(), "gitzette-secret-check-"));
   temporaryRepositories.push(root);
   await mkdir(join(root, "scripts"), { recursive: true });
@@ -32,6 +39,7 @@ async function runRawSecretCheck(
   for (const file of ["check-production-secrets.sh", "check-production-secrets.ts", "require-wrangler.sh"]) {
     await Bun.write(join(root, "scripts", file), Bun.file(join(repoRoot, "scripts", file)));
   }
+  await chmod(join(root, "scripts", "check-production-secrets.sh"), 0o755);
   const fakeWrangler = join(root, "node_modules", ".bin", "wrangler");
   await Bun.write(fakeWrangler, `#!/usr/bin/env bash
 set -euo pipefail
@@ -53,21 +61,20 @@ esac
   await chmod(fakeWrangler, 0o755);
 
   let scriptPath = join(root, "scripts", "check-production-secrets.sh");
-  if (wrapperPath !== "direct") {
+  if (wrapperPath === "symlink") {
     await mkdir(join(root, "bin"), { recursive: true });
-    if (wrapperPath === "symlink") {
-      scriptPath = join(root, "bin", "production-secrets");
-      await symlink("../scripts/check-production-secrets.sh", scriptPath);
-    } else {
-      scriptPath = join(root, "bin", "cycle-a");
-      await symlink("cycle-b", scriptPath);
-      await symlink("cycle-a", join(root, "bin", "cycle-b"));
-    }
+    scriptPath = join(root, "bin", "production-secrets");
+    await symlink("../scripts/check-production-secrets.sh", scriptPath);
   }
   const argvLog = join(root, "wrangler-argv.log");
 
   const environment: Record<string, string> = {
-    PATH: [join(root, "node_modules", ".bin"), dirname(process.execPath), process.env.PATH]
+    PATH: [
+      invocation === "path" ? dirname(scriptPath) : undefined,
+      join(root, "node_modules", ".bin"),
+      dirname(process.execPath),
+      process.env.PATH,
+    ]
       .filter(Boolean).join(":"),
     HOME: root,
     FAKE_SECRET_LIST: secretList,
@@ -75,8 +82,25 @@ esac
     FAKE_WRANGLER_ARGV_LOG: argvLog,
   };
   if (includeToken) environment.CLOUDFLARE_API_TOKEN = "test-only-token";
-  const child = Bun.spawn(["bash", scriptPath], {
-    cwd: tmpdir(),
+  let command: string[];
+  let cwd = tmpdir();
+  switch (invocation) {
+    case "bash-absolute":
+      command = ["bash", scriptPath];
+      break;
+    case "direct-absolute":
+      command = [scriptPath];
+      break;
+    case "direct-relative":
+      command = ["./scripts/check-production-secrets.sh"];
+      cwd = root;
+      break;
+    case "path":
+      command = [scriptPath.split("/").at(-1) ?? scriptPath];
+      break;
+  }
+  const child = Bun.spawn(command, {
+    cwd,
     env: environment,
     stdout: "pipe",
     stderr: "pipe",
@@ -180,11 +204,46 @@ describe("production secret preflight", () => {
     expect(result.stdout).toContain("Production secrets OK");
   });
 
-  test("fails promptly on a circular wrapper symlink", async () => {
-    const result = await runRawSecretCheck("[]", { wrapperPath: "cycle" });
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toMatch(/too many levels of symbolic links/i);
-    expect(result.fakeInvoked).toBe(false);
+  test("bounds circular symlink resolution", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gitzette-secret-cycle-"));
+    temporaryRepositories.push(root);
+    const first = join(root, "cycle-a");
+    await symlink("cycle-b", first);
+    await symlink("cycle-a", join(root, "cycle-b"));
+    const wrapper = join(repoRoot, "scripts", "check-production-secrets.sh");
+    const child = Bun.spawn([
+      "bash",
+      "-c",
+      `source "$1"; gitzette_production_secrets_script_directory "$2"`,
+      "--",
+      wrapper,
+      first,
+    ], { stdout: "pipe", stderr: "pipe" });
+    const [exitCode, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toBe("check-production-secrets.sh symlink resolution exceeded 40 hops\n");
+  });
+
+  test("runs directly through the shebang from the CI working directory", async () => {
+    const secretList = JSON.stringify(expectedProductionSecrets.map(name => ({ name })));
+    for (const invocation of ["direct-absolute", "direct-relative"] as const) {
+      const result = await runRawSecretCheck(secretList, { invocation });
+      expect(result.exitCode).toBe(0);
+      expect(result.wranglerLog).toBe("CALL\nARG:secret\nARG:list\nARG:--format\nARG:json\n");
+    }
+  });
+
+  test("resolves a bare wrapper name from PATH outside the repository", async () => {
+    const result = await runRawSecretCheck(
+      JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
+      { invocation: "path" },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.fakeInvoked).toBe(true);
+    expect(result.stdout).toContain("Production secrets OK");
   });
 
   test("requires the secret-list argv path", async () => {
@@ -198,7 +257,7 @@ describe("production secret preflight", () => {
       new Response(child.stderr).text(),
     ]);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("Wrangler secret-list path is required");
+    expect(stderr).toBe("Wrangler secret-list path is required\n");
   });
 
   test("preserves an actionable file-read error", async () => {
@@ -214,6 +273,6 @@ describe("production secret preflight", () => {
     ]);
     expect(exitCode).toBe(1);
     expect(stderr).toContain(missingPath);
-    expect(stderr).not.toContain("invalid Wrangler secret list");
+    expect(stderr.split("\n").filter(Boolean)).toHaveLength(1);
   });
 });

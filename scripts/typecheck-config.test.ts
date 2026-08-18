@@ -25,16 +25,29 @@ describe("TypeScript project coverage", () => {
     }
   });
 
-  test("the test command executes every top-level script test", async () => {
+  test("the test command discovers every top-level script test", async () => {
     const packageJson = JSON.parse(await Bun.file(resolve("package.json")).text()) as {
       scripts?: Record<string, string>;
     };
-    expect(packageJson.scripts?.["test:runner"]).toContain("bun test runner scripts/*.test.ts");
+    const runnerCommand = packageJson.scripts?.["test:runner"];
+    expect(runnerCommand).toBeDefined();
+    const testCommand = runnerCommand?.split(/\s*&&\s*/)
+      .find(command => /^bun\s+test(?:\s|$)/.test(command.trim()));
+    expect(testCommand).toBeDefined();
+    const tokens = testCommand?.trim().match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"])*"|'[^']*')+/g) ?? [];
+    expect(tokens.slice(0, 2)).toEqual(["bun", "test"]);
+    const testArguments = tokens.slice(2);
+    expect(testArguments.some(argument => argument === "-t"
+      || argument.startsWith("--test-name-pattern")
+      || argument === "--only")).toBe(false);
+    const testPatterns = testArguments.filter(argument => !argument.startsWith("-"));
+    expect(testPatterns.length).toBeGreaterThan(0);
 
     const discovered = ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.test.ts"], 1)
       .map(name => resolve(name)).sort();
-    const matched = [...new Bun.Glob("scripts/*.test.ts").scanSync({ cwd: resolve("."), absolute: true })]
-      .map(name => resolve(name)).sort();
+    const matched = [...new Set(testPatterns.flatMap(pattern => [
+      ...new Bun.Glob(pattern).scanSync({ cwd: resolve("."), absolute: true }),
+    ]))].map(name => resolve(name)).filter(name => name.startsWith(resolve("scripts"))).sort();
     expect(matched).toEqual(discovered);
   });
 });

@@ -37,7 +37,7 @@ export function assertProductionSecrets(document: unknown): void {
   }
 }
 
-if (import.meta.main) {
+async function main(): Promise<void> {
   const secretListPath = process.argv[2];
   if (!secretListPath) throw new Error("Wrangler secret-list path is required");
   const rawSecretList = await Bun.file(secretListPath).text();
@@ -49,4 +49,13 @@ if (import.meta.main) {
     throw new Error(`invalid Wrangler secret list: malformed JSON (${detail})`, { cause: error });
   }
   assertProductionSecrets(document);
+}
+
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
