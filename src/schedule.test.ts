@@ -7,6 +7,7 @@ import { runnerRoutes } from "./runner";
 import {
   enqueueWeeklyProfiles,
   JOB_EXPIRY_CRON,
+  postRetryUnfulfilledWeekKey,
   runWeeklySchedule,
   WEEKLY_GENERATION_CRON,
   WEEKLY_GENERATION_CRONS,
@@ -95,6 +96,12 @@ const profiles = WEEKLY_PROFILE_USERNAMES.map((username, index) => ({
 const scheduledTime = Date.parse("2026-08-17T13:17:00Z");
 
 describe("weekly profile scheduling", () => {
+  test("raises unfulfilled-week visibility only after the final retry can age out", () => {
+    expect(postRetryUnfulfilledWeekKey(new Date("2026-08-18T02:16:59Z"), 21_600)).toBeNull();
+    expect(postRetryUnfulfilledWeekKey(new Date("2026-08-18T02:17:00Z"), 21_600)).toBe("2026-W33");
+    expect(() => postRetryUnfulfilledWeekKey(new Date("2026-08-18T02:17:00Z"), 0)).toThrow("recovery age");
+  });
+
   test("fails closed before writes when the admin identity is unset or missing", async () => {
     const unset = new StubD1(true, profiles);
     await expect(enqueueWeeklyProfiles({ DB: unset as never, DISPATCHES: new StubR2() as never, ADMIN_USER_ID: "" }, scheduledTime))

@@ -71,9 +71,16 @@ ship an unconsumed schema/API or require temporary compatibility paths that are
 larger and less reviewable than the final boundary.
 
 The apparent support files are part of that same deployable boundary. The
-Actions workflow pins the base-controlled reviewer and least-privilege release
-identity before public-PR code can run. `bun.lock` fixes the dependencies used
-by both the Worker and isolated host runner. The runner `tsconfig` makes its
+independent publisher/reviewer foundation is no longer introduced by this PR:
+PR #66 landed it on `main` at
+`1aca7074f59b193466697a0290a11bd44bffed6e` before the current review cycle.
+Every review in this cycle therefore runs under base-controlled code. The
+remaining CI change installs the runner's pinned ImageMagick runtime and runs
+the feature's complete-chain gate; the deploy change enforces this feature's
+reviewed migration/secrets/head checks. The unrelated scheduled dependency
+audit was removed from this cutover for a later independent PR. `bun.lock`
+fixes the dependencies used by both the Worker and isolated host runner. The
+runner `tsconfig` makes its
 tests part of the required typecheck. The dispatch specification and runbooks
 define the migration, credential, activation, takedown, smoke, and rollback
 gates that keep the shipped scheduler and runner inert until an operator enables

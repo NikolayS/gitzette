@@ -2,11 +2,12 @@ import { Hono } from "hono";
 import { getUser } from "./auth";
 import { bearerToken, secretMatches } from "./credentials";
 import { addArticleMarkers, isLegacyEmptyDispatch, slowNewsFragment } from "./dispatch-health";
-import { HOME_PROFILE_USERNAMES, isManagedProfileSuppressed } from "./highlighted";
+import { HOME_PROFILE_USERNAMES, WEEKLY_PROFILE_USERNAMES, isManagedProfileSuppressed } from "./highlighted";
 import { isProfileSuppressed, isRuntimeProfileSuppressed } from "./profile-suppression";
 import { normalizeGitHubUsername } from "./identifiers";
 import type { Env } from "./index";
-import { SCHEDULED_AGE_OUT_ERROR } from "./queue";
+import { SCHEDULED_AGE_OUT_ERROR, maxQueueAgeSeconds } from "./queue";
+import { postRetryUnfulfilledWeekKey } from "./schedule";
 
 export const pageRoutes = new Hono<{ Bindings: Env }>();
 
@@ -478,7 +479,28 @@ pageRoutes.get("/status", async (c) => {
   if (!token || !await secretMatches(token, c.env.STATUS_TOKEN)) {
     return c.text("403 Forbidden", 403);
   }
-  const [genRow, userRow, jobsRow, agedOutRows] = await Promise.all([
+  const unfulfilledWeekKey = c.env.WEEKLY_GENERATION_ENABLED === "true"
+    ? postRetryUnfulfilledWeekKey(new Date(), maxQueueAgeSeconds(c.env))
+    : null;
+  const expectedProfiles = WEEKLY_PROFILE_USERNAMES.map(() => "(?)").join(",");
+  const unfulfilledQuery = unfulfilledWeekKey
+    ? c.env.DB.prepare(
+      `WITH expected(username) AS (VALUES ${expectedProfiles})
+       SELECT expected.username,? AS week_key
+       FROM expected
+       LEFT JOIN users u ON u.username=expected.username COLLATE NOCASE
+       LEFT JOIN profile_suppressions ps ON ps.username=expected.username COLLATE NOCASE
+       WHERE ps.username IS NULL AND (
+         u.id IS NULL OR NOT EXISTS (
+           SELECT 1 FROM generation_jobs j
+           WHERE j.user_id=u.id AND j.week_key=? AND j.status='published'
+         )
+       )
+       ORDER BY expected.username`,
+    ).bind(...WEEKLY_PROFILE_USERNAMES, unfulfilledWeekKey, unfulfilledWeekKey)
+      .all<{ username: string; week_key: string }>()
+    : Promise.resolve({ results: [] as { username: string; week_key: string }[] });
+  const [genRow, userRow, jobsRow, agedOutRows, unfulfilledRows] = await Promise.all([
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE r2_key IS NOT NULL`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM users`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) AS total,
@@ -509,6 +531,7 @@ pageRoutes.get("/status", async (c) => {
        WHERE j.last_error=? AND j.updated_at>=unixepoch('now','-14 days')
        ORDER BY j.updated_at DESC,u.username LIMIT 100`,
     ).bind(SCHEDULED_AGE_OUT_ERROR).all<{ username: string; week_key: string; updated_at: number }>(),
+    unfulfilledQuery,
   ]);
   const now = Math.floor(Date.now() / 1000);
   return c.html(statusPage({
@@ -525,6 +548,7 @@ pageRoutes.get("/status", async (c) => {
     scheduledJobsThisWeek: jobsRow?.scheduled_jobs ?? 0,
     latestScheduledWeek: jobsRow?.latest_scheduled_week ?? "none",
     agedOutSchedules: agedOutRows.results ?? [],
+    unfulfilledSchedules: unfulfilledRows.results ?? [],
   }));
 });
 
@@ -734,6 +758,7 @@ function statusPage(stats: {
   scheduledJobsThisWeek: number;
   latestScheduledWeek: string;
   agedOutSchedules: { username: string; week_key: string; updated_at: number }[];
+  unfulfilledSchedules: { username: string; week_key: string }[];
 }): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -810,6 +835,11 @@ ${headTags()}
     <div class="label">Operator alert · deferred weekly slots aged out · last 14 days</div>
     <div class="value">${stats.agedOutSchedules.length}</div>
     ${stats.agedOutSchedules.map((row) => `<div>@${row.username} · ${row.week_key}</div>`).join("")}
+  </div>
+  <div class="stat">
+    <div class="label">Operator alert · unfulfilled weekly slots after final retry</div>
+    <div class="value">${stats.unfulfilledSchedules.length}</div>
+    ${stats.unfulfilledSchedules.map((row) => `<div>@${row.username} · ${row.week_key}</div>`).join("")}
   </div>
   ${creatorFooter()}
 </body>

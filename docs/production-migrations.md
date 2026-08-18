@@ -50,18 +50,26 @@ step mutates production.
 
 `fixtures/production-baseline-2026-08-15.sql` is a canonical SQL reconstruction
 of the pre-migration production `sqlite_master` captured on 2026-08-15, not a
-byte-for-byte export. The exact read-only capture and canonicalization command
-for its SQL body is below. Run it from the repository root and preserve the
-fixture's provenance header when replacing the reviewed SQL body:
+byte-for-byte export. `scripts/production-baseline-from-json.ts` now defines a
+strict, deterministic derivation from Wrangler's raw JSON envelope to the
+complete fixture, including its provenance header. The historical raw envelope
+was not retained, so this repository does not claim byte-for-byte evidence it
+does not have. The protected drift gate re-reads live D1 immediately before the
+first migration. The exact read-only capture and regeneration commands are:
 
 ```bash
 query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'trigger' THEN 2 ELSE 3 END,name"
 ./node_modules/.bin/wrangler d1 execute gitzette-db --remote --command "$query" --json \
-  | bun -e 'const { canonicalSchema } = await import("./scripts/schema-equivalence.ts"); const rows = canonicalSchema(JSON.parse(await Bun.stdin.text())); console.log(rows.flatMap((row) => row.sql === null ? [] : [row.sql + ";"]).join("\n"));' \
+  >/tmp/production-baseline-2026-08-15.raw.json
+bun scripts/production-baseline-from-json.ts \
+  /tmp/production-baseline-2026-08-15.raw.json 2026-08-15 \
   >/tmp/production-baseline-2026-08-15.sql
+diff -u fixtures/production-baseline-2026-08-15.sql \
+  /tmp/production-baseline-2026-08-15.sql
 ```
 
-`canonicalSchema` removes line and block comments outside quoted strings,
+The raw capture contains production schema only; do not commit account data or
+credentials. `canonicalSchema` removes line and block comments outside quoted strings,
 collapses whitespace around punctuation, strips `IF NOT EXISTS`, and removes
 unnecessary quotes from the declared object name. Review the resulting diff;
 never use this capture command to bless unexpected production drift.

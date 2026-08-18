@@ -14,6 +14,13 @@ secret, AI API keys, TARS state, messaging configuration, or a tool-capable
 agent session. The OpenClaw config denies every agent tool; text and images use
 the direct `openclaw infer` capability surface. It intentionally contains no
 Gateway block, and the systemd service never starts a Gateway process.
+Public commit messages and PR/issue titles are untrusted third-party input. They
+are serialized inside the hostile-evidence delimiter, never interpolated into a
+shell, and reach an agent with `tools.deny=["*"]`, no channels, elevation off,
+and `workspaceAccess=none`. The only accepted text result is then parsed and
+validated against the exact evidence-bound edition schema before publication;
+prompt text cannot grant tools, filesystem access, URLs, HTML, or unsupported
+claims.
 The editor receives newest-first evidence capped at 64 KiB of serialized UTF-8,
 keeping the single prompt argument below Linux's per-argument limit even when
 the collector reaches its 500-item ceiling. The complete evidence bundle

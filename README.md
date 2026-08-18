@@ -109,11 +109,6 @@ must not be dropped. Generation stays disabled until a reviewed forward repair
 and fresh canaries pass. Retired AI-provider credentials are not a rollback
 mechanism and must not be restored as a silent fallback.
 
-The scheduled moderate-or-higher dependency audit opens or updates a GitHub
-issue when it fails. GitHub may disable scheduled workflows after 60 days with
-no repository activity; operators must treat a missing weekly run as a failure
-and use `workflow_dispatch` to restore the cadence.
-
 The Cloudflare scheduled handler dispatches by `controller.cron`: `7 * * * *`
 only expires stale jobs and staging every hour, `17 13 * * 1` performs the
 primary Monday enqueue after the prior week is complete in every time zone, and
@@ -138,6 +133,18 @@ distinct terminal failure code
 that ISO week is still eligible. Verify publication before clearing the
 incident; after the Monday retry has run, the next Monday targets a different
 week and is not recovery.
+
+Once weekly generation is enabled, after the final Monday retry plus the
+configured queue age-out window, `/status` also computes a distinct
+`unfulfilled weekly slots after final retry` list for
+every unsuppressed retained profile without a published job for that ISO week.
+This catches a missed cron or total provider outage even when no job row was
+ever created. A nonzero count must be acknowledged within one hour. Within four
+hours of the alert, the on-call must use the same authenticated `POST /generate`
+admin re-drive for every listed profile/week, or keep a generation-outage
+incident open if the provider remains unavailable. The incident closes only
+after each edition is published and the unfulfilled counter returns to zero;
+merely queuing the jobs is not recovery.
 
 Before changing `WEEKLY_GENERATION_ENABLED` to `true`, run
 `bash scripts/check-weekly-profiles.sh` with production Cloudflare credentials.

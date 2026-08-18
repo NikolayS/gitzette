@@ -41,6 +41,5 @@ jobs:
       - run: bash scripts/poll-samorev-gate.test.sh
       - run: shellcheck scripts/*.sh
       - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
-      # High/critical advisories block merges. Lower severities stay visible in
-      # the weekly dependency-audit workflow without randomly blocking unrelated PRs.
+      # High/critical advisories block merges.
       - run: bun audit --audit-level=high

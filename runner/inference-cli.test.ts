@@ -7,6 +7,26 @@ import { OpenClawInference } from "./inference";
 import type { EvidenceBundle } from "../src/edition";
 
 describe("OpenClaw CLI boundary", () => {
+  test("denies every editor tool, elevation, and workspace access", async () => {
+    const document = JSON.parse(await Bun.file("runner/openclaw.json").text()) as {
+      tools: { deny: string[]; elevated: { enabled: boolean } };
+      channels: Record<string, unknown>;
+      agents: {
+        defaults: { sandbox: { mode: string; scope: string; workspaceAccess: string } };
+        list: { tools: { deny: string[] } }[];
+      };
+    };
+    expect(document.tools).toEqual({ deny: ["*"], elevated: { enabled: false } });
+    expect(document.channels).toEqual({});
+    expect(document.agents.defaults.sandbox).toEqual({
+      mode: "all",
+      scope: "agent",
+      workspaceAccess: "none",
+    });
+    expect(document.agents.list).toHaveLength(1);
+    expect(document.agents.list[0].tools).toEqual({ deny: ["*"] });
+  });
+
   test("uses an argv array, verifies the image envelope, and strips secrets", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-cli-test-"));
     const output = join(directory, "image.png");

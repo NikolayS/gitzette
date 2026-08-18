@@ -1,7 +1,7 @@
 import type { Env } from "./index";
 import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
 import { expireStaleJobs, LIVE_STATUSES, maxQueueAgeSeconds } from "./queue";
-import { previousCompletedIsoWeekKey } from "./week";
+import { parseIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 import { deleteR2Prefix } from "./artifacts";
 import { isProfileSuppressed } from "./profile-suppression";
 
@@ -10,6 +10,15 @@ export const WEEKLY_GENERATION_CRONS = ["17 13 * * 1", "17 20 * * 1"] as const;
 export const WEEKLY_GENERATION_CRON = WEEKLY_GENERATION_CRONS[0];
 export const WEEKLY_GENERATION_RETRY_CRON = WEEKLY_GENERATION_CRONS[1];
 const weeklyGenerationCrons = new Set<string>(WEEKLY_GENERATION_CRONS);
+
+export function postRetryUnfulfilledWeekKey(now: Date, maxAgeSeconds: number): string | null {
+  if (!Number.isFinite(maxAgeSeconds) || maxAgeSeconds < 1) throw new Error("invalid schedule recovery age");
+  const weekKey = previousCompletedIsoWeekKey(now);
+  const [minute, hour] = WEEKLY_GENERATION_RETRY_CRON.split(" ").map(Number);
+  const nextMonday = parseIsoWeekKey(weekKey).nextMonday.getTime();
+  const alertAt = nextMonday + (hour * 60 + minute) * 60_000 + maxAgeSeconds * 1000;
+  return now.getTime() >= alertAt ? weekKey : null;
+}
 
 export type WeeklyScheduleResult = {
   weekKey: string;

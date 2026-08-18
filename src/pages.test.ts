@@ -40,6 +40,7 @@ describe("private status route boundary", () => {
     const body = await response.text();
     expect(body).toContain("Input tokens · last 7 days");
     expect(body).toContain("Operator alert · deferred weekly slots aged out · last 14 days");
+    expect(body).toContain("Operator alert · unfulfilled weekly slots after final retry");
     expect(body).toContain("@torvalds · 2026-W32");
   });
 });

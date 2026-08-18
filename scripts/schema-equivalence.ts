@@ -55,14 +55,26 @@ function canonicalSql(sql: string | null): string | null {
 }
 
 export function canonicalSchema(document: unknown): SchemaRow[] {
-  const rows = (document as any)?.[0]?.results;
-  if (!Array.isArray(rows)) throw new Error("invalid Wrangler schema result");
-  return rows.map((row: any) => {
-    if (typeof row?.type !== "string" || typeof row?.name !== "string") {
+  if (!Array.isArray(document) || document.length !== 1 || !isRecord(document[0])) {
+    throw new Error("invalid Wrangler schema result");
+  }
+  const envelope = document[0];
+  if (("success" in envelope && envelope.success !== true)
+    || "error" in envelope
+    || !Array.isArray(envelope.results)) {
+    throw new Error("invalid Wrangler schema result");
+  }
+  return envelope.results.map((row) => {
+    if (!isRecord(row) || typeof row.type !== "string" || typeof row.name !== "string"
+      || (row.sql !== null && typeof row.sql !== "string")) {
       throw new Error("invalid Wrangler schema row");
     }
     return { type: row.type, name: row.name, sql: canonicalSql(row.sql) };
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export function schemasMatch(left: unknown, right: unknown): boolean {
