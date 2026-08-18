@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { Hono } from "hono";
 import { WEEKLY_PROFILE_USERNAMES } from "./highlighted";
+import { queueRoutes } from "./queue";
+import { runnerRoutes } from "./runner";
 import { enqueueWeeklyProfiles, runWeeklySchedule, WEEKLY_GENERATION_CRON } from "./schedule";
 import { AOE_LAG_MS } from "./week";
 
@@ -231,24 +234,45 @@ describe("weekly profile scheduling", () => {
       const db = new SqliteD1(sqlite);
       const bucket = new StubR2();
       sqlite.query("INSERT INTO users(id,username) VALUES ('1','admin')").run();
+      sqlite.query("INSERT INTO sessions(token,user_id,expires_at) VALUES ('disabled-weekly','1',unixepoch()+3600)").run();
       sqlite.query(
         "INSERT INTO generation_jobs(id,user_id,requested_by,week_key,status,created_at) VALUES (?,?,?,?,?,unixepoch()-2)",
       ).run("stale-manual", "1", "1", "2026-W33", "queued");
       bucket.objects.add("staging/stale-manual/lease/image-1.webp");
 
+      const env = {
+        DB: db,
+        DISPATCHES: bucket,
+        MAX_QUEUE_AGE_SECONDS: "1",
+        WEEKLY_GENERATION_ENABLED: "false",
+        RUNNER_SECRET: "expected",
+        ROLLING_7D_GLOBAL_GENERATION_LIMIT: "100",
+      } as never;
       await runWeeklySchedule(
         { cron: WEEKLY_GENERATION_CRON, scheduledTime } as ScheduledController,
-        {
-          DB: db,
-          DISPATCHES: bucket,
-          MAX_QUEUE_AGE_SECONDS: "1",
-          WEEKLY_GENERATION_ENABLED: "false",
-        } as never,
+        env,
       );
 
       expect(sqlite.query("SELECT status,last_error FROM generation_jobs WHERE id='stale-manual'").get())
         .toEqual({ status: "permanent_failed", last_error: "generation runner unavailable; please retry" });
       expect(bucket.objects.size).toBe(0);
+
+      const app = new Hono()
+        .route("/", queueRoutes as never)
+        .route("/runner", runnerRoutes as never);
+      const status = await app.request(
+        "/generate/status",
+        { headers: { cookie: "session=disabled-weekly" } },
+        env,
+      );
+      expect(status.status).toBe(200);
+      expect(await status.json()).toMatchObject({ status: "failed", stage: "permanent_failed" });
+      const claim = await app.request(
+        "/runner/jobs/claim",
+        { method: "POST", headers: { authorization: "Bearer expected" } },
+        env,
+      );
+      expect(claim.status).toBe(204);
     } finally {
       sqlite.close();
     }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source scripts/require-wrangler.sh
+# shellcheck source=scripts/require-wrangler.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 
 weekly_enabled="$(bun -e '
   const config = Bun.TOML.parse(await Bun.file("wrangler.toml").text());

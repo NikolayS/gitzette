@@ -2,7 +2,8 @@
 set -euo pipefail
 
 unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_D1_TOKEN
-source scripts/require-wrangler.sh
+# shellcheck source=scripts/require-wrangler.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 
 state_dir="$(mktemp -d)"
 port=""

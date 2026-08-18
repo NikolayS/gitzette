@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source scripts/require-wrangler.sh
+# shellcheck source=scripts/require-wrangler.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required to verify Worker secrets" >&2

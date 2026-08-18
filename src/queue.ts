@@ -4,7 +4,7 @@ import type { Env } from "./index";
 import { isGitHubUsername } from "./identifiers";
 import { isManagedProfileSuppressed } from "./highlighted";
 import { deleteR2Prefix } from "./artifacts";
-import { isCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
+import { isCompletedIsoWeekKey, isGeneratableCompletedIsoWeekKey, previousCompletedIsoWeekKey } from "./week";
 
 export const LIVE_STATUSES = ["queued", "collecting", "writing", "illustrating", "validating", "retryable_failed"] as const;
 export const TERMINAL_STATUSES = ["published", "permanent_failed"] as const;
@@ -74,7 +74,9 @@ queueRoutes.post("/generate", async (c) => {
   const unknownFields = Object.keys(body).filter((key) => key !== "weekKey" && key !== "forUsername");
   if (unknownFields.length > 0) return c.json({ error: `unknown request field: ${unknownFields[0]}` }, 400);
   const weekKey = body.weekKey === undefined ? defaultCompletedWeek() : body.weekKey;
-  if (typeof weekKey !== "string" || !isCompletedIsoWeekKey(weekKey)) return c.json({ error: "invalid or incomplete weekKey" }, 400);
+  if (typeof weekKey !== "string" || !isGeneratableCompletedIsoWeekKey(weekKey)) {
+    return c.json({ error: "invalid or incomplete weekKey" }, 400);
+  }
 
   let target = requester;
   if (body.forUsername !== undefined) {

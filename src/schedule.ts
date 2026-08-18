@@ -84,6 +84,8 @@ export async function runWeeklySchedule(
   if (controller.cron !== WEEKLY_GENERATION_CRON) {
     throw new Error(`unexpected generation cron: ${controller.cron}`);
   }
+  // Queue expiry is a control-plane invariant for manual and scheduled jobs;
+  // it must run even while weekly enqueue is disabled.
   await expireStaleArtifacts(env);
   if (env.WEEKLY_GENERATION_ENABLED !== "true") {
     console.log(JSON.stringify({ event: "weekly_generation_disabled" }));

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source scripts/require-wrangler.sh
+# shellcheck source=scripts/require-wrangler.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 
 # This is a one-time pre-cutover baseline gate. After cutover, Wrangler's D1
 # migration ledger records and applies reviewed migrations; this script does not
