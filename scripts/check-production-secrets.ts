@@ -1,11 +1,11 @@
-export const expectedProductionSecrets = [
+export const expectedProductionSecrets: readonly string[] = Object.freeze([
   "ADMIN_USER_ID",
   "GITHUB_CLIENT_ID",
   "GITHUB_CLIENT_SECRET",
   "RUNNER_SECRET",
   "SESSION_SECRET",
   "STATUS_TOKEN",
-].sort();
+]);
 
 export function assertProductionSecrets(document: unknown): void {
   if (!Array.isArray(document)
@@ -33,9 +33,10 @@ export function assertProductionSecrets(document: unknown): void {
 if (import.meta.main) {
   const secretListPath = process.argv[2];
   if (!secretListPath) throw new Error("Wrangler secret-list path is required");
+  const rawSecretList = await Bun.file(secretListPath).text();
   let document: unknown;
   try {
-    document = JSON.parse(await Bun.file(secretListPath).text());
+    document = JSON.parse(rawSecretList);
   } catch {
     throw new Error("invalid Wrangler secret list");
   }

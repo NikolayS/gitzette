@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,12 +13,18 @@ afterEach(async () => {
 });
 
 type FakeWranglerMode = "success" | "failure" | "empty";
+type WrapperPath = "direct" | "symlink" | "cycle";
+type SecretCheckOptions = {
+  includeToken?: boolean;
+  mode?: FakeWranglerMode;
+  wrapperPath?: WrapperPath;
+};
 
 async function runRawSecretCheck(
   secretList: string,
-  mode: FakeWranglerMode = "success",
-  throughSymlink = false,
-): Promise<{ exitCode: number; stdout: string; stderr: string; wranglerArgv: string[]; fakeInvoked: boolean }> {
+  options: SecretCheckOptions = {},
+): Promise<{ exitCode: number; stdout: string; stderr: string; wranglerLog: string; fakeInvoked: boolean }> {
+  const { includeToken = true, mode = "success", wrapperPath = "direct" } = options;
   const root = await mkdtemp(join(tmpdir(), "gitzette-secret-check-"));
   temporaryRepositories.push(root);
   await mkdir(join(root, "scripts"), { recursive: true });
@@ -27,9 +33,16 @@ async function runRawSecretCheck(
     await Bun.write(join(root, "scripts", file), Bun.file(join(repoRoot, "scripts", file)));
   }
   const fakeWrangler = join(root, "node_modules", ".bin", "wrangler");
-  await Bun.write(fakeWrangler, `#!/bin/bash
+  await Bun.write(fakeWrangler, `#!/usr/bin/env bash
 set -euo pipefail
-printf '%s\\n' "$@" >"\${FAKE_WRANGLER_ARGV_LOG:?}"
+{
+  printf 'CALL\\n'
+  printf 'ARG:%s\\n' "$@"
+} >>"\${FAKE_WRANGLER_ARGV_LOG:?}"
+if [[ "$#" -ne 4 || "$1" != secret || "$2" != list || "$3" != --format || "$4" != json ]]; then
+  echo "unexpected fake Wrangler arguments" >&2
+  exit 44
+fi
 case "\${FAKE_WRANGLER_MODE:?}" in
   success) printf '%s\\n' "\${FAKE_SECRET_LIST:?}" ;;
   failure) echo "fake Wrangler failure" >&2; exit 42 ;;
@@ -40,24 +53,31 @@ esac
   await chmod(fakeWrangler, 0o755);
 
   let scriptPath = join(root, "scripts", "check-production-secrets.sh");
-  if (throughSymlink) {
+  if (wrapperPath !== "direct") {
     await mkdir(join(root, "bin"), { recursive: true });
-    scriptPath = join(root, "bin", "production-secrets");
-    const linked = Bun.spawn(["ln", "-s", "../scripts/check-production-secrets.sh", scriptPath]);
-    expect(await linked.exited).toBe(0);
+    if (wrapperPath === "symlink") {
+      scriptPath = join(root, "bin", "production-secrets");
+      await symlink("../scripts/check-production-secrets.sh", scriptPath);
+    } else {
+      scriptPath = join(root, "bin", "cycle-a");
+      await symlink("cycle-b", scriptPath);
+      await symlink("cycle-a", join(root, "bin", "cycle-b"));
+    }
   }
   const argvLog = join(root, "wrangler-argv.log");
 
+  const environment: Record<string, string> = {
+    PATH: [join(root, "node_modules", ".bin"), dirname(process.execPath), process.env.PATH]
+      .filter(Boolean).join(":"),
+    HOME: root,
+    FAKE_SECRET_LIST: secretList,
+    FAKE_WRANGLER_MODE: mode,
+    FAKE_WRANGLER_ARGV_LOG: argvLog,
+  };
+  if (includeToken) environment.CLOUDFLARE_API_TOKEN = "test-only-token";
   const child = Bun.spawn(["bash", scriptPath], {
     cwd: tmpdir(),
-    env: {
-      PATH: `${join(root, "node_modules", ".bin")}:${dirname(process.execPath)}:/usr/bin:/bin`,
-      HOME: root,
-      CLOUDFLARE_API_TOKEN: "test-only-token",
-      FAKE_SECRET_LIST: secretList,
-      FAKE_WRANGLER_MODE: mode,
-      FAKE_WRANGLER_ARGV_LOG: argvLog,
-    },
+    env: environment,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -67,10 +87,8 @@ esac
     new Response(child.stderr).text(),
   ]);
   const fakeInvoked = await Bun.file(argvLog).exists();
-  const wranglerArgv = fakeInvoked
-    ? (await Bun.file(argvLog).text()).trim().split("\n").filter(Boolean)
-    : [];
-  return { exitCode, stdout, stderr, wranglerArgv, fakeInvoked };
+  const wranglerLog = fakeInvoked ? await Bun.file(argvLog).text() : "";
+  return { exitCode, stdout, stderr, wranglerLog, fakeInvoked };
 }
 
 function runSecretCheck(secrets: unknown) {
@@ -84,7 +102,7 @@ describe("production secret preflight", () => {
     expect(result.stderr).not.toContain("secret mismatch");
     expect(result.stdout).toContain("Production secrets OK");
     expect(result.fakeInvoked).toBe(true);
-    expect(result.wranglerArgv).toEqual(["secret", "list", "--format", "json"]);
+    expect(result.wranglerLog).toBe("CALL\nARG:secret\nARG:list\nARG:--format\nARG:json\n");
   });
 
   test("fails closed when the Wrangler response is missing a required secret", async () => {
@@ -114,6 +132,11 @@ describe("production secret preflight", () => {
     }
   });
 
+  test("keeps the production allowlist immutable", () => {
+    expect(Object.isFrozen(expectedProductionSecrets)).toBe(true);
+    expect(() => (expectedProductionSecrets as string[]).push("EXTRA_SECRET")).toThrow();
+  });
+
   test("rejects malformed JSON from Wrangler", async () => {
     const result = await runRawSecretCheck("{");
     expect(result.exitCode).toBe(1);
@@ -122,27 +145,41 @@ describe("production secret preflight", () => {
   });
 
   test("fails before validation when Wrangler fails or returns an empty response", async () => {
-    const failed = await runRawSecretCheck("[]", "failure");
+    const failed = await runRawSecretCheck("[]", { mode: "failure" });
     expect(failed.exitCode).toBe(42);
     expect(failed.stderr).toContain("fake Wrangler failure");
     expect(failed.stdout).not.toContain("Production secrets OK");
     expect(failed.fakeInvoked).toBe(true);
 
-    const empty = await runRawSecretCheck("unused", "empty");
+    const empty = await runRawSecretCheck("unused", { mode: "empty" });
     expect(empty.exitCode).toBe(1);
     expect(empty.stderr).toContain("invalid Wrangler secret list");
     expect(empty.stdout).not.toContain("Production secrets OK");
   });
 
+  test("requires the Cloudflare token before invoking Wrangler", async () => {
+    const result = await runRawSecretCheck("[]", { includeToken: false });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("CLOUDFLARE_API_TOKEN is required");
+    expect(result.stdout).toBe("");
+    expect(result.fakeInvoked).toBe(false);
+  });
+
   test("resolves the checked entrypoint through a symlinked wrapper", async () => {
     const result = await runRawSecretCheck(
       JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
-      "success",
-      true,
+      { wrapperPath: "symlink" },
     );
     expect(result.exitCode).toBe(0);
     expect(result.fakeInvoked).toBe(true);
     expect(result.stdout).toContain("Production secrets OK");
+  });
+
+  test("fails promptly on a circular wrapper symlink", async () => {
+    const result = await runRawSecretCheck("[]", { wrapperPath: "cycle" });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/too many (?:levels of symbolic links|symlinks)/i);
+    expect(result.fakeInvoked).toBe(false);
   });
 
   test("requires the secret-list argv path", async () => {
@@ -157,5 +194,21 @@ describe("production secret preflight", () => {
     ]);
     expect(exitCode).toBe(1);
     expect(stderr).toContain("Wrangler secret-list path is required");
+  });
+
+  test("preserves an actionable file-read error", async () => {
+    const missingPath = join(tmpdir(), `missing-secret-list-${crypto.randomUUID()}.json`);
+    const child = Bun.spawn(["bun", `${repoRoot}/scripts/check-production-secrets.ts`, missingPath], {
+      cwd: tmpdir(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(missingPath);
+    expect(stderr).not.toContain("invalid Wrangler secret list");
   });
 });
