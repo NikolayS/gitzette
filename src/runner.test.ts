@@ -29,7 +29,7 @@ class StubStatement {
     return this;
   }
 
-  async run() {
+  async all<T>() {
     if (this.query.includes("last_error='generation attempts exhausted'")) {
       const [now, maxAttempts] = this.args as number[];
       const job = this.db.job;
@@ -41,9 +41,9 @@ class StubStatement {
         job.lease_token = null;
         job.lease_expires_at = null;
       }
-      return { meta: { changes: exhausted ? 1 : 0 } };
+      return { results: exhausted ? [{ id: job.id }] : [] } as D1Result<T>;
     }
-    throw new Error(`unexpected D1 run: ${this.query}`);
+    throw new Error(`unexpected D1 all: ${this.query}`);
   }
 
   async first<T>() {
@@ -92,8 +92,22 @@ class StubD1 {
 }
 
 class StubR2 {
-  async list() { return { objects: [], truncated: false }; }
-  async delete() {}
+  readonly objects: Set<string>;
+
+  constructor(keys: string[] = []) {
+    this.objects = new Set(keys);
+  }
+
+  async list({ prefix }: { prefix: string }) {
+    return {
+      objects: [...this.objects].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
+      truncated: false,
+    };
+  }
+
+  async delete(keys: string | string[]) {
+    for (const key of Array.isArray(keys) ? keys : [keys]) this.objects.delete(key);
+  }
 }
 
 describe("runner route boundary", () => {
@@ -184,12 +198,17 @@ describe("runner route boundary", () => {
 
   test("moves an attempt-exhausted expired lease to a terminal non-live state", async () => {
     const db = stubDb({ status: "validating", attempt: 5, lease_token: oldLease, lease_expires_at: Math.floor(Date.now() / 1000) - 1 });
-    const claim = await runnerRequest(db, "/runner/jobs/claim", { method: "POST" });
+    const r2 = new StubR2([
+      `staging/${jobId}/${oldLease}/image-1.webp`,
+      `staging/${jobId}/superseded-lease/image-2.webp`,
+    ]);
+    const claim = await runnerRequest(db, "/runner/jobs/claim", { method: "POST" }, r2);
     expect(claim.status).toBe(204);
     expect(db.job.status).toBe("permanent_failed");
     expect(LIVE_STATUSES).not.toContain(db.job.status as never);
     expect(db.job.lease_token).toBeNull();
     expect(db.job.lease_expires_at).toBeNull();
+    expect(r2.objects.size).toBe(0);
   });
 });
 
@@ -208,7 +227,7 @@ function stubDb(overrides: Partial<StubJob>): StubD1 {
   });
 }
 
-async function runnerRequest(db: StubD1, path: string, init: RequestInit): Promise<Response> {
+async function runnerRequest(db: StubD1, path: string, init: RequestInit, dispatches = new StubR2()): Promise<Response> {
   const app = new Hono().route("/runner", runnerRoutes as never);
   const headers = new Headers(init.headers);
   headers.set("authorization", "Bearer expected");
@@ -217,7 +236,7 @@ async function runnerRequest(db: StubD1, path: string, init: RequestInit): Promi
     RUNNER_SECRET: "expected",
     ROLLING_7D_GLOBAL_GENERATION_LIMIT: "100",
     DB: db,
-    DISPATCHES: new StubR2(),
+    DISPATCHES: dispatches,
   } as never);
 }
 

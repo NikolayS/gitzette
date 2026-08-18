@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import { pageRoutes } from "./pages";
+import { buildDispatchOGTags, pageRoutes } from "./pages";
 
 function statusEnv(statusToken: string | undefined) {
   return {
@@ -40,5 +40,19 @@ describe("private status route boundary", () => {
     const body = await response.text();
     expect(body).toContain("Input tokens · last 7 days");
     expect(body).toContain("@torvalds · 2026-W32");
+  });
+});
+
+describe("dispatch social metadata", () => {
+  test("decodes rendered text before escaping it exactly once", () => {
+    const tags = buildDispatchOGTags(
+      '<h1>Parser &amp; Queue</h1><p class="deck">Bounds &quot;hold&quot; &amp; retries stop.</p>',
+      "octocat",
+      "2026-W32",
+    );
+    expect(tags).toContain('content="Parser &amp; Queue"');
+    expect(tags).toContain('content="Bounds &quot;hold&quot; &amp; retries stop."');
+    expect(tags).not.toContain("&amp;amp;");
+    expect(tags).not.toContain("&amp;quot;");
   });
 });

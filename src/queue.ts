@@ -166,7 +166,7 @@ export async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Pr
      SET status='permanent_failed',
          schedule_key=CASE WHEN capacity_started_at IS NULL THEN NULL ELSE schedule_key END,
          last_error=CASE
-           WHEN schedule_key IS NOT NULL AND capacity_started_at IS NULL THEN '${SCHEDULED_AGE_OUT_ERROR}'
+           WHEN schedule_key IS NOT NULL AND capacity_started_at IS NULL THEN ?
            ELSE 'generation runner unavailable; please retry'
          END,
          updated_at=unixepoch()
@@ -174,7 +174,7 @@ export async function expireStaleJobs(db: D1Database, maxAgeSeconds: number): Pr
        status IN ('queued','retryable_failed') OR
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
      ) AND created_at < unixepoch()-?`
-  ).bind(maxAgeSeconds).run();
+  ).bind(SCHEDULED_AGE_OUT_ERROR, maxAgeSeconds).run();
 }
 
 async function expireStaleTargetJob(
@@ -188,7 +188,7 @@ async function expireStaleTargetJob(
      SET status='permanent_failed',
          schedule_key=CASE WHEN capacity_started_at IS NULL THEN NULL ELSE schedule_key END,
          last_error=CASE
-           WHEN schedule_key IS NOT NULL AND capacity_started_at IS NULL THEN '${SCHEDULED_AGE_OUT_ERROR}'
+           WHEN schedule_key IS NOT NULL AND capacity_started_at IS NULL THEN ?
            ELSE 'generation runner unavailable; please retry'
          END,
          updated_at=unixepoch()
@@ -196,7 +196,7 @@ async function expireStaleTargetJob(
        status IN ('queued','retryable_failed') OR
        (status IN ('collecting','writing','illustrating','validating') AND lease_expires_at < unixepoch())
      ) AND created_at < unixepoch()-?`
-  ).bind(userId, weekKey, maxAgeSeconds).run();
+  ).bind(SCHEDULED_AGE_OUT_ERROR, userId, weekKey, maxAgeSeconds).run();
 }
 
 export function isAdmin(userId: string, adminUserId: string | undefined): boolean {

@@ -128,6 +128,16 @@ aged out before provider work began during the last 14 days. A nonzero list is
 an operator alert: enqueue each named profile/week through the admin generation
 path, then verify publication before clearing the incident.
 
+Before changing `WEEKLY_GENERATION_ENABLED` to `true`, run
+`bash scripts/check-weekly-profiles.sh` with production Cloudflare credentials.
+The deployment workflow repeats this preflight and requires one `users` row for
+every retained profile. If a row is missing, keep scheduling disabled. Either
+have that account complete GitHub OAuth sign-in or add its GitHub numeric user
+ID through a reviewed forward data migration after verifying the identity with
+GitHub's `/users/{username}` API. Deploy and verify the row while the flag stays
+false; enable scheduling only in a later reviewed deployment. Never fabricate
+an ID or use the admin enqueue path as a seeding mechanism.
+
 ### Highlighted-profile opt-out and takedown
 
 The contact for an automated-profile opt-out or takedown is
@@ -137,7 +147,16 @@ scheduler and runner, then remove the username from
 `WEEKLY_PROFILE_USERNAMES` while retaining it in
 `MANAGED_PROFILE_USERNAMES`. That reviewed deployment suppresses the profile
 from the home page, blocks new generation, and makes both the profile and every
-existing edition route return 404. The operator must run the production smoke
-test and verify those 404s before closing the request. Retaining the name in the
-managed registry is deliberate: it prevents historical D1/R2 records from
-becoming public again. A later opt-in requires a new reviewed allowlist change.
+existing edition route return 404. New illustration objects carry their owner
+ID and username in R2 custom metadata, so the image route also returns 404 after
+suppression. For historical objects without that metadata, R2 deletion is a
+mandatory part of the takedown: enumerate every `edition_versions.r2_key` and
+legacy `dispatches.r2_key` for the profile, fetch those exact edition objects,
+record every referenced `illustrations/*` key, and delete each exact edition and
+illustration key with the locked Wrangler `r2 object delete ... --remote`
+command. Never use a bucket-wide prefix or wildcard. The operator must run the
+production smoke test and verify the profile route, every edition route, and
+every recorded `/img/*` URL return 404 before closing the request. Retaining the
+name in the managed registry is deliberate: it prevents historical D1/R2
+records from becoming public again. A later opt-in requires a new reviewed
+allowlist change.

@@ -158,8 +158,7 @@ function ctaFooter(): string {
 function extractH1(html: string): string {
   const m = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
   if (!m) return "";
-  // strip inner HTML tags
-  return m[1].replace(/<[^>]+>/g, "").trim();
+  return decodeRenderedText(m[1].replace(/<[^>]+>/g, "").trim());
 }
 
 /** Extract text content of the first element with class "deck". */
@@ -167,8 +166,18 @@ function extractDeck(html: string): string {
   // match class="deck" or class="... deck ..."
   const m = html.match(/<[^>]+class="[^"]*\bdeck\b[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
   if (!m) return "";
-  const text = m[1].replace(/<[^>]+>/g, "").trim();
+  const text = decodeRenderedText(m[1].replace(/<[^>]+>/g, "").trim());
   return text.length > 200 ? text.slice(0, 197) + "…" : text;
+}
+
+function decodeRenderedText(value: string): string {
+  return value.replace(/&(amp|lt|gt|quot|#39);/g, (entity) => ({
+    "&amp;": "&",
+    "&lt;": "<",
+    "&gt;": ">",
+    "&quot;": '"',
+    "&#39;": "'",
+  })[entity]!);
 }
 
 /** Extract the first <img src="..."> URL. */
@@ -196,7 +205,7 @@ function fixUnclosedHeadlineLinks(html: string): string {
 }
 
 /** Build OG + Twitter Card meta tags for a dispatch page. */
-function buildDispatchOGTags(html: string, username: string, week_key: string): string {
+export function buildDispatchOGTags(html: string, username: string, week_key: string): string {
   const title = extractH1(html) || `@${username}'s dispatch · ${week_key}`;
   const description = extractDeck(html) || `Open-source activity for @${username}, week ${week_key}.`;
   const image = extractFirstImg(html);
@@ -215,6 +224,16 @@ function buildDispatchOGTags(html: string, username: string, week_key: string): 
     `<meta name="twitter:description" content="${esc(description)}">`,
     image ? `<meta name="twitter:image" content="${esc(image)}">` : "",
   ].filter(Boolean).join("\n");
+}
+
+function generationRequestClient(): string {
+  return `async function enqueueGeneration(requestedWeek){
+    const res=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:requestedWeek?JSON.stringify({weekKey:requestedWeek}):'{}'});
+    let data={};
+    try{data=await res.json();}catch{}
+    if(!res.ok||data.error)throw new Error(data.error||'generation failed');
+    return data;
+  }`;
 }
 
 async function fetchAndServeDispatch(
@@ -284,6 +303,7 @@ async function fetchAndServeDispatch(
         </div>
         <div style="min-height:48px;"></div>
         <script>
+        ${generationRequestClient()}
         var _regenPending=false,_regenTimer=null;
         async function regenerate() {
           const btn = document.querySelector('button[onclick="regenerate()"]');
@@ -295,9 +315,8 @@ async function fetchAndServeDispatch(
           }
           clearTimeout(_regenTimer);_regenPending=false;
           btn.disabled=true; btn.textContent='generating...';
-          const res=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:'${week_key}'})});
-          const data=await res.json();
-          if(!res.ok||data.error){btn.textContent=data.message||data.error||'generation failed';setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000);return;}
+          try{await enqueueGeneration('${week_key}');}
+          catch(error){btn.textContent=error.message;setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000);return;}
           let n=0;
           const iv=setInterval(async()=>{
             n++; btn.textContent='generating... ('+(n*5)+'s)';
@@ -417,7 +436,7 @@ pageRoutes.get("/", async (c) => {
     `SELECT u.username, d.week_key, d.generated_at
      FROM dispatches d
      JOIN users u ON u.id = d.user_id
-     WHERE d.r2_key IS NOT NULL AND d.week_key != 'generating'
+     WHERE d.r2_key IS NOT NULL
      ORDER BY d.generated_at DESC LIMIT 100`
   ).all<{ username: string; week_key: string; generated_at: number }>();
 
@@ -433,6 +452,8 @@ pageRoutes.get("/img/:slug{[a-zA-Z0-9_-]+\\.(jpg|png|webp)}", async (c) => {
   const { slug } = c.req.param();
   const obj = await c.env.DISPATCHES.get(`illustrations/${slug}`);
   if (!obj) return c.text("not found", 404);
+  const ownerUsername = obj.customMetadata?.ownerUsername;
+  if (ownerUsername && isManagedProfileSuppressed(ownerUsername)) return c.text("not found", 404);
   const buf = await obj.arrayBuffer();
   const contentType = slug.endsWith(".webp") ? "image/webp"
     : slug.endsWith(".png") ? "image/png" : "image/jpeg";
@@ -452,7 +473,7 @@ pageRoutes.get("/status", async (c) => {
     return c.text("403 Forbidden", 403);
   }
   const [genRow, userRow, jobsRow, agedOutRows] = await Promise.all([
-    c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE week_key != 'generating' AND r2_key IS NOT NULL`).first<{ total: number }>(),
+    c.env.DB.prepare(`SELECT COUNT(*) as total FROM dispatches WHERE r2_key IS NOT NULL`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) as total FROM users`).first<{ total: number }>(),
     c.env.DB.prepare(`SELECT COUNT(*) AS total,
       SUM(CASE WHEN status='permanent_failed' THEN 1 ELSE 0 END) AS failed,
@@ -525,17 +546,12 @@ pageRoutes.get("/:username{[a-zA-Z0-9_-]+}", async (c) => {
     return c.html(notFoundPage(username, ghUser), 404);
   }
 
-  // Check if generating sentinel exists
-  const generating = await c.env.DB.prepare(
-    `SELECT 1 FROM dispatches WHERE user_id = ? AND week_key = 'generating'`
-  ).bind(userRow.id).first();
-  if (generating) return c.html(generatingPage(username));
-
-  // Query ALL real dispatches
+  // Query all published dispatches. Legacy generating sentinels are removed by
+  // migration 0002 and cannot block profile rendering.
   const allDispatches = await c.env.DB.prepare(
     `SELECT d.week_key, d.r2_key, d.generated_at
      FROM dispatches d
-     WHERE d.user_id = ? AND d.week_key != 'generating' AND d.r2_key IS NOT NULL
+     WHERE d.user_id = ? AND d.r2_key IS NOT NULL
      ORDER BY d.week_key DESC`
   ).bind(userRow.id).all<{ week_key: string; r2_key: string; generated_at: number }>();
 
@@ -844,6 +860,7 @@ ${headTags()}
   </div>
   ${dispatchFooter(username, dispatch.week_key)}
   ${isOwner ? `<script>
+  ${generationRequestClient()}
   var _regenPending=false,_regenTimer=null;
   async function regenerate() {
     const btn = document.querySelector('.regen-btn');
@@ -855,9 +872,8 @@ ${headTags()}
     }
     clearTimeout(_regenTimer);_regenPending=false;
     btn.disabled=true; btn.textContent='generating...';
-    const res = await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:'${dispatch.week_key}'})});
-    const data = await res.json();
-    if (data.error) { btn.textContent=data.message||data.error; setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000); return; }
+    try{await enqueueGeneration('${dispatch.week_key}');}
+    catch(error){btn.textContent=error.message;setTimeout(()=>{btn.disabled=false;btn.textContent='regenerate';},5000);return;}
     let n=0;
     const poll=setInterval(async()=>{
       n++;
@@ -891,22 +907,16 @@ ${headTags()}
     ${isOwner ? `<button id="genbtn" onclick="startGen()" style="padding:10px 24px;background:#0f0f0f;color:#f7f4ee;border:none;font-family:monospace;cursor:pointer;">generate now</button>
     <div id="gen-msg" style="font-size:12px;color:#666;max-width:300px;line-height:1.5;display:none;"></div>
     <script>
+    ${generationRequestClient()}
     async function startGen(){
       const btn=document.getElementById('genbtn');
       const msg=document.getElementById('gen-msg');
       const requestedWeek=${week_key ? `'${week_key}'` : "null"};
       btn.disabled=true; btn.textContent='checking...';
-      const res=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:requestedWeek?JSON.stringify({weekKey:requestedWeek}):'{}'});
-      const data=await res.json();
-      if(data.error==='no_activity'){
-        btn.style.display='none';
-        msg.textContent=data.message;
-        msg.style.display='block';
-        return;
-      }
-      if(data.error){
+      try{await enqueueGeneration(requestedWeek);}
+      catch(error){
         btn.disabled=false; btn.textContent='generate now';
-        msg.textContent=data.message||data.error;
+        msg.textContent=error.message;
         msg.style.display='block';
         return;
       }
@@ -950,62 +960,6 @@ ${headTags()}
   </div>
   ${ctaFooter()}
   ${creatorFooter()}
-</body></html>`;
-}
-
-function generatingPage(username: string): string {
-  return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>@${username} — gitzette</title>
-${headTags()}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
-<style>
-  *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:'IBM Plex Mono',monospace;background:#f7f4ee;min-height:100vh;display:flex;flex-direction:column;}
-  .center{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:40px 24px;text-align:center;}
-</style>
-</head><body>
-  <div class="center">
-    <a href="/" style="font-family:'Playfair Display',serif;font-weight:900;font-style:italic;font-size:clamp(36px,10vw,60px);color:#0f0f0f;text-decoration:none;line-height:1;">gitzette</a>
-    <div style="font-size:18px;font-weight:700;">@${username}</div>
-    <div id="status-msg" style="color:#666;">Generating dispatch... this takes about 60 seconds.</div>
-    <div id="retry-btn" style="display:none;">
-      <div style="color:#c00;font-size:13px;margin-bottom:12px;">Generation timed out. Something went wrong.</div>
-      <a href="/generate" id="retry-link" style="display:inline-block;padding:10px 24px;background:#0f0f0f;color:#f7f4ee;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;text-decoration:none;" onclick="this.textContent='retrying...';retryGen();return false;">Try again</a>
-    </div>
-    <a href="/" style="color:#888;font-size:12px;">← gitzette.online</a>
-  </div>
-  ${ctaFooter()}
-  ${creatorFooter()}
-  <script>
-  let n = 0;
-  const iv = setInterval(async () => {
-    n++;
-    try {
-      const s = await fetch('/generate/status').then(r => r.json());
-      if (s.status === 'ready') { clearInterval(iv); location.reload(); return; }
-      if (s.status === 'failed') {
-        clearInterval(iv);
-        document.getElementById('status-msg').style.display = 'none';
-        document.getElementById('retry-btn').style.display = 'block';
-        return;
-      }
-      if (s.status === 'generating') {
-        document.getElementById('status-msg').textContent = 'Generating dispatch... (' + Math.round(s.age) + 's)';
-      }
-    } catch(e) {}
-    if (n > 36) { // 3 min client-side max
-      clearInterval(iv);
-      document.getElementById('status-msg').style.display = 'none';
-      document.getElementById('retry-btn').style.display = 'block';
-    }
-  }, 5000);
-
-  async function retryGen() {
-    await fetch('/generate', { method: 'POST' });
-    setTimeout(() => location.reload(), 2000);
-  }
-  </script>
 </body></html>`;
 }
 

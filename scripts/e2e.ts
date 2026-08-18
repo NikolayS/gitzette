@@ -182,6 +182,13 @@ expect((html.match(/<html/gi) || []).length).toBe(1);
 const ownerHtml = await (await fetch(`${base}/octocat/2026-W32`, { headers: { cookie: "session=e2e-session" } })).text();
 expect(ownerHtml).toContain("/generate/status?weekKey=2026-W32");
 expect(ownerHtml).toContain("if(!res.ok||data.error)");
+const profileWithLegacySentinel = await (await fetch(`${base}/octocat`)).text();
+expect(profileWithLegacySentinel).toContain("The final byte gets read");
+expect(profileWithLegacySentinel).not.toContain("Generating dispatch");
+const emptyOwnerHtml = await (await fetch(`${base}/target-user`, { headers: { cookie: "session=target-session" } })).text();
+expect(emptyOwnerHtml).toContain("if(!res.ok||data.error)");
+expect(emptyOwnerHtml).not.toContain("no_activity");
+expect(emptyOwnerHtml).not.toContain("data.message");
 expect((await json(`/generate/jobs/${jobId}`, { headers: sessionHeaders })).body.job.status).toBe("published");
 const browserStatus = await json("/generate/status", { headers: sessionHeaders });
 expect(browserStatus.body.status).toBe("ready");
@@ -337,4 +344,4 @@ for (const expected of [8, 8]) {
   expect(scheduledHtml).toContain(previousCompletedIsoWeekKey());
 }
 
-console.log("E2E OK: queue, authz, per-user quota, global queue-and-defer, weekly schedule, usage telemetry, stale-job expiry, dedupe, lease/stages, artifacts, active+quiet invariants, atomic publish, XSS, retry");
+console.log("E2E OK: queue, authz, per-user quota, weekly schedule, usage telemetry, stale-job expiry, dedupe, lease/stages, artifacts, active+quiet invariants, atomic publish, XSS, retry");

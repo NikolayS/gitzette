@@ -57,6 +57,7 @@ describe("typed publication manifest", () => {
 
     const html = renderEdition(validateManifest(activeManifest(), "octocat", "2026-W32"), (key) => `/img/${key}`);
     expect(html).toMatch(/<article>[\s\S]*<h2>[\s\S]*<p>/);
+    expect(html).toContain('<p class="deck"><em>One boundary condition, finally bounded.</em></p>');
   });
 
   test("retains the legacy nonempty editorial-copy guards", () => {

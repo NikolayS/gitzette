@@ -35,7 +35,7 @@ trap 'trap - EXIT; cleanup; exit 143' TERM
 
 local_wrangler d1 migrations apply gitzette-db --local --persist-to "$state_dir" >/dev/null
 local_wrangler d1 execute gitzette-db --local --persist-to "$state_dir" --command \
-  "INSERT INTO users(id,username,avatar_url) VALUES('1','octocat',''),('2','NikolayS',''),('3','target-user',''),('4','DHH',''),('5','dcramer',''),('6','karpathy',''),('7','levkk',''),('8','mitchellh',''),('9','simonw',''),('10','steipete',''),('11','torvalds',''); INSERT INTO sessions(token,user_id,expires_at) VALUES('e2e-session','1',unixepoch()+3600),('intruder-session','2',unixepoch()+3600),('target-session','3',unixepoch()+3600);" >/dev/null
+  "INSERT INTO users(id,username,avatar_url) VALUES('1','octocat',''),('2','NikolayS',''),('3','target-user',''),('4','DHH',''),('5','dcramer',''),('6','karpathy',''),('7','levkk',''),('8','mitchellh',''),('9','simonw',''),('10','steipete',''),('11','torvalds',''); INSERT INTO sessions(token,user_id,expires_at) VALUES('e2e-session','1',unixepoch()+3600),('intruder-session','2',unixepoch()+3600),('target-session','3',unixepoch()+3600); INSERT INTO dispatches(user_id,week_key) VALUES('1','generating');" >/dev/null
 
 ready=false
 for _attempt in $(seq 1 5); do

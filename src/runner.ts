@@ -64,11 +64,15 @@ runnerRoutes.post("/jobs/claim", async (c) => {
   const now = Math.floor(Date.now() / 1000);
   const leaseExpires = now + leaseSeconds(c.env);
   const globalLimit = positiveInteger(c.env.ROLLING_7D_GLOBAL_GENERATION_LIMIT, DEFAULT_GLOBAL_WEEKLY_LIMIT);
-  await c.env.DB.prepare(
+  const exhausted = await c.env.DB.prepare(
     `UPDATE generation_jobs
      SET status='permanent_failed',last_error='generation attempts exhausted',lease_token=NULL,lease_expires_at=NULL,updated_at=?
-     WHERE attempt>=? AND status IN ('collecting','writing','illustrating','validating') AND lease_expires_at<?`
-  ).bind(now, MAX_ATTEMPTS, now).run();
+     WHERE attempt>=? AND status IN ('collecting','writing','illustrating','validating') AND lease_expires_at<?
+     RETURNING id`
+  ).bind(now, MAX_ATTEMPTS, now).all<{ id: string }>();
+  await Promise.all((exhausted.results ?? []).map((job) =>
+    deleteStagingPrefix(c.env.DISPATCHES, `staging/${job.id}/`)
+  ));
   const row = await c.env.DB.prepare(CLAIM_JOB_SQL)
     .bind(
       now,
@@ -146,7 +150,10 @@ runnerRoutes.post("/jobs/:id/fail", async (c) => {
   await c.env.DB.prepare(
     "UPDATE generation_jobs SET status=?,last_error=?,lease_token=NULL,lease_expires_at=NULL,updated_at=unixepoch() WHERE id=? AND lease_token=?"
   ).bind(status, body.error.slice(0, 1000), job.id, body.leaseToken).run();
-  await deleteStagingPrefix(c.env.DISPATCHES, `staging/${job.id}/${body.leaseToken}/`);
+  const stagingPrefix = status === "permanent_failed"
+    ? `staging/${job.id}/`
+    : `staging/${job.id}/${body.leaseToken}/`;
+  await deleteStagingPrefix(c.env.DISPATCHES, stagingPrefix);
   return c.json({ status });
 });
 
@@ -175,8 +182,11 @@ runnerRoutes.post("/jobs/:id/publish", async (c) => {
     const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
       .map((byte) => byte.toString(16).padStart(2, "0")).join("");
     if (digest !== image.sha256) return c.json({ error: `artifact hash mismatch: ${image.key}` }, 422);
-    const finalName = `${digest}.webp`;
-    await c.env.DISPATCHES.put(`illustrations/${finalName}`, bytes, { httpMetadata: { contentType: "image/webp" } });
+    const finalName = `${job.user_id}-${digest}.webp`;
+    await c.env.DISPATCHES.put(`illustrations/${finalName}`, bytes, {
+      httpMetadata: { contentType: "image/webp" },
+      customMetadata: { ownerUserId: job.user_id, ownerUsername: job.username },
+    });
     finalImages.set(image.key, `/img/${finalName}`);
   }
 

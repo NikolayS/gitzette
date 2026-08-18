@@ -38,6 +38,16 @@ describe("managed profile publication policy", () => {
     expect((await pages.request("/gitzette-opt-out-test", {}, pageEnv)).status).toBe(404);
     expect((await pages.request("/gitzette-opt-out-test/2026-W32", {}, pageEnv)).status).toBe(404);
 
+    const suppressedImage = await pages.request("/img/1-deadbeef.webp", {}, {
+      DISPATCHES: {
+        get: async () => ({
+          customMetadata: { ownerUserId: "retired", ownerUsername: "gitzette-opt-out-test" },
+          arrayBuffer: async () => new ArrayBuffer(1),
+        }),
+      },
+    } as never);
+    expect(suppressedImage.status).toBe(404);
+
     const queue = new Hono().route("/", queueRoutes as never);
     const queueEnv = {
       DB: {

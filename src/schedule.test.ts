@@ -31,6 +31,7 @@ class StubStatement {
 
   async run() {
     if (!this.query.startsWith("UPDATE generation_jobs")) throw new Error(`unexpected run: ${this.query}`);
+    this.db.staleSweepCalls += 1;
     return { meta: { changes: 0 } };
   }
 }
@@ -38,6 +39,7 @@ class StubStatement {
 class StubD1 {
   readonly scheduleKeys = new Set<string>();
   batchCalls = 0;
+  staleSweepCalls = 0;
 
   constructor(
     readonly adminExists: boolean,
@@ -202,6 +204,7 @@ describe("weekly profile scheduling", () => {
       { DB: db, WEEKLY_GENERATION_ENABLED: "false" } as never,
     );
     expect(db.batchCalls).toBe(0);
+    expect(db.staleSweepCalls).toBe(1);
   });
 
   test("couples the configured trigger to the only accepted handler cron", async () => {

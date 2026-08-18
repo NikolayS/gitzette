@@ -75,6 +75,7 @@ export async function runWeeklySchedule(
   if (controller.cron !== WEEKLY_GENERATION_CRON) {
     throw new Error(`unexpected generation cron: ${controller.cron}`);
   }
+  await expireStaleJobs(env.DB, maxQueueAgeSeconds(env));
   if (env.WEEKLY_GENERATION_ENABLED !== "true") {
     console.log(JSON.stringify({ event: "weekly_generation_disabled" }));
     return;
