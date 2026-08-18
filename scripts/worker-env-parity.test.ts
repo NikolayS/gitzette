@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { expectedProductionSecrets } from "./check-production-secrets";
 
 function interfaceBody(source: string, name: string): string {
   const match = source.match(new RegExp(`(?:export )?interface ${name} \\{([\\s\\S]*?)\\n\\}`));
@@ -29,6 +30,7 @@ describe("Worker environment provenance", () => {
 
     expect(new Set(bindings)).toEqual(new Set(["DB", "DISPATCHES"]));
     expect(secrets.length).toBeGreaterThan(0);
+    expect(new Set(expectedProductionSecrets)).toEqual(new Set(secrets));
     for (const name of [...bindings, ...vars]) {
       expectEnvField(generatedEnv, name);
       expectEnvField(runtimeEnv, name);

@@ -8,7 +8,9 @@ set -euo pipefail
 
 # Supported contract: execute this checked-in file by absolute or repository-relative
 # path. Installing it as a PATH command or symlinked wrapper is intentionally unsupported.
-production_secrets_script_directory="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+production_secrets_script_directory="$(
+  CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null && pwd
+)"
 # shellcheck source=scripts/require-wrangler.sh
 source "$production_secrets_script_directory/require-wrangler.sh"
 

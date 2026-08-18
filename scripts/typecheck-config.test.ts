@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import ts from "typescript";
 
 describe("TypeScript project coverage", () => {
@@ -40,47 +38,36 @@ describe("TypeScript project coverage", () => {
     const testCommand = runnerCommand?.split(/\s*&&\s*/)
       .find(command => /^bun\s+test(?:\s|$)/.test(command.trim()));
     expect(testCommand).toBeDefined();
-    const reportDirectory = await mkdtemp(resolve(tmpdir(), "gitzette-test-discovery-"));
-    const reportPath = resolve(reportDirectory, "bun-test.xml");
-    try {
-      const child = Bun.spawn([
-        "bash",
-        "-c",
-        `${testCommand} --test-name-pattern '^__gitzette_discovery_only__$' `
-          + `--reporter=junit --reporter-outfile="$GITZETTE_TEST_DISCOVERY_REPORT"`,
-      ], {
-        cwd: resolve("."),
-        env: {
-          ...process.env,
-          GITZETTE_TEST_DISCOVERY_REPORT: reportPath,
-        },
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-      ]);
-      if (exitCode !== 0 && exitCode !== 1) {
-        throw new Error(`configured test command failed with ${exitCode}\n${stdout}\n${stderr}`);
-      }
-      const report = await Bun.file(reportPath).text();
-      expect(report).toContain('failures="0"');
-      const executedFiles = new Set(
-        [...report.matchAll(/<(?:testsuite|testcase)[^>]+file="([^"]+\.test\.ts)"/g)]
-          .map(match => resolve(match[1])),
-      );
-      if (executedFiles.size === 0) {
-        throw new Error("Bun JUnit report did not identify discovered test files");
-      }
-      const discovered = ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.test.ts"], 1);
-      expect(discovered.length).toBeGreaterThan(0);
-      for (const name of discovered) {
-        expect(executedFiles.has(resolve(name)), `script test not executed: ${name}`).toBe(true);
-      }
-    } finally {
-      await rm(reportDirectory, { recursive: true, force: true });
+    expect(testCommand).not.toMatch(/[|<>]/);
+    const argumentSource = testCommand?.trim().replace(/^bun\s+test(?:\s+|$)/, "") ?? "";
+    expect(argumentSource.length).toBeGreaterThan(0);
+    const child = Bun.spawn(["bash", "-c", `printf '%s\\0' ${argumentSource}`], {
+      cwd: resolve("."),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).arrayBuffer(),
+      new Response(child.stderr).text(),
+    ]);
+    if (exitCode !== 0) {
+      throw new Error(`unable to expand configured test selectors (${exitCode}): ${stderr}`);
     }
-  }, 15_000);
+    const expandedArguments = new TextDecoder().decode(stdout).split("\0").filter(Boolean);
+    expect(expandedArguments.some(argument => argument === "-t"
+      || argument === "--only"
+      || argument.startsWith("--test-name-pattern"))).toBe(false);
+    const selectors = expandedArguments.filter(argument => !argument.startsWith("-"));
+    expect(selectors.length).toBeGreaterThan(0);
+    const discovered = ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.test.ts"], 1);
+    expect(discovered.length).toBeGreaterThan(0);
+    for (const name of discovered) {
+      const repoRelativeName = relative(resolve("."), resolve(name));
+      expect(
+        selectors.some(selector => repoRelativeName === selector || repoRelativeName.includes(selector)),
+        `script test not selected by test:runner: ${name}`,
+      ).toBe(true);
+    }
+  });
 });

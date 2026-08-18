@@ -13,8 +13,9 @@ afterEach(async () => {
 });
 
 type FakeWranglerMode = "success" | "failure" | "empty";
-type WrapperInvocation = "bash-absolute" | "bash-bare" | "direct-absolute" | "direct-relative";
+type WrapperInvocation = "bash-absolute" | "bash-bare" | "bash-relative" | "direct-absolute" | "direct-relative";
 type SecretCheckOptions = {
+  adversarialCdPath?: boolean;
   includeToken?: boolean;
   invocation?: WrapperInvocation;
   mode?: FakeWranglerMode;
@@ -25,6 +26,7 @@ async function runRawSecretCheck(
   options: SecretCheckOptions = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string; wranglerLog: string; fakeInvoked: boolean }> {
   const {
+    adversarialCdPath = false,
     includeToken = true,
     invocation = "bash-absolute",
     mode = "success",
@@ -72,6 +74,11 @@ esac
     FAKE_WRANGLER_MODE: mode,
     FAKE_WRANGLER_ARGV_LOG: argvLog,
   };
+  if (adversarialCdPath) {
+    const cdPath = join(root, "cdpath");
+    await mkdir(join(cdPath, "scripts"), { recursive: true });
+    environment.CDPATH = cdPath;
+  }
   if (includeToken) environment.CLOUDFLARE_API_TOKEN = "test-only-token";
   let command: string[];
   let cwd = tmpdir();
@@ -82,6 +89,10 @@ esac
     case "bash-bare":
       command = ["bash", scriptPath.split("/").at(-1) ?? scriptPath];
       cwd = dirname(scriptPath);
+      break;
+    case "bash-relative":
+      command = ["bash", "scripts/check-production-secrets.sh"];
+      cwd = root;
       break;
     case "direct-absolute":
       command = [scriptPath];
@@ -206,6 +217,18 @@ describe("production secret preflight", () => {
     expect(result.stdout).toContain("Production secrets OK");
   });
 
+  test("ignores CDPATH while resolving a repository-relative invocation", async () => {
+    const result = await runRawSecretCheck(
+      JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
+      { adversarialCdPath: true, invocation: "bash-relative" },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(
+      "Production secrets OK: required bindings exist and retired provider credentials are absent\n",
+    );
+  });
+
   test("fails loudly when the deploy gate is sourced", async () => {
     const wrapper = join(repoRoot, "scripts", "check-production-secrets.sh");
     const child = Bun.spawn(["bash", "-c", `source "$1"`, "--", wrapper], {
@@ -248,7 +271,8 @@ describe("production secret preflight", () => {
       new Response(child.stderr).text(),
     ]);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(missingPath);
+    expect(stderr).toContain(`unable to read Wrangler secret list at ${missingPath}`);
+    expect(stderr).toContain("ENOENT");
     expect(stderr.split("\n").filter(Boolean)).toHaveLength(1);
   });
 });
