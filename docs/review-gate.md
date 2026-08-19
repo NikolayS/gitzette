@@ -177,8 +177,7 @@ IDs, then run from a clean checkout of the PR head:
 ```bash
 SAMOREV_HOME=/path/to/samorev
 SAMO_TOKEN="$(gh auth token --user samo-agent)"
-GH_TOKEN="$SAMO_TOKEN" GITHUB_REPOSITORY=NikolayS/gitzette \
-  bash scripts/check-reviewer-credential-isolation.sh
+bash scripts/check-reviewer-credential-isolation.sh
 GH_TOKEN="$SAMO_TOKEN" SAMOREV_HOME="$SAMOREV_HOME" \
   bash scripts/run-samorev-review.sh NUMBER PUBLISHER_RUN_ID PUBLISHER_CHECK_RUN_ID
 unset SAMO_TOKEN
@@ -192,6 +191,10 @@ the PR-time evaluator and release gate both reject another target URL.
 
 Only after that exact-head review exits zero, CI is green, conversations are
 resolved, and the readiness review confirms the same head SHA may the PR merge.
+With the administrator's default `gh` credential, run
+`bash scripts/check-release-review-evidence.sh HEAD_SHA` immediately before
+merge; a green checks UI is not evidence. Never grant `samo-agent` admin access
+to make an administration-scoped inventory call pass.
 A GitHub `APPROVED` review is not required evidence; the reviewed branch policy
 requires a pull request with zero approvals instead. For the bootstrap that
 changes this policy, run `bash scripts/apply-branch-protection.sh` from the
@@ -291,7 +294,7 @@ reapply the legacy approval rule. Audit production policy before migration:
 bash scripts/check-branch-protection.sh
 samo_token="$(gh auth token --user samo-agent)"
 GH_TOKEN="$samo_token" bash scripts/check-branch-protection-nonadmin.sh
-GH_TOKEN="$samo_token" bash scripts/check-reviewer-credential-isolation.sh
+bash scripts/check-reviewer-credential-isolation.sh
 bash scripts/check-production-environment.sh
 ```
 

@@ -95,6 +95,7 @@ text matching is not the authorization proof.
    table and proves the ordinary exact-schema gate again.
 
    ```bash
+   set -euo pipefail
    bash scripts/check-production-environment.sh
    bash scripts/apply-credential-migration-environment.sh
    bash scripts/check-credential-migration-inventory.sh
@@ -112,6 +113,11 @@ text matching is not the authorization proof.
    does not claim that the intentionally installed bootstrap workflow or
    migration environment has already been removed.
 
+   From merge until `scripts/apply-credential-migration-environment.sh`
+   succeeds, the scheduled guard's `production-policy` job is expected red
+   with exit 4 because the temporary environment does not yet exist. This is
+   the only expected red `production-policy` window; afterward, red is drift.
+
    The production policy does not change during export or verification; any
    checker failure is therefore real drift, never an expected migration window.
 
@@ -125,6 +131,7 @@ text matching is not the authorization proof.
    the guard intentionally stays red until the variable is deleted.
 
    ```bash
+   set -euo pipefail
    bash scripts/check-credential-migration-environment.sh
    bash scripts/check-credential-migration-inventory.sh
    gh variable set CREDENTIAL_EXPORT_OPEN --body true
@@ -139,6 +146,7 @@ text matching is not the authorization proof.
    live environment policy.
 
    ```bash
+   set -euo pipefail
    openssl pkey -in "$MIGRATION_KEY_DIR/production-migration-private.pem" \
      -pubout -outform DER | sha256sum
    bash scripts/check-credential-migration-environment.sh
@@ -205,6 +213,8 @@ text matching is not the authorization proof.
    the out-of-band rollback copy.
 
    ```bash
+   set -euo pipefail
+   environment_credentials_ready=false
    secret_write_started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
    account_id="$(jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
    api_token="$(jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
@@ -220,6 +230,8 @@ text matching is not the authorization proof.
      "https://api.cloudflare.com/client/v4/accounts/$account_id/workers/services/gitzette" \
      <<<"header = \"Authorization: Bearer $api_token\"" |
      jq -e '.success == true' >/dev/null
+   environment_credentials_ready=true
+   [[ "$environment_credentials_ready" == true ]]
    gh secret delete CLOUDFLARE_ACCOUNT_ID
    gh secret delete CLOUDFLARE_API_TOKEN
    remaining_repository_cloudflare_secrets="$(gh secret list --json name --jq \
@@ -254,6 +266,7 @@ text matching is not the authorization proof.
    workflows possess neither identity.
 
    ```bash
+   set -euo pipefail
    git fetch origin main
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
    bash scripts/check-credential-migration-environment.sh
@@ -278,6 +291,7 @@ text matching is not the authorization proof.
    IDs that bound the approval window:
 
    ```bash
+   set -euo pipefail
    test "$(gh run view VERIFY_RUN_ID --json headSha --jq .headSha)" = \
      "$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
    bash scripts/check-credential-migration-environment.sh
@@ -290,6 +304,7 @@ text matching is not the authorization proof.
    interruption, close the verification switch and re-audit immediately:
 
    ```bash
+   set -euo pipefail
    gh variable delete CREDENTIAL_VERIFY_OPEN
    bash scripts/check-production-environment.sh
    ```
@@ -315,6 +330,7 @@ text matching is not the authorization proof.
    On verification failure, restore repository rollback scope before debugging:
 
    ```bash
+   set -euo pipefail
    printf '%s' "$account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID
    printf '%s' "$api_token" | gh secret set CLOUDFLARE_API_TOKEN
    ```
@@ -324,6 +340,7 @@ text matching is not the authorization proof.
    at-rest control.
 
    ```bash
+   set -euo pipefail
    shred -u "$migration_dir/credentials.bin" "$migration_dir/select.json" \
      "$migration_dir/drop.json"
    rmdir "$migration_dir"
@@ -352,3 +369,8 @@ text matching is not the authorization proof.
    live environment plus both variables return not found.
    Retain `scripts/get-github-environment.sh`: it is a shared helper used by
    the permanent production-environment audit and apply scripts.
+   Tighten `scripts/check-reviewer-credential-isolation.sh` at the same time:
+   repository Actions secrets and repository Actions variables must both be
+   empty after migration, while only the `production` environment retains the
+   two reviewed Cloudflare secret names. Run that audit in the post-teardown
+   proof so re-created repository rollback copies or switches fail closed.

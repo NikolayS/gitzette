@@ -161,6 +161,9 @@ describe("one-shot credential migration boundary", () => {
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);
     expect(migrationDoc).toContain("Retain `scripts/get-github-environment.sh`");
+    expect(migrationDoc).toContain("repository Actions secrets and repository Actions variables must both be\n   empty after migration");
+    expect(migrationDoc).toContain("production-policy` job is expected red");
+    expect(migrationDoc).toContain("environment_credentials_ready=true");
 
     const policyGuard = await Bun.file(".github/workflows/credential-migration-policy-guard.yml").text();
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {

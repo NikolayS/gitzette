@@ -13,7 +13,8 @@ describe("deploy review revalidation", () => {
     const applyBranchPolicy = await Bun.file("scripts/apply-branch-protection.sh").text();
     const reviewerWrapper = await Bun.file("scripts/run-samorev-review.sh").text();
     const tagActorGate = "scripts/check-release-tag-actor.sh";
-    expect(workflow).toContain('bash scripts/check-release-review-evidence.sh "$reviewed_sha"');
+    expect(workflow).toContain('contents/scripts/check-release-review-evidence.sh?ref=$reviewed_sha');
+    expect(workflow).toContain('bash "$gate_file" "$reviewed_sha"');
     expect(workflow).toContain("TAG_PUSHER_ID: ${{ github.actor_id }}");
     expect(workflow).toContain('bash scripts/check-release-tag-actor.sh "$TAG_PUSHER_ID"');
     expect(workflow).not.toContain('/reviews\")');
@@ -24,7 +25,8 @@ describe("deploy review revalidation", () => {
     expect(gate).toContain('.path == ".github/workflows/samorev-gate.yml"');
     expect(gate).toContain('.base.ref == "main"');
     expect(gate).toContain('.head_repository.full_name == $repository');
-    expect(gate).toContain('.target_url == $publisher_url');
+    expect(gate).toContain('.html_url == $url');
+    expect(gate).toContain('publisher_url="$(jq -er .target_url');
     expect(gate).toContain("sort_by(.created_at, .id) | last");
     expect(gate).toContain('.creator.id == 280144521');
     expect(gate).toContain("gh api --paginate --slurp");
@@ -114,7 +116,8 @@ case "$endpoint" in
     if [[ "$mode" == no-gate-path ]]; then
       jq -nc --arg sha "$FAKE_SHA" '{workflow_runs:[{id:2,path:".github/workflows/attacker.yml",event:"pull_request_target",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:"success"}]}'
     else
-      latest=success; [[ "$mode" != latest-gate-failure ]] || latest=failure
+      latest=success
+      [[ "$mode" != latest-gate-failure && "$mode" != later-gate-failure ]] || latest=failure
       base=main; [[ "$mode" != wrong-base ]] || base=attacker
       repository=example/gitzette; [[ "$mode" != fork-head ]] || repository=attacker/gitzette
       jq -nc --arg sha "$FAKE_SHA" --arg latest "$latest" --arg base "$base" --arg repository "$repository" '{workflow_runs:[
@@ -128,7 +131,8 @@ case "$endpoint" in
     if [[ "$mode" == forged-reviewer ]]; then latest_id=1; latest_login=attacker; fi
     if [[ "$mode" == renamed-reviewer ]]; then latest_login=renamed-samo; fi
     target=https://github.com/example/gitzette/actions/runs/2
-    [[ "$mode" != wrong-publisher-target ]] || target=https://github.com/example/gitzette/actions/runs/1
+    [[ "$mode" != wrong-publisher-target ]] || target=https://github.com/example/gitzette/actions/runs/999
+    [[ "$mode" != later-gate-failure ]] || target=https://github.com/example/gitzette/actions/runs/1
     created_at=2026-01-03T00:00:00Z; [[ "$mode" != predated-verdict ]] || created_at=2026-01-01T00:00:00Z
     jq -nc --arg state "$latest_state" --argjson actor "$latest_id" --arg login "$latest_login" --arg target "$target" --arg created_at "$created_at" '[[
       {id:1,context:"samorev",state:"success",created_at:"2026-01-01T00:00:00Z",target_url:"https://github.com/example/gitzette/actions/runs/1",creator:{id:280144521,login:"samo-agent"}},
@@ -148,13 +152,14 @@ esac
     }).exited;
     expect(await run("success")).toBe(0);
     expect(await run("renamed-reviewer")).toBe(0);
+    expect(await run("later-gate-failure")).toBe(0);
     for (const mode of [
       "latest-ci-failure", "no-ci-path", "latest-gate-failure", "no-gate-path",
       "latest-review-failure", "forged-reviewer", "wrong-ci-base", "fork-ci-head",
       "wrong-base", "fork-head", "wrong-publisher-target", "predated-verdict", "api-error",
     ]) {
       const code = await run(mode);
-      expect(code).not.toBe(0);
+      if (code === 0) throw new Error(`${mode} unexpectedly passed release evidence`);
     }
   });
 

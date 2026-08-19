@@ -32,13 +32,25 @@ if ! jq -e --arg sha "$reviewed_sha" --arg repository "$repository" '
   exit 1
 fi
 
+statuses="$(gh api --paginate --slurp "repos/$repository/commits/$reviewed_sha/statuses?per_page=100" | jq -c 'add // []')"
+verdict="$(jq -ce '
+  [.[] | select(.context == "samorev")] | sort_by(.created_at, .id) | last
+' <<<"$statuses")" || {
+  echo "reviewed head lacks an immutable-reviewer samorev verdict" >&2
+  exit 1
+}
+if ! jq -e '.state == "success" and .creator.id == 280144521 and
+  (.target_url | type == "string" and length > 0)' <<<"$verdict" >/dev/null; then
+  echo "reviewed head lacks a publisher-bound immutable-reviewer samorev verdict" >&2
+  exit 1
+fi
+publisher_url="$(jq -er .target_url <<<"$verdict")"
 gate_runs="$(gh api "repos/$repository/actions/workflows/samorev-gate.yml/runs?event=pull_request_target&head_sha=$reviewed_sha&per_page=100")"
-gate_run="$(jq -ce --arg sha "$reviewed_sha" '
+gate_run="$(jq -ce --arg sha "$reviewed_sha" --arg url "$publisher_url" '
   [.workflow_runs[] | select(.path == ".github/workflows/samorev-gate.yml" and
-    .event == "pull_request_target" and .head_sha == $sha)] |
-  sort_by(.created_at, .id) | last
+    .event == "pull_request_target" and .head_sha == $sha and .html_url == $url)] | first
 ' <<<"$gate_runs")" || {
-  echo "reviewed head lacks an exact-path publisher run" >&2
+  echo "reviewed head lacks the publisher run targeted by samorev" >&2
   exit 1
 }
 if ! jq -e --arg sha "$reviewed_sha" --arg repository "$repository" '
@@ -47,20 +59,12 @@ if ! jq -e --arg sha "$reviewed_sha" --arg repository "$repository" '
     .base.ref == "main" and .base.repo.url == "https://api.github.com/repos/\($repository)" and
     .head.sha == $sha and .head.repo.url == "https://api.github.com/repos/\($repository)")
 ' <<<"$gate_run" >/dev/null; then
-  echo "latest exact-path publisher run is not successful same-repository main-base evidence" >&2
+  echo "targeted publisher run is not successful same-repository main-base evidence" >&2
   exit 1
 fi
-
-statuses="$(gh api --paginate --slurp "repos/$repository/commits/$reviewed_sha/statuses?per_page=100" | jq -c 'add // []')"
-publisher_url="$(jq -er .html_url <<<"$gate_run")"
 publisher_started_at="$(jq -er .run_started_at <<<"$gate_run")"
-if ! jq -e --arg publisher_url "$publisher_url" --arg publisher_started_at "$publisher_started_at" '
-  [.[] | select(.context == "samorev")] |
-  sort_by(.created_at, .id) | last |
-  .state == "success" and .creator.id == 280144521 and
-  .target_url == $publisher_url and .created_at >= $publisher_started_at
-' <<<"$statuses" >/dev/null; then
-  echo "reviewed head lacks a publisher-bound immutable-reviewer samorev verdict" >&2
+if [[ "$(jq -er .created_at <<<"$verdict")" < "$publisher_started_at" ]]; then
+  echo "samorev verdict predates its targeted publisher run" >&2
   exit 1
 fi
 

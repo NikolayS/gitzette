@@ -30,9 +30,11 @@ run_case() {
 
 pending='[[{"context":"samorev","state":"pending","created_at":"2026-08-16T00:01:00Z","target_url":"https://github.com/NikolayS/gitzette/actions/runs/7","creator":{"id":280144521,"login":"samo-agent"}}]]'
 success='[[{"context":"samorev","state":"success","created_at":"2026-08-16T00:01:00Z","target_url":"https://github.com/NikolayS/gitzette/actions/runs/7","creator":{"id":280144521,"login":"samo-agent"}}]]'
+wrong_target='[[{"context":"samorev","state":"success","created_at":"2026-08-16T00:01:00Z","target_url":"https://github.com/NikolayS/gitzette/actions/runs/6","creator":{"id":280144521,"login":"samo-agent"}}]]'
 run_case transport 1 'error|GitHub status API failed three consecutive times' __FAIL__ __FAIL__ __FAIL__
 run_case malformed 1 'error|samorev status response was malformed three times' not-json not-json not-json
 run_case interleaved 0 'success|immutable-reviewer samorev verdict passed' __FAIL__ "$pending" __FAIL__ "$success"
+run_case superseded-publisher 0 'success|immutable-reviewer samorev verdict passed' "$wrong_target" "$success"
 run_case exhausted 1 'failure|samorev did not finish within the polling window' "$pending" "$pending"
 
 : >"$SAMOREV_PUBLISH_LOG"

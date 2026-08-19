@@ -42,7 +42,12 @@ jobs:
             exit 1
           fi
 
-          bash scripts/check-release-review-evidence.sh "$reviewed_sha"
+          gate_file="$(mktemp)"
+          gh api "repos/$GITHUB_REPOSITORY/contents/scripts/check-release-review-evidence.sh?ref=$reviewed_sha" \
+            --jq .content | base64 --decode >"$gate_file"
+          chmod 0500 "$gate_file"
+          GITHUB_REPOSITORY="$GITHUB_REPOSITORY" bash "$gate_file" "$reviewed_sha"
+          rm -f "$gate_file"
 
   deploy:
     needs: review-gate
