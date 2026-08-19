@@ -109,6 +109,10 @@ text matching is not the authorization proof.
    serializes accidental duplicates; it does not reject them. Confirm exactly
    one run exists before approval.
 
+   The only clean closed state is an absent variable. A value of `false`
+   prevents the migration job from continuing but is still switch residue, so
+   the guard intentionally stays red until the variable is deleted.
+
    ```bash
    bash scripts/check-credential-migration-environment.sh
    gh variable set CREDENTIAL_EXPORT_OPEN --body true
@@ -320,7 +324,8 @@ text matching is not the authorization proof.
    `.github/workflows/credential-migration-policy-guard.yml`,
    `config/credential-migration-environment.json`,
    `config/production-environment-migration.json`, all corresponding
-   apply/check scripts, and `scripts/credential-migration-gate.test.ts`. Remove
+   apply/check scripts, `scripts/get-github-environment.sh`, and
+   `scripts/credential-migration-gate.test.ts`. Remove
    the `migration` case from both shared production-environment scripts so no
    code path points at the deleted config, then delete the live
    `credential-migration` environment and both repository variables

@@ -72,10 +72,13 @@ describe("one-shot credential migration boundary", () => {
     expect(policy.deployment_branch_policy).toEqual({ protected_branches: true, custom_branch_policies: false });
     const productionPolicy = JSON.parse(await Bun.file("config/production-environment.json").text()) as {
       can_admins_bypass: boolean;
+      prevent_self_review: boolean;
+      reviewers: Array<{ id: number }>;
       branch_policies: Array<{ name: string; type: string }>;
     };
     const migrationProductionPolicy = JSON.parse(await Bun.file("config/production-environment-migration.json").text()) as {
       can_admins_bypass: boolean;
+      prevent_self_review: boolean;
       reviewers: Array<{ id: number }>;
       deployment_branch_policy: Record<string, boolean>;
       branch_policies: Array<{ name: string; type: string }>;
@@ -83,9 +86,14 @@ describe("one-shot credential migration boundary", () => {
     expect(productionPolicy.can_admins_bypass).toBe(false);
     expect(productionPolicy.branch_policies).toEqual([{ name: "v*", type: "tag" }]);
     expect(migrationProductionPolicy.can_admins_bypass).toBe(false);
+    expect(migrationProductionPolicy.prevent_self_review).toBe(true);
     expect(migrationProductionPolicy.reviewers.map(({ id }) => id)).toEqual([1345402]);
     expect(migrationProductionPolicy.branch_policies).toEqual([]);
     expect(migrationProductionPolicy.deployment_branch_policy).toEqual({ protected_branches: true, custom_branch_policies: false });
+    expect(policy.can_admins_bypass).toBe(migrationProductionPolicy.can_admins_bypass);
+    expect(policy.prevent_self_review).toBe(migrationProductionPolicy.prevent_self_review);
+    expect(policy.reviewers.map(({ id }) => id)).toEqual(migrationProductionPolicy.reviewers.map(({ id }) => id));
+    expect(policy.deployment_branch_policy).toEqual(migrationProductionPolicy.deployment_branch_policy);
     const applyProduction = await Bun.file("scripts/apply-production-environment.sh").text();
     const checkProduction = await Bun.file("scripts/check-production-environment.sh").text();
     expect(applyProduction).not.toContain("{wait_timer,can_admins_bypass");
@@ -131,6 +139,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("gh variable set CREDENTIAL_VERIFY_OPEN --body true");
     expect(migrationDoc.lastIndexOf("bash scripts/check-production-environment.sh migration", migrationDoc.indexOf("gh variable set CREDENTIAL_VERIFY_OPEN"))).toBeGreaterThan(-1);
     expect(migrationDoc).toContain("gh variable delete CREDENTIAL_VERIFY_OPEN");
+    expect(migrationDoc).toContain("only clean closed state is an absent variable");
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
       migrationDoc.indexOf("--ref main -f operation=verify"),
     );
@@ -149,6 +158,7 @@ describe("one-shot credential migration boundary", () => {
     for (const teardownItem of [
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
       "production-environment-migration.json", "credential-migration-gate.test.ts",
+      "get-github-environment.sh",
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);
 
@@ -156,11 +166,13 @@ describe("one-shot credential migration boundary", () => {
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {
       on: { schedule: Array<{ cron: string }> };
       permissions: Record<string, string>;
+      jobs: Record<string, { permissions: Record<string, string>; steps: Array<{ name?: string; run?: string }> }>;
     };
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
     expect(policyGuard).toContain('true) expected_mode=migration');
     expect(policyGuard).toContain('bash scripts/check-production-environment.sh "$expected_mode"');
     expect(policyGuard).toContain("CRITICAL: production is not v*-only after the verification switch closed");
+    expect(policyGuard).toContain("GUARD UNREADABLE: production environment API evidence could not be retrieved");
     expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" ]]');
     expect(policyGuard).not.toContain("github.event.repository.fork");
     expect(policyGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
@@ -168,7 +180,30 @@ describe("one-shot credential migration boundary", () => {
     expect(policyGuard).toContain('a credential migration switch remains defined');
     expect(policyGuard).toContain("  migration-switches:");
     expect(policyGuard).not.toContain("if: ${{ github.repository == 'NikolayS/gitzette' }}");
-    expect(parsedPolicyGuard.permissions).toEqual({ contents: "read", deployments: "read" });
+    expect(parsedPolicyGuard.permissions).toEqual({});
+    expect(parsedPolicyGuard.jobs["production-policy"].permissions).toEqual({ actions: "read", contents: "read" });
+    expect(parsedPolicyGuard.jobs["migration-switches"].permissions).toEqual({});
+    const policyGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
+      name?.startsWith("Fail if temporary production widening"))?.run;
+    expect(policyGuardRun).toBeDefined();
+    const policyGuardRoot = await mkdtemp(join(tmpdir(), "gitzette-policy-guard-run-"));
+    const fakeBash = join(policyGuardRoot, "bash");
+    await Bun.write(fakeBash, `#!/bin/sh
+exit "\${FAKE_CHECKER_STATUS:-0}"
+`);
+    await Bun.spawn(["chmod", "+x", fakeBash]).exited;
+    const executePolicyGuard = (verifyOpen: string, checkerStatus: number): Promise<number> => Bun.spawn([
+      "/bin/bash", "-c", policyGuardRun ?? "exit 99",
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${policyGuardRoot}:${process.env.PATH}`, VERIFY_OPEN: verifyOpen, FAKE_CHECKER_STATUS: String(checkerStatus) },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await executePolicyGuard("", 0)).toBe(0);
+    expect(await executePolicyGuard("true", 0)).toBe(0);
+    expect(await executePolicyGuard("", 1)).toBe(1);
+    expect(await executePolicyGuard("", 3)).toBe(3);
+    expect(await executePolicyGuard("false", 0)).toBe(1);
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
@@ -358,7 +393,10 @@ case "$endpoint" in
   repos/example/gitzette/environments/production)
     case "\${FAKE_API_ERROR:-none}" in
       auth) echo "fake production API failure" >&2; exit 1 ;;
-      missing) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+      missing)
+        [[ "$*" != *--include* ]] || printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Not Found"}\n'
+        echo "gh: Not Found (HTTP 404)" >&2; exit 1
+        ;;
     esac
     bypass=false; [[ "\${FAKE_API_ERROR:-none}" != bypass ]] || bypass=true
     protected=false; custom=true
@@ -367,6 +405,7 @@ case "$endpoint" in
     [[ "\${FAKE_LIVE_POLICY:-default}" != migration ]] || reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
     jq -nc --argjson bypass "$bypass" --argjson protected "$protected" --argjson custom "$custom" --argjson reviewers "$reviewers" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:$reviewers}],deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}}'
     ;;
+  *environments?per_page=100) printf '%s\n' '[{"environments":[]}]' ;;
   *deployment-branch-policies*)
     if [[ "\${FAKE_LIVE_POLICY:-default}" == api-error ]]; then
       echo "fake branch policy API failure" >&2
@@ -414,7 +453,7 @@ esac
     const missing = await run("default", "default", "missing");
     expect(missing.code).toBe(3);
     expect(missing.stderr).toContain("production environment is missing; run scripts/apply-production-environment.sh default");
-    expect(missing.stderr).toContain("HTTP 404");
+    expect(missing.stderr).toContain("absent from the readable repository inventory");
     const bypass = await run("default", "default", "bypass");
     expect(bypass.code).toBe(1);
     expect(bypass.stderr).toContain('disable "Allow administrators to bypass configured protection rules"');
@@ -493,7 +532,10 @@ case "$endpoint" in
   repos/example/gitzette/environments/credential-migration)
     case "\${FAKE_MODE:-ok}" in
       auth) echo "fake API failure" >&2; exit 1 ;;
-      missing) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+      missing)
+        [[ "$*" != *--include* ]] || printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Not Found"}\n'
+        echo "gh: Not Found (HTTP 404)" >&2; exit 1
+        ;;
     esac
     reviewer_id=1345402; reviewer_login=NikolayS; prevent=true; admin_bypass=false; wait_timer=0; protected=true; custom=false
     [[ "\${FAKE_MODE:-ok}" != reviewer ]] || { reviewer_id=280144521; reviewer_login=samo-agent; }
@@ -510,6 +552,7 @@ case "$endpoint" in
       deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}
     }'
     ;;
+  *environments?per_page=100) printf '%s\n' '[{"environments":[]}]' ;;
   *deployment-branch-policies*)
     if [[ "\${FAKE_MODE:-ok}" == extra-policy ]]; then
       printf '%s\\n' '[{"branch_policies":[{"name":"other","type":"branch"}]}]'
@@ -574,7 +617,7 @@ esac
     const missingStderr = await new Response(missing.stderr).text();
     expect(await missing.exited).toBe(3);
     expect(missingStderr).toContain("credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh");
-    expect(missingStderr).toContain("HTTP 404");
+    expect(missingStderr).toContain("absent from the readable repository inventory");
 
     const apply = await Bun.file("scripts/apply-credential-migration-environment.sh").text();
     expect(apply).toContain("post_apply_environment");
@@ -603,6 +646,7 @@ if [[ "$method" == POST ]]; then printf '%s\\n' "$*" >>"$FAKE_RECORD/post.log"; 
 case "$endpoint" in
   repos/example/gitzette/environments/credential-migration)
     if [[ "\${FAKE_MODE:-correct}" == missing && ! -f "$FAKE_RECORD/installed" ]]; then
+      [[ "$*" != *--include* ]] || printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Not Found"}\n'
       echo 'gh: Not Found (HTTP 404)' >&2
       exit 1
     fi
@@ -613,6 +657,7 @@ case "$endpoint" in
     fi
     jq -nc --argjson bypass "$bypass" --argjson protected "$protected" --argjson custom "$custom" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}}]}],deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}}'
     ;;
+  *environments?per_page=100) printf '%s\n' '[{"environments":[]}]' ;;
   *deployment-branch-policies*)
     count_file="$FAKE_RECORD/policy-count"; count=0; [[ ! -f "$count_file" ]] || count="$(<"$count_file")"; count=$((count + 1)); printf '%s' "$count" >"$count_file"
     if [[ "$count" -ge 2 ]]; then
@@ -672,5 +717,45 @@ esac
     expect(await firstApply.exited).toBe(1);
     expect(await Bun.file(join(missing, "put.json")).exists()).toBe(true);
     expect(firstApplyStderr).toContain("credential-migration was newly created");
+  });
+
+  test("distinguishes inventory-proven absence from permission-masked 404", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gitzette-environment-lookup-"));
+    const gh = join(root, "gh");
+    await Bun.write(gh, `#!/usr/bin/env bash
+set -euo pipefail
+endpoint="\${*: -1}"
+case "$endpoint" in
+  repos/example/gitzette/environments/production)
+    if [[ "\${FAKE_MODE:-ok}" == ok ]]; then printf '{"name":"production"}\n'; exit 0; fi
+    if [[ "$*" == *--include* ]]; then
+      status=404; [[ "\${FAKE_MODE:-ok}" != server-error ]] || status=500
+      printf 'HTTP/2.0 %s Error\r\n\r\n{"message":"error"}\n' "$status"
+    fi
+    echo 'lookup failed' >&2
+    exit 1
+    ;;
+  *environments?per_page=100)
+    if [[ "\${FAKE_MODE:-ok}" == absent ]]; then
+      printf '[{"environments":[]}]\n'
+    else
+      printf '[{"environments":[{"name":"production"}]}]\n'
+    fi
+    ;;
+  *) exit 91 ;;
+esac
+`);
+    await Bun.spawn(["chmod", "+x", gh]).exited;
+    const run = (mode: string): Promise<number> => Bun.spawn([
+      "bash", "scripts/get-github-environment.sh", "example/gitzette", "production",
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, FAKE_MODE: mode },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await run("ok")).toBe(0);
+    expect(await run("absent")).toBe(4);
+    expect(await run("masked")).toBe(3);
+    expect(await run("server-error")).toBe(3);
   });
 });

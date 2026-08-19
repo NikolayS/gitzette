@@ -15,7 +15,9 @@ describe("deploy review revalidation", () => {
     expect(gate).toContain('actions/workflows/ci.yml/runs?event=pull_request&head_sha=$reviewed_sha');
     expect(gate).toContain('actions/workflows/samorev-gate.yml/runs?event=pull_request_target&head_sha=$reviewed_sha');
     expect(gate).toContain('.default_branch == "main"');
-    expect(gate).toContain('.protected == true');
+    expect(gate).toContain('.enforce_admins.enabled == true');
+    expect(gate).toContain('.allow_force_pushes.enabled == false');
+    expect(gate).toContain('.require_last_push_approval == true');
     expect(gate).toContain('.path == ".github/workflows/ci.yml"');
     expect(gate).toContain('.path == ".github/workflows/samorev-gate.yml"');
     expect(gate).toContain('.base.ref == "main"');
@@ -56,9 +58,16 @@ case "$endpoint" in
     default_branch=main; [[ "$mode" != wrong-default ]] || default_branch=attacker
     jq -nc --arg default_branch "$default_branch" '{default_branch:$default_branch}'
     ;;
-  repos/example/gitzette/branches/main)
-    protected=true; [[ "$mode" != unprotected-main ]] || protected=false
-    jq -nc --argjson protected "$protected" '{protected:$protected}'
+  repos/example/gitzette/branches/main/protection)
+    enforce=true; force=false; delete=false; reviews=true
+    [[ "$mode" != admin-bypass ]] || enforce=false
+    [[ "$mode" != force-push ]] || force=true
+    [[ "$mode" != deletable-main ]] || delete=true
+    [[ "$mode" != no-reviews ]] || reviews=false
+    jq -nc --argjson enforce "$enforce" --argjson force "$force" --argjson delete "$delete" --argjson reviews "$reviews" '{enforce_admins:{enabled:$enforce},allow_force_pushes:{enabled:$force},allow_deletions:{enabled:$delete},required_pull_request_reviews:(if $reviews then {dismiss_stale_reviews:true,require_code_owner_reviews:true,require_last_push_approval:true} else null end)}'
+    ;;
+  *rulesets*)
+    if [[ "$mode" == ruleset ]]; then printf '[{"id":1}]\n'; else printf '[]\n'; fi
     ;;
   *actions/workflows/ci.yml/runs*)
     if [[ "$mode" == no-ci-path ]]; then
@@ -110,7 +119,8 @@ esac
     expect(await run("renamed-reviewer")).toBe(0);
     for (const mode of [
       "latest-ci-failure", "no-ci-path", "latest-gate-failure", "no-gate-path",
-      "latest-review-failure", "forged-reviewer", "wrong-default", "unprotected-main",
+      "latest-review-failure", "forged-reviewer", "wrong-default", "admin-bypass",
+      "force-push", "deletable-main", "no-reviews", "ruleset",
       "wrong-base", "fork-head", "wrong-publisher-target", "predated-verdict", "api-error",
     ]) expect(await run(mode)).not.toBe(0);
   });

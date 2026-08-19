@@ -15,8 +15,12 @@ esac
 expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
-if ! environment="$(gh api "repos/$repository/environments/production" 2>"$error_file")"; then
-  if grep -Eq 'HTTP 404([^0-9]|$)' "$error_file"; then
+set +e
+environment="$("$root/scripts/get-github-environment.sh" "$repository" production 2>"$error_file")"
+environment_status=$?
+set -e
+if [[ "$environment_status" -ne 0 ]]; then
+  if [[ "$environment_status" -eq 4 ]]; then
     echo "production environment is missing; run scripts/apply-production-environment.sh default" >&2
   else
     echo "unable to read production environment; apply only after resolving this API error:" >&2

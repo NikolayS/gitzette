@@ -18,9 +18,21 @@ if ! jq -e '.default_branch == "main"' <<<"$repository_metadata" >/dev/null; the
   echo "release gate requires main to be the repository default branch" >&2
   exit 1
 fi
-main_metadata="$(gh api "repos/$repository/branches/main")"
-if ! jq -e '.protected == true' <<<"$main_metadata" >/dev/null; then
-  echo "release gate requires the main base branch to be protected" >&2
+main_protection="$(gh api "repos/$repository/branches/main/protection")"
+if ! jq -e '
+  .enforce_admins.enabled == true and
+  .allow_force_pushes.enabled == false and
+  .allow_deletions.enabled == false and
+  .required_pull_request_reviews.dismiss_stale_reviews == true and
+  .required_pull_request_reviews.require_code_owner_reviews == true and
+  .required_pull_request_reviews.require_last_push_approval == true
+' <<<"$main_protection" >/dev/null; then
+  echo "release gate requires non-bypassable main protection against direct overwrite" >&2
+  exit 1
+fi
+rulesets="$(gh api "repos/$repository/rulesets?includes_parents=true")"
+if ! jq -e 'length == 0' <<<"$rulesets" >/dev/null; then
+  echo "release gate refuses unreviewed repository or inherited ruleset bypass state" >&2
   exit 1
 fi
 

@@ -11,8 +11,12 @@ repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url
 policy="$root/config/credential-migration-environment.json"
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
-if ! environment="$(gh api "repos/$repository/environments/credential-migration" 2>"$error_file")"; then
-  if grep -Eq 'HTTP 404([^0-9]|$)' "$error_file"; then
+set +e
+environment="$("$root/scripts/get-github-environment.sh" "$repository" credential-migration 2>"$error_file")"
+environment_status=$?
+set -e
+if [[ "$environment_status" -ne 0 ]]; then
+  if [[ "$environment_status" -eq 4 ]]; then
     echo "credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh" >&2
   else
     echo "unable to read credential-migration environment; apply only after resolving this API error:" >&2

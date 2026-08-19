@@ -14,7 +14,11 @@ created_environment=false
 
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
-if live_environment="$(gh api "repos/$repository/environments/$environment" 2>"$error_file")"; then
+set +e
+live_environment="$("$root/scripts/get-github-environment.sh" "$repository" "$environment" 2>"$error_file")"
+environment_status=$?
+set -e
+if [[ "$environment_status" -eq 0 ]]; then
   if [[ "$(jq -r .can_admins_bypass <<<"$live_environment")" != false ]]; then
     echo 'disable "Allow administrators to bypass configured protection rules" for environment credential-migration in Settings -> Environments before applying' >&2
     exit 1
@@ -24,7 +28,7 @@ if live_environment="$(gh api "repos/$repository/environments/$environment" 2>"$
   else
     live='[]'
   fi
-elif grep -Eq 'HTTP 404([^0-9]|$)' "$error_file"; then
+elif [[ "$environment_status" -eq 4 ]]; then
   created_environment=true
   live='[]'
 else
