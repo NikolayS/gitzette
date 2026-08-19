@@ -1,6 +1,6 @@
 type SchemaRow = { type: string; name: string; sql: string | null };
 
-function collapseSqlWhitespace(sql: string, stripComments = true): string {
+function collapseSqlWhitespace(sql: string, stripComments: boolean): string {
   let result = "";
   let quote = "";
   let pendingSpace = false;
@@ -64,7 +64,7 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
 
 function canonicalSql(sql: string | null): string | null {
   if (sql === null) return null;
-  return collapseSqlWhitespace(sql)
+  return collapseSqlWhitespace(sql, true)
     .replace(/CREATE (TABLE|INDEX|TRIGGER|VIEW) IF NOT EXISTS/gi, "CREATE $1")
     .replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) "([A-Za-z0-9_]+)"/i, "CREATE $1 $2")
     .trim();

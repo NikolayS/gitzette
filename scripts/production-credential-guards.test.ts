@@ -162,6 +162,32 @@ describe("production migration credential guards", () => {
     }
   });
 
+  test("an inherited memo flag and exported functions cannot bypass the Wrangler guard", async () => {
+    const helperPath = `${repoRoot}/scripts/require-wrangler.sh`;
+    const env = {
+      ...process.env,
+      CLOUDFLARE_API_TOKEN: "must-be-cleared",
+      gitzette_require_wrangler_loaded: "1",
+      "BASH_FUNC_gitzette_require_checked_in_caller%%": "() { return 0; }",
+      "BASH_FUNC_gitzette_require_local%%": "() { :; }",
+    };
+    const child = Bun.spawn([
+      "bash", "-c",
+      'set -euo pipefail; source "$1"; gitzette_require_local; '
+        + '[[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; '
+        + 'gitzette_require_checked_in_caller "invalid.sh" "/tmp/invalid.sh" "/tmp/invalid.sh"',
+      "wrangler-inheritance-probe", helperPath,
+    ], { cwd: "/tmp", env, stdout: "pipe", stderr: "pipe" });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("invalid.sh must be executed, not sourced or wrapped");
+  });
+
   test("relative callers ignore a hostile CDPATH before the helper changes cwd", async () => {
     const root = await mkdtemp(join(process.env.RUNNER_TEMP || tmpdir(), "wrangler-cdpath-"));
     try {

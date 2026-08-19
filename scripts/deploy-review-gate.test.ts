@@ -73,5 +73,9 @@ describe("deploy review revalidation", () => {
     expect(workflow).toContain("rsa_oaep_md:sha256");
     expect(workflow).toContain("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
     expect(workflow).toContain("encrypted_credentials=%s");
+    expect(workflow).not.toMatch(/PRIVATE KEY|private_key|upload-artifact/);
+    const environmentCheck = await Bun.file("scripts/check-production-environment.sh").text();
+    expect(environmentCheck).toContain("credential migration is complete; remove its workflow");
+    expect(environmentCheck).toContain("contents/.github/workflows/migrate-production-credentials.yml?ref=main");
   });
 });

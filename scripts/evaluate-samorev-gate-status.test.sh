@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/evaluate-samorev-gate-status.sh"
+script="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null && pwd)/evaluate-samorev-gate-status.sh"
 
 assert_exit() {
   expected="$1"

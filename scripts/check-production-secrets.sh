@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-if [[ -z "${BASH_SOURCE[0]:-}" ]] || {
-  [[ "${BASH_SOURCE[0]}" != "$0" ]] && [[ "$(basename -- "${BASH_SOURCE[0]}")" != "$0" ]]
-}; then
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
   echo "check-production-secrets.sh must be executed, not sourced or piped to Bash" >&2
   exit 1
 fi

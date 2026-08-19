@@ -3,8 +3,10 @@
 Protected `main` requires `typecheck`, `samorev`, and `samorev-gate` on the
 exact pull-request head, applies those checks to administrators, and requires
 every conversation to be resolved. A separate formal GitHub approval is not a
-merge or release gate. The repository owner explicitly chose this zero-formal-
-approval policy: the release runner (`samo-agent`, immutable ID `280144521`)
+merge or release gate. On 2026-08-19, the repository owner explicitly chose
+this standing zero-formal-approval policy: each push is re-reviewed by the
+independent exact-head samorev process, then Max performs a documented readiness
+review before merge. The release runner (`samo-agent`, immutable ID `280144521`)
 pushes the `v*` tag, and Nik performs the mandatory human authorization at the
 protected production environment. The checked-in approval validator permits
 only Nik and rejects the release actor.
@@ -101,6 +103,13 @@ environment secrets and deleting the repository copies, delete the bootstrap
 workflow in the next reviewed PR;
 remove the temporary `main` policy in that same PR. Leaving a credential-export
 path around is needless attack surface.
+
+CI and `scripts/check-production-environment.sh` enforce that removal. The
+temporary `main` environment policy and migration workflow must appear or
+disappear together. Once the repository credential copies are absent, the
+check fails if the migration workflow is still present on protected `main`.
+The workflow never uploads an artifact or contains a decryption key; it prints
+only ciphertext for the operator-held private key.
 
 ```bash
 GH_TOKEN="$(gh auth token --user samo-agent)" \

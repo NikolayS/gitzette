@@ -13,8 +13,8 @@ afterEach(async () => {
 });
 
 type FakeWranglerMode = "success" | "failure" | "empty";
-type WrapperInvocation = "bash-absolute" | "bash-bare" | "bash-path" | "bash-relative"
-  | "direct-absolute" | "direct-relative";
+type WrapperInvocation = "bash-absolute" | "bash-bare" | "bash-relative"
+  | "direct-absolute" | "direct-path" | "direct-relative";
 type SecretCheckOptions = {
   adversarialCdPath?: boolean;
   includeToken?: boolean;
@@ -69,7 +69,7 @@ esac
 
   const environment: Record<string, string> = {
     PATH: [
-      invocation === "bash-path" ? dirname(scriptPath) : undefined,
+      invocation === "direct-path" ? dirname(scriptPath) : undefined,
       join(root, "node_modules", ".bin"),
       dirname(process.execPath),
       process.env.PATH,
@@ -96,8 +96,8 @@ esac
       command = ["bash", scriptPath.split("/").at(-1) ?? scriptPath];
       cwd = dirname(scriptPath);
       break;
-    case "bash-path":
-      command = ["bash", scriptPath.split("/").at(-1) ?? scriptPath];
+    case "direct-path":
+      command = [scriptPath.split("/").at(-1) ?? scriptPath];
       break;
     case "bash-relative":
       command = ["bash", "scripts/check-production-secrets.sh"];
@@ -261,20 +261,22 @@ describe("production secret preflight", () => {
     const wrapper = join(repoRoot, "scripts", "check-production-secrets.sh");
     const bash = Bun.which("bash");
     expect(bash).not.toBeNull();
-    const child = Bun.spawn([bash!, "-c", `source "$1"`, "--", wrapper], {
-      cwd: tmpdir(),
-      env: { HOME: tmpdir(), PATH: `${dirname(bash!)}:${dirname(process.execPath)}` },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
-    expect(exitCode).toBe(1);
-    expect(stdout).toBe("");
-    expect(stderr).toContain("must be executed, not sourced");
+    for (const argvZero of ["--", "check-production-secrets.sh"]) {
+      const child = Bun.spawn([bash!, "-c", `source "$1"`, argvZero, wrapper], {
+        cwd: tmpdir(),
+        env: { HOME: tmpdir(), PATH: `${dirname(bash!)}:${dirname(process.execPath)}` },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(exitCode, argvZero).toBe(1);
+      expect(stdout, argvZero).toBe("");
+      expect(stderr, argvZero).toContain("must be executed, not sourced");
+    }
   });
 
   test("fails loudly when piped to bash instead of executed by path", async () => {
@@ -297,10 +299,10 @@ describe("production secret preflight", () => {
     expect(stderr).toContain("must be executed, not sourced or piped to Bash");
   });
 
-  test("uses Bash's resolved path for a bare PATH invocation", async () => {
+  test("uses the kernel-resolved path for a bare PATH invocation", async () => {
     const result = await runRawSecretCheck(
       JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
-      { invocation: "bash-path" },
+      { invocation: "direct-path" },
     );
     expect(result.exitCode).toBe(0);
     expect(result.fakeInvoked).toBe(true);

@@ -51,6 +51,22 @@ live beside `require-wrangler.sh` and its declared TypeScript entrypoints, so
 out-of-tree wrappers and missing siblings fail closed. Invocation is
 cwd-independent, though the documented `bun run` commands remain preferred.
 
+## Production authorization availability
+
+Nik (immutable GitHub user ID `1345402`) is deliberately the only production
+environment reviewer. Normal release tags must be pushed by `samo-agent`
+(immutable ID `280144521`), never by Nik: `prevent_self_review` rejects a run
+whose actor is also its approver. If Nik accidentally pushes a release tag,
+delete that undeployed tag and recreate it at the same reviewed commit using
+`samo-agent`; never disable self-review.
+
+Loss of Nik's account stops releases by design. Recovery requires a reviewed
+policy change that adds a named human's immutable ID to both
+`config/production-environment.json` and the checked-in approval validator,
+followed by the full exact-head CI and samorev gates and a live environment
+policy audit. There is no emergency bypass through repository secrets or an
+Actions actor.
+
 ## Captured baseline provenance
 
 `fixtures/production-baseline-2026-08-15.sql` is a canonical SQL reconstruction
