@@ -18,6 +18,8 @@ set -e
 if [[ "$environment_status" -ne 0 ]]; then
   if [[ "$environment_status" -eq 4 ]]; then
     echo "credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh" >&2
+    sed 's/^/  /' "$error_file" >&2
+    exit 4
   else
     echo "unable to read credential-migration environment; apply only after resolving this API error:" >&2
   fi
@@ -32,20 +34,6 @@ if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies <<<"$environment
   fi
 else
   policies='[]'
-fi
-if ! variables="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/variables?per_page=100" 2>"$error_file" | jq -c 'map(.variables) | add // []')"; then
-  echo "unable to read credential-migration environment variables:" >&2
-  sed 's/^/  /' "$error_file" >&2
-  exit 3
-fi
-if ! secrets="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/secrets?per_page=100" 2>"$error_file" | jq -c 'map(.secrets) | add // []')"; then
-  echo "unable to read credential-migration environment secrets:" >&2
-  sed 's/^/  /' "$error_file" >&2
-  exit 3
-fi
-if [[ "$(jq -r 'length' <<<"$variables")" -ne 0 || "$(jq -r 'length' <<<"$secrets")" -ne 0 ]]; then
-  echo "credential-migration environment must not define variables or secrets" >&2
-  exit 1
 fi
 expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$policies" '{

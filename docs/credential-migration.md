@@ -97,6 +97,7 @@ text matching is not the authorization proof.
    ```bash
    bash scripts/check-production-environment.sh
    bash scripts/apply-credential-migration-environment.sh
+   bash scripts/check-credential-migration-inventory.sh
    gh workflow run credential-migration-policy-guard.yml --ref main
    gh run watch POLICY_GUARD_RUN_ID --exit-status
    ```
@@ -104,7 +105,10 @@ text matching is not the authorization proof.
    This preflight dispatch must be green before the scheduled guard is relied
    on; API-read failures exit separately from policy drift. Green proves the
    fixed production policy and that neither migration switch resolves to a
-   nonempty value. It
+   nonempty value. The scheduled guard deliberately checks only environment
+   policy endpoints readable by `GITHUB_TOKEN`; the adjacent inventory command
+   uses the operator's administrator token to prove the migration environment
+   has no variables or secrets. It
    does not claim that the intentionally installed bootstrap workflow or
    migration environment has already been removed.
 
@@ -122,6 +126,7 @@ text matching is not the authorization proof.
 
    ```bash
    bash scripts/check-credential-migration-environment.sh
+   bash scripts/check-credential-migration-inventory.sh
    gh variable set CREDENTIAL_EXPORT_OPEN --body true
    GH_TOKEN="$(gh auth token --user samo-agent)" \
      gh workflow run migrate-production-credentials.yml --ref main -f operation=export
@@ -137,10 +142,11 @@ text matching is not the authorization proof.
    openssl pkey -in "$MIGRATION_KEY_DIR/production-migration-private.pem" \
      -pubout -outform DER | sha256sum
    bash scripts/check-credential-migration-environment.sh
+   bash scripts/check-credential-migration-inventory.sh
    ```
 
    Record the exact pre-approval guard and export run IDs in the incident log.
-   Run `bash scripts/check-credential-migration-environment.sh` again
+   Run both credential-migration checks again
    immediately before approval; do not approve if either the run identity or
    the environment check differs from the recorded evidence.
 
@@ -244,6 +250,7 @@ text matching is not the authorization proof.
    git fetch origin main
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
    bash scripts/check-credential-migration-environment.sh
+   bash scripts/check-credential-migration-inventory.sh
    bash scripts/check-production-environment.sh
    gh variable set CREDENTIAL_VERIFY_OPEN --body true
    GH_TOKEN="$(gh auth token --user samo-agent)" \
@@ -267,6 +274,7 @@ text matching is not the authorization proof.
    test "$(gh run view VERIFY_RUN_ID --json headSha --jq .headSha)" = \
      "$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
    bash scripts/check-credential-migration-environment.sh
+   bash scripts/check-credential-migration-inventory.sh
    bash scripts/check-production-environment.sh
    ```
 
@@ -321,7 +329,9 @@ text matching is not the authorization proof.
    `.github/workflows/migrate-production-credentials.yml`,
    `.github/workflows/credential-migration-policy-guard.yml`,
    `config/credential-migration-environment.json`,
-   all corresponding apply/check scripts, `scripts/get-github-environment.sh`, and
+   all corresponding apply/check scripts, including
+   `scripts/check-credential-migration-inventory.sh`,
+   `scripts/get-github-environment.sh`, and
    `scripts/credential-migration-gate.test.ts`. Delete the live
    `credential-migration` environment and both repository variables
    `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Remove the temporary

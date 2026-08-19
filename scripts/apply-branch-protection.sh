@@ -6,8 +6,6 @@ repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url
 policy="$root/config/main-branch-protection.json"
 owner_type="$(gh api "repos/$repository" --jq .owner.type)"
 
-jq '{allow_auto_merge}' "$policy" | gh api --method PATCH "repos/$repository" --input - --silent
-
 audit_partial_apply() {
   rc=$?
   if [[ "$rc" -ne 0 ]]; then
@@ -21,11 +19,12 @@ trap audit_partial_apply EXIT
 # Install the non-forgeable update boundary before reducing formal approvals.
 # RepositoryRole 5 is the repository administrator; GitHub Actions is not a
 # bypass actor and therefore cannot update main even if it forges every context.
-ruleset_payload="$(jq -c '.repository_rulesets[0]' "$policy")"
 if [[ "$(jq '.repository_rulesets | length' "$policy")" -ne 1 ]]; then
   echo "branch policy must define exactly one main update-restriction ruleset" >&2
   exit 1
 fi
+ruleset_payload="$(jq -c '.repository_rulesets[0]' "$policy")"
+jq '{allow_auto_merge}' "$policy" | gh api --method PATCH "repos/$repository" --input - --silent
 ruleset_name="$(jq -r .name <<<"$ruleset_payload")"
 ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=false&per_page=100" | jq -c 'add')"
 matching_ids="$(jq -r --arg name "$ruleset_name" '.[] | select(.name == $name) | .id' <<<"$ruleset_summaries")"

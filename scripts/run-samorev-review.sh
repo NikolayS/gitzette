@@ -63,7 +63,8 @@ SAMOREV_IGNORED_GITHUB_CHECK_RUN_IDS="$publisher_check_run_id" \
 SAMOREV_IGNORED_GITHUB_CHECK_NAME="base-controlled samorev publisher" \
 SAMOREV_IGNORED_GITHUB_CHECK_APP_ID=15368 \
   bun "$SAMOREV_HOME/src/cli.ts" review "$pr_url" --blocking --fetch \
-  > >(tee "$log_file") 2>&1 || review_rc=$?
+  >"$log_file" 2>&1 || review_rc=$?
+cat "$log_file"
 
 if [[ "$review_rc" -eq 0 ]]; then
   publish success "terminal-clean exact-head samorev passed"

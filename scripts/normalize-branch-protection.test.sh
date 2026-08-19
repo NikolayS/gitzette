@@ -39,4 +39,23 @@ assert_drift ruleset-disabled "$protection" "$(jq -c '.[0].enforcement="disabled
 assert_drift update-rule-removed "$protection" "$(jq -c '.[0].rules=[]' <<<"$rulesets")"
 assert_drift ref-widened "$protection" "$(jq -c '.[0].conditions.ref_name.include=["~ALL"]' <<<"$rulesets")"
 
+stub_dir="$(mktemp -d)"
+trap 'rm -rf "$stub_dir"' EXIT
+cat >"$stub_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == *'repos/example/gitzette --jq .allow_auto_merge'* ]] || exit 91
+printf 'true\n'
+EOF
+chmod +x "$stub_dir/gh"
+if GITHUB_REPOSITORY=example/gitzette PATH="$stub_dir:$PATH" \
+  bash "$root/scripts/check-branch-protection.sh" >"$stub_dir/out" 2>"$stub_dir/err"; then
+  echo "allow_auto_merge drift was not rejected" >&2
+  exit 1
+fi
+grep -q 'repository allow_auto_merge differs' "$stub_dir/err" || {
+  echo "allow_auto_merge drift did not produce the expected diagnostic" >&2
+  exit 1
+}
+
 echo "branch-protection normalization and security-field tests passed"

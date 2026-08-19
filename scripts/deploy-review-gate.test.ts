@@ -43,6 +43,14 @@ describe("deploy review revalidation", () => {
     expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_APP_ID=15368");
     expect(reviewerWrapper).toContain('-f target_url="$publisher_url"');
     expect(reviewerWrapper).toContain("publish error");
+    expect(reviewerWrapper).toContain('>"$log_file" 2>&1');
+    expect(reviewerWrapper).not.toContain('> >(tee "$log_file")');
+    expect(applyBranchPolicy.indexOf("repository_rulesets | length")).toBeLessThan(
+      applyBranchPolicy.indexOf("{allow_auto_merge}"),
+    );
+    expect(applyBranchPolicy.indexOf("trap audit_partial_apply EXIT")).toBeLessThan(
+      applyBranchPolicy.indexOf("{allow_auto_merge}"),
+    );
     expect(applyBranchPolicy.indexOf("ruleset_payload=")).toBeLessThan(
       applyBranchPolicy.indexOf("actions/permissions/workflow"),
     );

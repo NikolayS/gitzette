@@ -156,7 +156,7 @@ describe("one-shot credential migration boundary", () => {
     for (const teardownItem of [
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
       "credential-migration-gate.test.ts",
-      "get-github-environment.sh",
+      "get-github-environment.sh", "check-credential-migration-inventory.sh",
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);
 
@@ -185,7 +185,10 @@ describe("one-shot credential migration boundary", () => {
     expect(parsedPolicyGuard.jobs["migration-switches"].permissions).toEqual({});
     const policyGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the fixed production ref policy"))?.run;
+    const migrationGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
+      name?.startsWith("Audit the credential migration approval boundary"))?.run;
     expect(policyGuardRun).toBeDefined();
+    expect(migrationGuardRun).toBeDefined();
     const policyGuardRoot = await mkdtemp(join(tmpdir(), "gitzette-policy-guard-run-"));
     const fakeBash = join(policyGuardRoot, "bash");
     await Bun.write(fakeBash, `#!/bin/sh
@@ -203,6 +206,17 @@ exit "\${FAKE_CHECKER_STATUS:-0}"
     expect(await executePolicyGuard(1)).toBe(1);
     expect(await executePolicyGuard(3)).toBe(3);
     expect(await executePolicyGuard(4)).toBe(4);
+    const executeMigrationGuard = (checkerStatus: number): Promise<number> => Bun.spawn([
+      "/bin/bash", "-c", migrationGuardRun ?? "exit 99",
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${policyGuardRoot}:${process.env.PATH}`, FAKE_CHECKER_STATUS: String(checkerStatus) },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await executeMigrationGuard(0)).toBe(0);
+    expect(await executeMigrationGuard(1)).toBe(1);
+    expect(await executeMigrationGuard(3)).toBe(3);
+    expect(await executeMigrationGuard(4)).toBe(4);
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
@@ -355,7 +369,10 @@ fi
       CLOUDFLARE_ACCOUNT_ID: "exact-account",
       CLOUDFLARE_API_TOKEN: "exact-token",
     });
+    expect(exportRun).not.toContain('--arg api_token "$CLOUDFLARE_API_TOKEN"');
+    expect(exportRun).not.toContain('--arg account_id "$CLOUDFLARE_ACCOUNT_ID"');
     const d1Request = JSON.parse(await Bun.file(join(throwawayRoot, "gitzette-credential-migration", "d1-request.json")).text());
+    expect(Object.keys(d1Request)).toEqual(["batch"]);
     expect(d1Request.batch).toHaveLength(2);
     expect(d1Request.batch[0].sql).toContain("create table credential_migration_transfer");
     expect(d1Request.batch[0].sql).not.toContain("if not exists");
@@ -596,12 +613,20 @@ esac
     expect(await run("wait-timer")).toBe(1);
     expect(await run("custom-branch-policy")).toBe(1);
     expect(await run("admin-bypass")).toBe(1);
-    expect(await run("environment-variable")).toBe(1);
-    expect(await run("environment-secret")).toBe(1);
-    expect(await run("variable-api-error")).toBe(3);
-    expect(await run("secret-api-error")).toBe(3);
-    expect(await run("missing")).toBe(3);
+    expect(await run("missing")).toBe(4);
     expect(await run("auth")).toBe(3);
+    const runInventory = (mode: string): Promise<number> => Bun.spawn([
+      "bash", "scripts/check-credential-migration-inventory.sh",
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await runInventory("ok")).toBe(0);
+    expect(await runInventory("environment-variable")).toBe(1);
+    expect(await runInventory("environment-secret")).toBe(1);
+    expect(await runInventory("variable-api-error")).toBe(3);
+    expect(await runInventory("secret-api-error")).toBe(3);
     const bypassFailure = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "admin-bypass" },
@@ -626,7 +651,7 @@ esac
       stdout: "pipe", stderr: "pipe",
     });
     const missingStderr = await new Response(missing.stderr).text();
-    expect(await missing.exited).toBe(3);
+    expect(await missing.exited).toBe(4);
     expect(missingStderr).toContain("credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh");
     expect(missingStderr).toContain("absent from the readable repository inventory");
 
