@@ -161,8 +161,9 @@ bun test
 bash scripts/e2e.sh
 ```
 
-All referenced shell gates must be executed as files, not sourced or piped.
-They must live beside `require-wrangler.sh` and their declared TypeScript
+The Wrangler/D1 shell preflights enumerated by
+`scripts/production-credential-guards.test.ts` must be executed as files, not
+sourced or piped. They must live beside `require-wrangler.sh` and their declared
 entrypoints; out-of-tree wrappers and missing siblings fail closed. Invocation
 is cwd-independent, as documented in `docs/production-migrations.md`.
 

@@ -24,4 +24,4 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-echo "Branch protection OK: base-controlled gate, exact-head verdict, CI, and an independent fresh approval are required for admins"
+echo "Branch protection OK: base-controlled gate, exact-head verdict, CI, and conversation resolution are required for admins"

@@ -83,6 +83,11 @@ describe("schema equivalence", () => {
       schema("CREATE TABLE jobs(id TEXT,-- the user's immutable id\nstate TEXT)"),
       true,
     )).toBe(true);
+    expect(schemasMatch(
+      schema("CREATE TABLE jobs(id TEXT -- reviewed id\n,state TEXT)"),
+      schema("CREATE TABLE jobs(id TEXT -- reviewed id\n)"),
+      true,
+    )).toBe(false);
   });
 
   test("CLI pins argv order, labels, strict mode, and unknown modes", async () => {

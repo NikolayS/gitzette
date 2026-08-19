@@ -9,21 +9,23 @@
     checks: ((.required_status_checks.checks // []) | sort_by(.context))
   },
   enforce_admins: (.enforce_admins.enabled // false),
-  required_pull_request_reviews: {
-    dismiss_stale_reviews: (.required_pull_request_reviews.dismiss_stale_reviews // false),
-    require_code_owner_reviews: (.required_pull_request_reviews.require_code_owner_reviews // false),
-    required_approving_review_count: (.required_pull_request_reviews.required_approving_review_count // 0),
-    require_last_push_approval: (.required_pull_request_reviews.require_last_push_approval // false),
-    dismissal_restrictions: {
-      users: ((.required_pull_request_reviews.dismissal_restrictions.users // []) | map(.login) | sort),
-      teams: ((.required_pull_request_reviews.dismissal_restrictions.teams // []) | map(.slug) | sort)
-    },
-    bypass_pull_request_allowances: {
-      users: ((.required_pull_request_reviews.bypass_pull_request_allowances.users // []) | map(.login) | sort),
-      teams: ((.required_pull_request_reviews.bypass_pull_request_allowances.teams // []) | map(.slug) | sort),
-      apps: ((.required_pull_request_reviews.bypass_pull_request_allowances.apps // []) | map(.slug) | sort)
-    }
-  },
+  required_pull_request_reviews: (
+    if .required_pull_request_reviews == null then null else {
+      dismiss_stale_reviews: (.required_pull_request_reviews.dismiss_stale_reviews // false),
+      require_code_owner_reviews: (.required_pull_request_reviews.require_code_owner_reviews // false),
+      required_approving_review_count: (.required_pull_request_reviews.required_approving_review_count // 0),
+      require_last_push_approval: (.required_pull_request_reviews.require_last_push_approval // false),
+      dismissal_restrictions: {
+        users: ((.required_pull_request_reviews.dismissal_restrictions.users // []) | map(.login) | sort),
+        teams: ((.required_pull_request_reviews.dismissal_restrictions.teams // []) | map(.slug) | sort)
+      },
+      bypass_pull_request_allowances: {
+        users: ((.required_pull_request_reviews.bypass_pull_request_allowances.users // []) | map(.login) | sort),
+        teams: ((.required_pull_request_reviews.bypass_pull_request_allowances.teams // []) | map(.slug) | sort),
+        apps: ((.required_pull_request_reviews.bypass_pull_request_allowances.apps // []) | map(.slug) | sort)
+      }
+    } end
+  ),
   required_conversation_resolution: (.required_conversation_resolution.enabled // false),
   allow_force_pushes: (.allow_force_pushes.enabled // false),
   allow_deletions: (.allow_deletions.enabled // false),

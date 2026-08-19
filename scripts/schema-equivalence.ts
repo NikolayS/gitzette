@@ -20,9 +20,9 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
       while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") index += 1;
       if (!stripComments) {
         if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
-        result += sql.slice(commentStart, index);
+        result += `${sql.slice(commentStart, index)}\n`;
       }
-      pendingSpace = true;
+      pendingSpace = stripComments;
       continue;
     }
     if (char === "/" && sql[index + 1] === "*") {
@@ -45,7 +45,9 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
     } else if (/\s/.test(char)) {
       pendingSpace = true;
     } else if (char === "(" || char === "," || char === ")") {
-      result = result.trimEnd() + char;
+      result = !stripComments && result.endsWith("\n")
+        ? result + char
+        : result.trimEnd() + char;
       pendingSpace = false;
     } else {
       if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
@@ -53,7 +55,7 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
       result += char;
     }
   }
-  return result.trim();
+  return result.trim().replace(/\n[ \t]+/g, "\n");
 }
 
 function canonicalSql(sql: string | null): string | null {

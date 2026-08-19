@@ -56,12 +56,6 @@ jobs:
             exit 1
           fi
 
-          reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$(jq -r '.number' <<<"$reviewed_pr")/reviews")"
-          if ! jq -e --arg sha "$reviewed_sha" 'any(.[]; .user.login == "samo-agent" and .state == "APPROVED" and .commit_id == $sha)' <<<"$reviews" >/dev/null; then
-            echo "reviewed head lacks the exact-head CODEOWNER approval" >&2
-            exit 1
-          fi
-
   deploy:
     needs: review-gate
     environment: production

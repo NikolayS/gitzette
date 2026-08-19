@@ -99,6 +99,16 @@ describe("production migration credential guards", () => {
         expect(script, `${name} must declare sibling ${sibling}`).toContain(`"${sibling}"`);
       }
     }
+    const localSchemaGate = await Bun.file(`${repoRoot}/scripts/check-schema.sh`).text();
+    expect(localSchemaGate).toMatch(/schema-equivalence\.ts[\s\\]*[\s\S]*--strict/);
+    for (const name of [
+      "check-production-applied-schema.sh",
+      "check-production-baseline.sh",
+      "check-production-drift.sh",
+      "check-production-schema.sh",
+    ]) {
+      expect(await Bun.file(`${repoRoot}/scripts/${name}`).text()).not.toContain("--strict");
+    }
   });
 
   test("local-only scripts centrally clear every Wrangler credential alias", async () => {

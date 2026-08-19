@@ -30,7 +30,9 @@ trap cleanup EXIT
 
 "$wrangler_bin" d1 execute gitzette-db --remote --command \
   "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name='d1_migrations'" --json >"$cutover_json"
-ledger_table_count="$(jq -r '.[0].results[0].total' "$cutover_json")"
+ledger_table_count="$(
+  jq -er '.[0].results[0].total | select(type == "number")' "$cutover_json"
+)"
 if [[ "$ledger_table_count" -eq 0 ]]; then
   echo "Applied-schema gate skipped: pre-cutover baseline gate owns the unmigrated database"
   exit 0

@@ -7,7 +7,7 @@ rulesets='[]'
 protection='{
   "required_status_checks":{"strict":true,"checks":[{"context":"typecheck","app_id":15368},{"context":"samorev-gate","app_id":15368},{"context":"samorev","app_id":null}]},
   "enforce_admins":{"enabled":true},
-  "required_pull_request_reviews":{"dismiss_stale_reviews":true,"require_code_owner_reviews":true,"required_approving_review_count":1,"require_last_push_approval":true},
+  "required_pull_request_reviews":null,
   "required_conversation_resolution":{"enabled":true},
   "allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":false},
   "required_linear_history":{"enabled":false},"required_signatures":{"enabled":false},
@@ -32,6 +32,7 @@ assert_drift() {
 
 assert_drift bypass "$(jq -c '.required_pull_request_reviews.bypass_pull_request_allowances={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 assert_drift dismissal "$(jq -c '.required_pull_request_reviews.dismissal_restrictions={users:[{login:"attacker"}],teams:[]}' <<<"$protection")"
+assert_drift approval "$(jq -c '.required_pull_request_reviews={required_approving_review_count:1,require_code_owner_reviews:true}' <<<"$protection")"
 assert_drift restrictions "$(jq -c '.restrictions={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 assert_drift ruleset "$protection" '[{"name":"bypass","target":"branch","enforcement":"active","bypass_actors":[{"actor_type":"RepositoryRole","actor_id":5,"bypass_mode":"always"}],"conditions":{},"rules":[]}]'
 

@@ -78,6 +78,11 @@ credentials. `canonicalSchema` removes line and block comments outside quoted st
 collapses whitespace around punctuation, strips `IF NOT EXISTS`, and removes
 unnecessary quotes from the declared object name. Review the resulting diff;
 never use this capture command to bless unexpected production drift.
+`check-schema.sh` alone passes `--strict`: it preserves SQL comments,
+`IF NOT EXISTS`, and identifier quoting while still normalizing horizontal
+layout around punctuation. The production drift, applied-prefix, complete-chain,
+and baseline gates deliberately use canonical mode so those authored-DDL
+differences do not make equivalent live SQLite schemas fail deployment.
 
 | Script | Pre-cutover database | Migrated database |
 | --- | --- | --- |

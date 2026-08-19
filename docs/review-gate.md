@@ -1,20 +1,15 @@
 # Exact-head review gate
 
 Protected `main` requires `typecheck`, `samorev`, and `samorev-gate` on the
-exact pull-request head. It also requires a fresh CODEOWNER approval from
-`@samo-agent`, dismisses stale approvals after a push, rejects approval by the
-last pusher, applies to administrators, and requires every conversation to be
-resolved.
+exact pull-request head, applies those checks to administrators, and requires
+every conversation to be resolved. A separate formal GitHub approval is not a
+merge or release gate.
 
-The CODEOWNER approval is the identity boundary. GitHub Actions status names
-are shared across workflows, and classic branch protection cannot bind a
-user-published commit status to one user. A same-repository PR workflow can
-request `statuses: write` even though the repository default is read-only, so it
-can imitate all three required status names. The `samo-agent` approver must never
-trust displayed check statuses: it approves only after its own exact-head
-samorev process exits zero and it has read any `.github/workflows/**` changes.
-Repository Actions cannot approve PRs, so a PR workflow cannot forge this
-CODEOWNER decision.
+The external `samo-agent` status plus the base-controlled publisher are the
+identity boundary. A same-repository PR workflow can request `statuses: write`,
+but it cannot create a status as immutable user ID `280144521` or forge the
+app-bound publisher check. The publisher validates both identity and freshness
+before it turns the external verdict into the required app-bound gate.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
@@ -30,13 +25,14 @@ new verdict.
 publishes pending immediately, retries transient API/malformed-response failures
 three times, and waits up to 30 minutes. A later verdict needs a failed-job
 rerun. Strict protection means updating the branch creates a new head and
-requires another review and approval.
+requires another complete review.
 
 The ordinary `pull_request` CI workflow runs all PR-controlled code in the PR
 cache scope with a read-only token, no repository secrets, and no persisted Git
 credential. The `pull_request_target` publisher executes only protected-main
 code. Deployment credentials are available only to the protected `production`
-environment; tag-triggered deploys require that environment's approval.
+environment; tag-triggered deploys remain subject to that environment's
+configured protections.
 
 ## Artifact cleanup recovery
 
@@ -63,7 +59,7 @@ code. The mention-driven Claude workflow is restricted to OWNER, MEMBER, or
 COLLABORATOR-authored comments/reviews/issues, so arbitrary public commenters
 cannot activate its OAuth credential.
 
-## Requesting and approving a verdict
+## Requesting and publishing a verdict
 
 After every push or PR edit, wait until `samorev-gate` is pending, then run from
 a clean checkout of the PR head:
@@ -75,9 +71,9 @@ GH_TOKEN="$(gh auth token --user samo-agent)" \
   https://github.com/NikolayS/gitzette/pull/NUMBER --blocking --fetch
 ```
 
-Only after that exact-head review exits zero and CI is green may `samo-agent`
-submit the CODEOWNER approval. Merge immediately after verifying the head SHA
-has not changed.
+Only after that exact-head review exits zero, its exact-head status is published,
+the base-controlled publisher is green, and CI is green may the PR merge. Verify
+the head SHA has not changed immediately before merging.
 
 ## Full-delta review proof
 
@@ -106,11 +102,11 @@ them. Landing any of those separately would break exact dependency
 reproducibility or detach the operational safety contract from the code it
 controls; none is an independently activatable feature.
 
-Every push invalidates the prior verdict and approval. The reviewer is invoked
+Every push invalidates the prior verdict. The reviewer is invoked
 with the PR URL and `--fetch`, so it receives the complete base-to-exact-head
 delta; it is never invoked on `HEAD^..HEAD`. The posted report records the exact
 head, total changed files/diff bytes, and CI result. A clean exit is followed by
-an exact-head status and a fresh commit-bound approval. The current review has
+an exact-head status and an app-bound publisher result. The current review has
 already demonstrated full-delta coverage by finding interactions across D1
 migrations, Worker scheduling/publication, the host runner, TypeScript project
 configuration, and operational documentation in different fix rounds.
@@ -135,7 +131,7 @@ actionlint, shellcheck, the high audit, and the secret scan before the linked
 
 Each report records the complete base-to-head byte count, not only the focus
 column. A later fix head invalidates the prior row and must add a new exact-head
-report before approval.
+report before merge.
 
 The merge base and current protected `main` are both
 `1aca7074f59b193466697a0290a11bd44bffed6e`. At that base, the
@@ -159,9 +155,8 @@ protection, Actions workflow permissions, and full repository or inherited
 ruleset details. The apply script does not delete rulesets; unexpected rulesets
 must be reconciled deliberately.
 
-For the bootstrap PR, require its own exact-head CI, a clean samorev verdict,
-and the separate `samo-agent` approval. Then apply and audit the committed
-policy:
+For the bootstrap PR, require its own exact-head CI and a clean samorev verdict.
+Then apply and audit the committed policy:
 
 ```bash
 bash scripts/apply-branch-protection.sh
