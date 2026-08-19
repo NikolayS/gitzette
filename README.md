@@ -77,9 +77,11 @@ Before cutover, delete the retired Worker secrets `OPENROUTER_API_KEY`,
 `wrangler secret delete`, and revoke the corresponding provider-side keys.
 Execute `scripts/check-production-secrets.sh` by its checked-in path to enforce
 the exact remaining Worker secret set and reject retired or unknown standing
-credentials. Sourcing, piping, and symlinked wrappers fail closed. The reviewed
-allowlist lives in `scripts/check-production-secrets.ts`; update it with any
-production secret-set change.
+credentials. The script must sit next to its checked-in helper and TypeScript
+entrypoint; sourcing and stdin-piped invocation are rejected. Secret-set changes
+must update `scripts/check-production-secrets.ts`, the bounded `# secrets` block
+in `wrangler.toml`, and the `Env` interface in `src/index.ts` together;
+`scripts/worker-env-parity.test.ts` enforces their exact agreement.
 
 ## Development
 

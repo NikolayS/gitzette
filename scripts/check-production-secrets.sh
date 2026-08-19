@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 if [[ -z "${BASH_SOURCE[0]:-}" ]]; then
-  echo "check-production-secrets.sh must be executed from its checked-in path, not piped to bash" >&2
+  echo "check-production-secrets.sh must run as bash scripts/check-production-secrets.sh from its checked-in path, not through stdin or a non-Bash shell" >&2
   exit 1
 fi
-if (return 0 2>/dev/null); then
-  echo "check-production-secrets.sh must be executed, not sourced" >&2
-  return 1
-fi
-
 set -euo pipefail
 
 # Supported contract: execute this checked-in file by absolute, repository-relative,
@@ -16,15 +11,26 @@ production_secrets_script_directory="$(
   CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null && pwd
 )"
 readonly production_secrets_script_directory
-for production_secrets_required_file in require-wrangler.sh check-production-secrets.ts; do
-  if [[ ! -r "$production_secrets_script_directory/$production_secrets_required_file" ]]; then
-    echo "cannot find $production_secrets_required_file under resolved script directory $production_secrets_script_directory; execute the checked-in script by a supported path" >&2
-    exit 1
+production_secrets_invocation_path="$production_secrets_script_directory/$(basename -- "${BASH_SOURCE[0]}")"
+readonly production_secrets_invocation_path
+production_secrets_executable_path="$0"
+if [[ "$production_secrets_executable_path" != */* ]]; then
+  if [[ -e "$production_secrets_executable_path" ]]; then
+    production_secrets_executable_path="$PWD/$production_secrets_executable_path"
+  else
+    production_secrets_executable_path="$(type -P -- "$production_secrets_executable_path" || true)"
   fi
-done
-unset production_secrets_required_file
+fi
+readonly production_secrets_executable_path
+if [[ ! -r "$production_secrets_script_directory/require-wrangler.sh" ]]; then
+  echo "cannot find require-wrangler.sh under resolved script directory $production_secrets_script_directory" >&2
+  exit 1
+fi
 # shellcheck source=scripts/require-wrangler.sh
 source "$production_secrets_script_directory/require-wrangler.sh"
+gitzette_require_checked_in_caller \
+  "check-production-secrets.sh" "$production_secrets_invocation_path" \
+  "check-production-secrets.ts" "$production_secrets_executable_path"
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required to verify Worker secrets" >&2

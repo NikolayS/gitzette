@@ -3,6 +3,7 @@ set -euo pipefail
 
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
+gitzette_require_checked_in_caller "e2e.sh" "${BASH_SOURCE[0]:-}"
 gitzette_require_local
 
 state_dir="$(mktemp -d)"

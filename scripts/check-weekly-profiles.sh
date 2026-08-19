@@ -2,6 +2,8 @@
 set -euo pipefail
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
+gitzette_require_checked_in_caller \
+  "check-weekly-profiles.sh" "${BASH_SOURCE[0]:-}" "check-weekly-profiles.ts"
 
 weekly_enabled="$(bun -e '
   const config = Bun.TOML.parse(await Bun.file("wrangler.toml").text());
@@ -23,4 +25,4 @@ trap 'rm -f "$users_json"' EXIT
 "$wrangler_bin" d1 execute gitzette-db --remote \
   --command "SELECT username FROM users ORDER BY username COLLATE NOCASE" \
   --json >"$users_json"
-bun scripts/check-weekly-profiles.ts "$users_json"
+bun "$gitzette_scripts_directory/check-weekly-profiles.ts" "$users_json"

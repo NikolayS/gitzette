@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-gitzette_repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+gitzette_scripts_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly gitzette_scripts_directory
+gitzette_repo_root="$(cd -- "$gitzette_scripts_directory/.." && pwd -P)"
 wrangler_expected_bin="$gitzette_repo_root/node_modules/.bin/wrangler"
 if [[ -n "${wrangler_bin+set}" && "$wrangler_bin" != "$wrangler_expected_bin" ]]; then
   echo "wrangler_bin is already set to an unexpected path" >&2
@@ -16,6 +18,41 @@ if [[ ! -x "$wrangler_bin" ]]; then
 fi
 cd -- "$gitzette_repo_root" || exit 1
 unset gitzette_repo_root
+
+gitzette_require_checked_in_caller() {
+  local expected_name="$1"
+  local caller_path="${2:-}"
+  local sibling_name="${3:-}"
+  local executable_path="${4:-$0}"
+  local caller_directory
+  local executable_directory
+
+  if [[ -z "$caller_path" ]]; then
+    echo "$expected_name must run under Bash from its checked-in path, not through stdin" >&2
+    exit 1
+  fi
+  if [[ "$caller_path" != */* ]]; then
+    if [[ -e "$caller_path" ]]; then caller_path="$PWD/$caller_path";
+    else caller_path="$(type -P -- "$caller_path" || true)"; fi
+  fi
+  if [[ "$executable_path" != */* ]]; then
+    if [[ -e "$executable_path" ]]; then executable_path="$PWD/$executable_path";
+    else executable_path="$(type -P -- "$executable_path" || true)"; fi
+  fi
+  caller_directory="$(CDPATH='' cd -P -- "$(dirname -- "$caller_path")" >/dev/null && pwd)"
+  executable_directory="$(CDPATH='' cd -P -- "$(dirname -- "$executable_path")" >/dev/null && pwd)"
+  if [[ "$(basename -- "$caller_path")" != "$expected_name" \
+    || "$(basename -- "$executable_path")" != "$expected_name" \
+    || "$caller_directory" != "$gitzette_scripts_directory" \
+    || "$executable_directory" != "$gitzette_scripts_directory" ]]; then
+    echo "$expected_name must be executed, not sourced or wrapped; use its checked-in path" >&2
+    exit 1
+  fi
+  if [[ -n "$sibling_name" && ! -r "$gitzette_scripts_directory/$sibling_name" ]]; then
+    echo "checked-in sibling is required: $gitzette_scripts_directory/$sibling_name" >&2
+    exit 1
+  fi
+}
 
 local_wrangler() (
   gitzette_require_local

@@ -34,7 +34,8 @@ async function runRawSecretCheck(
     missingSibling,
     mode = "success",
   } = options;
-  const root = await mkdtemp(join(tmpdir(), "gitzette-secret-check-"));
+  const temporaryRoot = process.env.RUNNER_TEMP || tmpdir();
+  const root = await mkdtemp(join(temporaryRoot, "gitzette-secret-check-"));
   temporaryRepositories.push(root);
   await mkdir(join(root, "scripts"), { recursive: true });
   await mkdir(join(root, "node_modules", ".bin"), { recursive: true });
@@ -140,7 +141,10 @@ describe("production secret preflight", () => {
     expect(result.wranglerLog).toBe("CALL\nARG:secret\nARG:list\nARG:--format\nARG:json\n");
   });
 
-  test("fails closed when the Wrangler response is missing a required secret", async () => {
+  test("reproduces the deploy argv bug by rejecting a missing required secret", async () => {
+    // The removed `bun -e` parser read its sole shell argument from argv[2].
+    // Bun places that argument at argv[1], so the parser exited before checking
+    // this mismatch. A checked-in script receives its first argument at argv[2].
     const [omitted, ...present] = expectedProductionSecrets;
     const result = await runSecretCheck(present.map(name => ({ name })));
     expect(result.exitCode).toBe(1);
@@ -213,10 +217,12 @@ describe("production secret preflight", () => {
     for (const missingSibling of ["require-wrangler.sh", "check-production-secrets.ts"] as const) {
       const result = await runRawSecretCheck("[]", { missingSibling });
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain(
-        `cannot find ${missingSibling} under resolved script directory`,
-      );
-      expect(result.stderr).toContain("execute the checked-in script by a supported path");
+      if (missingSibling === "require-wrangler.sh") {
+        expect(result.stderr).toContain("cannot find require-wrangler.sh under resolved script directory");
+      } else {
+        expect(result.stderr).toContain("checked-in sibling is required:");
+        expect(result.stderr).toContain("check-production-secrets.ts");
+      }
       expect(result.stdout).toBe("");
       expect(result.fakeInvoked).toBe(false);
     }
@@ -288,7 +294,7 @@ describe("production secret preflight", () => {
     ]);
     expect(exitCode).toBe(1);
     expect(stdout).toBe("");
-    expect(stderr).toContain("must be executed from its checked-in path, not piped to bash");
+    expect(stderr).toContain("must run as bash scripts/check-production-secrets.sh");
   });
 
   test("uses Bash's resolved path for a bare PATH invocation", async () => {

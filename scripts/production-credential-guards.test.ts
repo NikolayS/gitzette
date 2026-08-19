@@ -52,6 +52,22 @@ describe("production migration credential guards", () => {
       repoRoot,
       `${repoRoot}/node_modules/.bin/wrangler`,
     ]);
+
+    const wranglerCallers = [
+      "bootstrap-production-db.sh",
+      "check-production-applied-schema.sh",
+      "check-production-baseline.sh",
+      "check-production-drift.sh",
+      "check-production-schema.sh",
+      "check-production-secrets.sh",
+      "check-schema.sh",
+      "check-weekly-profiles.sh",
+      "e2e.sh",
+    ];
+    for (const name of wranglerCallers) {
+      const script = await Bun.file(`${repoRoot}/scripts/${name}`).text();
+      expect(script).toContain("gitzette_require_checked_in_caller");
+    }
   });
 
   test("local-only scripts centrally clear every Wrangler credential alias", async () => {

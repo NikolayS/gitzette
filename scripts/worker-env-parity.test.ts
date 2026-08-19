@@ -23,14 +23,19 @@ describe("Worker environment provenance", () => {
 
     const bindings = [...wrangler.matchAll(/^binding = "([A-Z][A-Z0-9_]*)"$/gm)].map((match) => match[1]);
     const vars = [...wrangler.matchAll(/^([A-Z][A-Z0-9_]*) = "[^"]*"$/gm)].map((match) => match[1]);
-    const secretBlock = wrangler.split("# secrets (set via:")[1] ?? "";
+    const secretBlockMatch = wrangler.match(/# secrets \(set via:[^\n]*\)\n([\s\S]*?)# end secrets/);
+    expect(secretBlockMatch, "wrangler.toml must contain a bounded # secrets block").not.toBeNull();
+    const secretBlock = secretBlockMatch?.[1] ?? "";
     const secrets = [...secretBlock.matchAll(/^# ([A-Z][A-Z0-9_]+)(?:\s|$)/gm)].map((match) => match[1]);
     const generatedEnv = interfaceBody(generated, "__BaseEnv_Env");
     const runtimeEnv = interfaceBody(source, "Env");
 
     expect(new Set(bindings)).toEqual(new Set(["DB", "DISPATCHES"]));
     expect(secrets.length).toBeGreaterThan(0);
-    expect(new Set(expectedProductionSecrets)).toEqual(new Set(secrets));
+    expect(
+      new Set(expectedProductionSecrets),
+      "scripts/check-production-secrets.ts, wrangler.toml, and src/index.ts must agree",
+    ).toEqual(new Set(secrets));
     for (const name of [...bindings, ...vars]) {
       expectEnvField(generatedEnv, name);
       expectEnvField(runtimeEnv, name);

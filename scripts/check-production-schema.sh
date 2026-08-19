@@ -2,6 +2,7 @@
 set -euo pipefail
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
+gitzette_require_checked_in_caller "check-production-schema.sh" "${BASH_SOURCE[0]:-}"
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required for the read-only production schema assertion" >&2
