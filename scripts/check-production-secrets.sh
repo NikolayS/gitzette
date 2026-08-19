@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-if [[ -z "${BASH_SOURCE[0]:-}" ]]; then
-  echo "check-production-secrets.sh must run as bash scripts/check-production-secrets.sh from its checked-in path, not through stdin or a non-Bash shell" >&2
+if [[ -z "${BASH_SOURCE[0]:-}" ]] || {
+  [[ "${BASH_SOURCE[0]}" != "$0" ]] && [[ "$(basename -- "${BASH_SOURCE[0]}")" != "$0" ]]
+}; then
+  echo "check-production-secrets.sh must be executed, not sourced or piped to Bash" >&2
   exit 1
 fi
 set -euo pipefail

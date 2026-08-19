@@ -2,6 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 let workspace = "";
 afterEach(async () => {
@@ -11,7 +14,7 @@ afterEach(async () => {
 
 describe("production migration orchestration", () => {
   test("fails closed when a ledger probe is not a result envelope", async () => {
-    const root = new URL("..", import.meta.url).pathname;
+    const root = repoRoot;
     workspace = await mkdtemp(join(tmpdir(), "gitzette-applied-schema-envelope-test-"));
     await cp(join(root, "scripts"), join(workspace, "scripts"), { recursive: true });
     await mkdir(join(workspace, "node_modules", ".bin"), { recursive: true });
@@ -39,7 +42,7 @@ printf '%s\\n' '[{"error":"remote query failed"}]'
   });
 
   test("runs the complete db:migrate chain from an unmigrated database", async () => {
-    const root = new URL("..", import.meta.url).pathname;
+    const root = repoRoot;
     workspace = await mkdtemp(join(tmpdir(), "gitzette-migration-test-"));
     await cp(join(root, "package.json"), join(workspace, "package.json"));
     await cp(join(root, "scripts"), join(workspace, "scripts"), { recursive: true });
@@ -87,7 +90,7 @@ fi
   });
 
   test("bootstraps only a brand-new empty production database", async () => {
-    const root = new URL("..", import.meta.url).pathname;
+    const root = repoRoot;
     workspace = await mkdtemp(join(tmpdir(), "gitzette-bootstrap-test-"));
     await cp(join(root, "package.json"), join(workspace, "package.json"));
     await cp(join(root, "scripts"), join(workspace, "scripts"), { recursive: true });
@@ -130,7 +133,7 @@ fi
   });
 
   test("rejects production bootstrap when any application table exists", async () => {
-    const root = new URL("..", import.meta.url).pathname;
+    const root = repoRoot;
     workspace = await mkdtemp(join(tmpdir(), "gitzette-bootstrap-reject-test-"));
     await cp(join(root, "package.json"), join(workspace, "package.json"));
     await cp(join(root, "scripts"), join(workspace, "scripts"), { recursive: true });

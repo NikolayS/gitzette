@@ -63,7 +63,9 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain("pull_request:");
     expect(workflow).not.toContain("pull_request_target:");
     expect(workflow).not.toContain("push:");
-    expect(workflow).toContain("if: github.event.sender.id == 1345402");
+    expect(workflow).toContain("if: github.event.sender.id == 280144521");
+    expect(workflow).not.toContain("inputs:");
+    expect(workflow).not.toContain("${{ inputs.");
     expect(workflow).toContain("    environment: production");
     expect(workflow).toContain("  contents: read");
     expect(workflow).not.toContain("actions/checkout");

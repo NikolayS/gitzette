@@ -70,9 +70,8 @@ non-overwritable: every same-repository Actions workflow shares app ID `15368`,
 and commit-status context names are last-writer-wins. Production release is the
 sole non-overwritable authorization boundary. `samorev-gate` validates merge
 evidence but is deliberately not described as an unforgeable identity. The
-`production` environment permits Nik
-or the separate `samo-agent` user to authorize `v*` tags plus the temporary
-`main` credential-scope bootstrap, and forbids the workflow actor from approving
+`production` environment permits only Nik to authorize `v*` tags plus the
+temporary `main` credential-scope bootstrap, and forbids the workflow actor from approving
 its own deployment. Normal release tags must be pushed by immutable user ID
 `280144521` (`samo-agent`) and are authorized only by immutable owner ID
 `1345402` (Nik). This makes the production authorizer independent from the
@@ -92,9 +91,9 @@ cannot approve their own environment deployment or read its secrets first.
 
 The initial scope migration uses
 `.github/workflows/migrate-production-credentials.yml` once, under that same
-environment authorization. Only immutable user ID `1345402` (Nik) may dispatch
-it, `samo-agent` must authorize the environment request, and the RSA public-key
-fingerprint is pinned in the
+environment authorization. Only immutable user ID `280144521` (`samo-agent`)
+may dispatch it, Nik must authorize the environment request, and both the RSA
+public key and its fingerprint are pinned in the
 reviewed workflow. It emits only an RSA-OAEP-SHA256 ciphertext for the
 operator-held private key. Dispatch it from `main`; the temporary `main` branch
 environment policy exists only for this bootstrap. After setting both
@@ -104,8 +103,8 @@ remove the temporary `main` policy in that same PR. Leaving a credential-export
 path around is needless attack surface.
 
 ```bash
-gh workflow run migrate-production-credentials.yml --ref main \
-  -f rsa_public_key_pem_b64="$(base64 -w0 /secure/path/migration-public.pem)"
+GH_TOKEN="$(gh auth token --user samo-agent)" \
+  gh workflow run migrate-production-credentials.yml --ref main
 ```
 
 Broadening a workflow's protected write set requires a three-PR recovery: first

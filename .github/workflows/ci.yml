@@ -76,7 +76,7 @@ jobs:
         run: >-
           jq -e '.prevent_self_review == true and .wait_timer == 0 and
           (.reviewers | sort_by(.id)) ==
-          [{"type":"User","id":1345402,"login":"NikolayS"},{"type":"User","id":280144521,"login":"samo-agent"}] and
+          [{"type":"User","id":1345402,"login":"NikolayS"}] and
           (.environment_secret_names | sort) ==
           ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
           (.forbidden_repository_secret_names | sort) ==

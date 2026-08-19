@@ -294,7 +294,7 @@ describe("production secret preflight", () => {
     ]);
     expect(exitCode).toBe(1);
     expect(stdout).toBe("");
-    expect(stderr).toContain("must run as bash scripts/check-production-secrets.sh");
+    expect(stderr).toContain("must be executed, not sourced or piped to Bash");
   });
 
   test("uses Bash's resolved path for a bare PATH invocation", async () => {

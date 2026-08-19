@@ -12,9 +12,9 @@ endpoint="${*: -1}"
 case "$endpoint" in
   repos/example/gitzette/environments/production)
     if [[ "${FAKE_POLICY_MODE:-ok}" == wrong-reviewer ]]; then
-      reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
+      reviewers='[{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
     else
-      reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
+      reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
     fi
     jq -n --argjson reviewers "$reviewers" '{
       protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:$reviewers}],

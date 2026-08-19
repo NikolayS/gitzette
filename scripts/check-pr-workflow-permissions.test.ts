@@ -85,9 +85,13 @@ describe("base-controlled workflow permission boundary", () => {
     const privileged = await commit(cwd, "large privileged workflow");
     expect(() => checkWorkflowChanges(cwd, deleted, privileged)).toThrow("statuses");
 
+    await Bun.write(join(cwd, "README.md"), "privileged workflow unchanged\n");
+    const privilegedUnchanged = await commit(cwd, "unrelated change with privileged workflow");
+    expect(() => checkWorkflowChanges(cwd, privileged, privilegedUnchanged)).toThrow("untrusted workflow");
+
     await Bun.write(join(cwd, ".github/workflows/large.yml"), `${large}# behavior-only change\n`);
     const unchangedPermissions = await commit(cwd, "unchanged privilege");
-    expect(() => checkWorkflowChanges(cwd, privileged, unchangedPermissions)).toThrow("changes the content of privileged workflow");
+    expect(() => checkWorkflowChanges(cwd, privilegedUnchanged, unchangedPermissions)).toThrow("changes the content of privileged workflow");
 
     await Bun.write(
       join(cwd, ".github/workflows/large.yml"),

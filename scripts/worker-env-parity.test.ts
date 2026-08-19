@@ -11,6 +11,18 @@ function expectEnvField(body: string, name: string): void {
   expect(body).toMatch(new RegExp(`(^|\\s)${name}\\??:`));
 }
 
+export function reviewedSecretNames(wrangler: string): string[] {
+  const match = wrangler.match(/# secrets \(set via:[^\n]*\)\n([\s\S]*?)# end secrets/);
+  if (!match) throw new Error("wrangler.toml must contain a bounded # secrets block");
+  const end = wrangler.indexOf("# end secrets");
+  if (/^# [A-Z][A-Z0-9_]+(?:\s|$)/m.test(wrangler.slice(end + "# end secrets".length))) {
+    throw new Error("secret comment appears after # end secrets");
+  }
+  const names = [...match[1].matchAll(/^# ([A-Z][A-Z0-9_]+)(?:\s|$)/gm)].map((item) => item[1]);
+  if (names.length === 0) throw new Error("bounded # secrets block must not be empty");
+  return names;
+}
+
 describe("Worker environment provenance", () => {
   test("keeps generated bindings and reviewed secrets aligned with Wrangler", async () => {
     const [wrangler, generated, source] = await Promise.all([
@@ -23,18 +35,11 @@ describe("Worker environment provenance", () => {
 
     const bindings = [...wrangler.matchAll(/^binding = "([A-Z][A-Z0-9_]*)"$/gm)].map((match) => match[1]);
     const vars = [...wrangler.matchAll(/^([A-Z][A-Z0-9_]*) = "[^"]*"$/gm)].map((match) => match[1]);
-    const secretBlockMatch = wrangler.match(/# secrets \(set via:[^\n]*\)\n([\s\S]*?)# end secrets/);
-    expect(secretBlockMatch, "wrangler.toml must contain a bounded # secrets block").not.toBeNull();
-    const secretBlockEnd = wrangler.indexOf("# end secrets");
-    expect(secretBlockEnd).toBeGreaterThanOrEqual(0);
-    expect(wrangler.slice(secretBlockEnd + "# end secrets".length)).not.toMatch(/^# [A-Z][A-Z0-9_]+(?:\s|$)/gm);
-    const secretBlock = secretBlockMatch?.[1] ?? "";
-    const secrets = [...secretBlock.matchAll(/^# ([A-Z][A-Z0-9_]+)(?:\s|$)/gm)].map((match) => match[1]);
+    const secrets = reviewedSecretNames(wrangler);
     const generatedEnv = interfaceBody(generated, "__BaseEnv_Env");
     const runtimeEnv = interfaceBody(source, "Env");
 
     expect(new Set(bindings)).toEqual(new Set(["DB", "DISPATCHES"]));
-    expect(secrets.length).toBeGreaterThan(0);
     expect(
       new Set(expectedProductionSecrets),
       "scripts/check-production-secrets.ts and wrangler.toml must agree exactly",
@@ -44,5 +49,12 @@ describe("Worker environment provenance", () => {
       expectEnvField(runtimeEnv, name);
     }
     for (const name of secrets) expectEnvField(runtimeEnv, name);
+  });
+
+  test("fails closed on a missing, empty, or overrun secrets sentinel", () => {
+    expect(() => reviewedSecretNames("# secrets (set via: test)\n# TOKEN\n")).toThrow("bounded # secrets block");
+    expect(() => reviewedSecretNames("# secrets (set via: test)\n# end secrets\n")).toThrow("must not be empty");
+    expect(() => reviewedSecretNames("# secrets (set via: test)\n# TOKEN\n# end secrets\n# LATE_TOKEN\n"))
+      .toThrow("appears after # end secrets");
   });
 });

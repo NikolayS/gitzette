@@ -1,7 +1,7 @@
 import { array, record, releaseReview } from "./check-release-review";
 
 const ownerId = 1345402;
-const releaseApproverIds = new Set([ownerId]);
+export const releaseApproverIds = new Set([ownerId]);
 
 export function productionDeploymentApproval(document: unknown): { environmentId: number; reviewedSha: string } {
   const input = record(document, "approval document");

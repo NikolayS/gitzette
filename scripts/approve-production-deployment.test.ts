@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { productionDeploymentApproval } from "./approve-production-deployment";
+import { productionDeploymentApproval, releaseApproverIds } from "./approve-production-deployment";
 
 const reviewedSha = "reviewed";
 const releaseSha = "release";
@@ -22,6 +22,13 @@ const base = {
 };
 
 describe("production deployment approval", () => {
+  test("matches the complete GitHub production reviewer set", async () => {
+    const policy = JSON.parse(await Bun.file("config/production-environment.json").text()) as {
+      reviewers: Array<{ id: number }>;
+    };
+    expect(policy.reviewers.map(({ id }) => id).sort()).toEqual([...releaseApproverIds].sort());
+  });
+
   test("accepts an exact reviewed release for the separate approval identity", () => {
     expect(productionDeploymentApproval(base)).toEqual({ environmentId: 19965704930, reviewedSha });
   });
