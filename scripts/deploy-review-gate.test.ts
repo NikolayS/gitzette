@@ -22,6 +22,8 @@ describe("deploy review revalidation", () => {
     expect(reviewGate).toContain("actions: read");
     expect(reviewGate).toContain("pull-requests: read");
     expect(reviewGate).toContain("statuses: read");
+    expect(reviewGate).toContain("actions/checkout@11d5960a326750d5838078e36cf38b85af677262");
+    expect(reviewGate).toContain("persist-credentials: false");
     expect(deploy).toContain("needs: review-gate");
     expect(deploy).toContain("contents: read");
     expect(deploy).not.toContain("actions: read");

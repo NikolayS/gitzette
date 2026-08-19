@@ -88,6 +88,8 @@ describe("one-shot credential migration boundary", () => {
     const checkProduction = await Bun.file("scripts/check-production-environment.sh").text();
     expect(applyProduction).not.toContain("{wait_timer,can_admins_bypass");
     expect(applyProduction).toContain('check-production-environment.sh" "$mode"');
+    expect(applyProduction).toContain("post_apply_environment");
+    expect(applyProduction).toContain("unable to re-read production environment after apply");
     expect(checkProduction).toContain("can_admins_bypass: $environment.can_admins_bypass");
     expect(checkProduction).toContain("admitted refs: $policy_names");
 
@@ -138,7 +140,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
       migrationDoc.indexOf("drop table credential_migration_transfer"),
     );
-    expect(migrationDoc).toContain("red during an open export switch or the legitimate production approval wait");
+    expect(migrationDoc).toContain("guard is expected to be red during an open export switch");
     for (const teardownItem of [
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
       "production-environment-migration.json", "credential-migration-gate.test.ts",
@@ -154,10 +156,12 @@ describe("one-shot credential migration boundary", () => {
     expect(policyGuard).toContain("bash scripts/check-production-environment.sh default");
     expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" ]]');
     expect(policyGuard).not.toContain("github.event.repository.fork");
-    expect(policyGuard).toContain("actions/variables?per_page=100");
-    expect(policyGuard).toContain('a credential migration switch remains open');
+    expect(policyGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
+    expect(policyGuard).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
+    expect(policyGuard).toContain('a credential migration switch remains defined');
+    expect(policyGuard).toContain("  migration-switches:");
     expect(policyGuard).not.toContain("if: ${{ github.repository == 'NikolayS/gitzette' }}");
-    expect(parsedPolicyGuard.permissions).toEqual({ actions: "read", contents: "read", deployments: "read" });
+    expect(parsedPolicyGuard.permissions).toEqual({ contents: "read", deployments: "read" });
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
@@ -560,6 +564,8 @@ esac
     expect(missingStderr).toContain("HTTP 404");
 
     const apply = await Bun.file("scripts/apply-credential-migration-environment.sh").text();
+    expect(apply).toContain("post_apply_environment");
+    expect(apply).toContain("unable to re-read credential-migration environment after apply");
     expect(apply).toContain(".branch_policies[] | [.name,.type] | @tsv");
     expect(apply).not.toContain("-f name=main");
     expect(apply).not.toContain("{wait_timer,can_admins_bypass");

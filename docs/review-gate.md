@@ -7,6 +7,9 @@ can request `statuses: write`, and GitHub Actions check names share app ID
 `15368`. A ceremonial GitHub `APPROVED` review is not a merge or release gate.
 The authorized admin merge path may satisfy a legacy approval-count setting,
 but only after exact-head CI, terminal-clean samorev, and readiness review.
+Any push after a verdict invalidates it: admin merge requires a new
+terminal-clean samorev verdict on the exact current head, and a green pipeline
+is never a substitute.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
@@ -30,6 +33,11 @@ Before publishing success, the external reviewer must inspect every
 `.github/workflows/**` change in the full base-to-head delta. The final deploy
 job also requires Nik's approval in the non-bypassable `production`
 environment.
+
+The real GitHub API shape was checked against merged PR #65 head
+`178fe9c27ceb0ddf47e4fe27afdb9f7c961bb93c`: the exact query returned
+successful run `32191117938` with event `pull_request_target`, path
+`.github/workflows/samorev-gate.yml`, and that PR head in `head_sha`.
 
 `samorev-gate` is fail-closed orchestration, not a second identity boundary. It
 publishes pending immediately, retries transient API/malformed-response failures

@@ -53,6 +53,16 @@ done <<<"$stale_policy_ids"
 jq '{wait_timer,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' "$policy" |
   gh api --method PUT "repos/$repository/environments/production" --input - --silent
 
+if ! post_apply_environment="$(gh api "repos/$repository/environments/production" 2>"$error_file")"; then
+  echo "unable to re-read production environment after apply:" >&2
+  sed 's/^/  /' "$error_file" >&2
+  exit 3
+fi
+if [[ "$(jq -r .can_admins_bypass <<<"$post_apply_environment")" != false ]]; then
+  echo 'disable "Allow administrators to bypass configured protection rules" for environment production in Settings -> Environments, then re-run' >&2
+  exit 1
+fi
+
 if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies "$policy")" == true ]]; then
   live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
   desired_policies="$(jq -r '[.branch_policies[] | [.name,.type] | @tsv] | .[]' "$policy")"

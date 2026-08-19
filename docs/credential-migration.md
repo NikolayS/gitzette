@@ -80,7 +80,8 @@ session after service restoration.
 
    This preflight dispatch must be green before the scheduled guard is relied
    on; API-read failures exit separately from policy drift. Green proves the
-   default production policy and that both migration switches are absent. It
+   default production policy and that neither migration switch resolves to a
+   nonempty value. It
    does not claim that the intentionally installed bootstrap workflow or
    migration environment has already been removed.
 
@@ -264,9 +265,11 @@ session after service restoration.
    ```
 
    A best-effort scheduled guard also runs approximately every five minutes on
-   GitHub's scheduler. It checks the default production policy and absence of
-   both migration-switch variables from protected `main`, and is expected to be
-   red during an open export switch or the legitimate production approval wait.
+   GitHub's scheduler. Independent jobs check the default production policy and
+   that both migration switches resolve empty from protected `main`, so switch
+   residue is still reported while production widening is expected red. The
+   guard is expected to be red during an open export switch or the legitimate
+   production approval wait.
    After cleanup, explicitly dispatch that guard and require it to turn green;
    a red result after the verify run is no longer waiting is lingering
    widening. The explicit post-cleanup dispatch, not schedule timing, is
