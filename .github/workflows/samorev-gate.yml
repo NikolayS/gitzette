@@ -37,6 +37,7 @@ jobs:
           git fetch --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/gitzette/pr-head"
           test "$(git rev-parse refs/gitzette/pr-head)" = "$HEAD_SHA"
           bun scripts/check-pr-workflow-permissions.ts "$BASE_SHA" "$HEAD_SHA"
+          bun scripts/check-repository-workflow-permissions.ts
       - name: Require the identity-checked exact-head verdict
         id: verdict
         env:

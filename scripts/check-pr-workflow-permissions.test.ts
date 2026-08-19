@@ -149,5 +149,19 @@ describe("base-controlled workflow permission boundary", () => {
     );
     const explicitWrite = await commit(cwd, "explicit write after implicit base");
     expect(() => checkWorkflowChanges(cwd, implicitDefault, explicitWrite)).toThrow("job:attacker:statuses");
+
+    await Bun.write(
+      join(cwd, ".github/workflows/evil.yaml"),
+      "on: push\npermissions: {statuses: write}\njobs: {}\n",
+    );
+    const yamlWrite = await commit(cwd, "yaml status writer");
+    expect(() => checkWorkflowChanges(cwd, explicitWrite, yamlWrite)).toThrow("statuses");
+
+    await Bun.write(
+      join(cwd, ".github/workflows/evil.yaml"),
+      "on: push\npermissions: write-all\njobs: {}\n",
+    );
+    const yamlWriteAll = await commit(cwd, "yaml write all");
+    expect(() => checkWorkflowChanges(cwd, yamlWrite, yamlWriteAll)).toThrow("write-all");
   });
 });

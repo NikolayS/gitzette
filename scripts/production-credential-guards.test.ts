@@ -12,8 +12,11 @@ describe("production migration credential guards", () => {
       Bun.file(`${repoRoot}/.github/workflows/migrate-production-credentials.yml`).text(),
       Bun.file(`${repoRoot}/scripts/check-production-environment.sh`).text(),
     ]);
-    expect(workflow).toContain("github.event.sender.id == 280144521");
-    expect(workflow).toContain("vars.CREDENTIAL_MIGRATION_OPEN == 'true'");
+    expect(workflow).toContain("DISPATCHER_ID: ${{ github.event.sender.id }}");
+    expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_MIGRATION_OPEN }}");
+    expect(workflow).toContain('[[ "$DISPATCHER_ID" != 280144521 ]]');
+    expect(workflow).toContain('[[ "$MIGRATION_OPEN" != true ]]');
+    expect(workflow).not.toContain("if: github.event.sender.id");
     expect(environmentCheck).toContain("actions/variables/CREDENTIAL_MIGRATION_OPEN");
     expect(environmentCheck).toContain("CREDENTIAL_MIGRATION_OPEN must be deleted");
   });

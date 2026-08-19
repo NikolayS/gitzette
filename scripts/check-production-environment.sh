@@ -30,7 +30,7 @@ if migration_variable="$(gh api "$migration_variable_endpoint" 2>/dev/null)"; th
   fi
   migration_variable_open=true
 fi
-expected="$(jq -Sc 'del(.environment_secret_names,.forbidden_repository_secret_names) | .reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
+expected="$(jq -Sc 'del(.environment_secret_names,.forbidden_repository_secret_names,.forbidden_repository_identity_secret_names) | .reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 if ! environment="$(gh api "repos/$repository/environments/production" 2>/dev/null)"; then
   echo "production environment is missing; run scripts/apply-production-environment.sh using config/production-environment.json" >&2
   exit 1
@@ -63,6 +63,12 @@ fi
 repository_secret_names="$(gh api --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add | map(.name)')"
 forbidden_repository_secret_names="$(jq -c '.forbidden_repository_secret_names' "$policy")"
 repository_credentials_present="$(jq -r --argjson forbidden "$forbidden_repository_secret_names" 'any(.[]; . as $name | any($forbidden[]; . == $name))' <<<"$repository_secret_names")"
+forbidden_repository_identity_secret_names="$(jq -c '.forbidden_repository_identity_secret_names' "$policy")"
+repository_identity_present="$(jq -r --argjson forbidden "$forbidden_repository_identity_secret_names" 'any(.[]; . as $name | any($forbidden[]; . == $name))' <<<"$repository_secret_names")"
+if [[ "$repository_identity_present" == true ]]; then
+  echo "dedicated reviewer or release identity credentials must not be repository-scoped Actions secrets" >&2
+  exit 1
+fi
 if [[ "$repository_credentials_present" == true && "$bootstrap_workflow_present" == true ]]; then
   if [[ "$migration_variable_open" != true ]]; then
     echo "CREDENTIAL_MIGRATION_OPEN=true is required while repository credentials await migration" >&2

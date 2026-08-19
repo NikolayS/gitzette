@@ -86,6 +86,10 @@ This bootstrap is intentionally fail-closed. Run these steps in order:
 7. Merge the reviewed cleanup PR that deletes the migration workflow and removes
    the temporary `main` environment branch policy, then rerun the live audit.
 
+The workflow's authorization job always runs and fails explicitly for a wrong
+dispatcher or a migration variable other than exact `true`. Only its successful
+completion can create the protected-environment export job.
+
 `scripts/check-production-environment.sh` is expected to fail from step 1 until
 step 7 completes: before step 5 it rejects repository-scoped production
 credentials; after step 5 it requires the open variable and export workflow to

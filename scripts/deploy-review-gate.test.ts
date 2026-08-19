@@ -6,6 +6,7 @@ describe("deploy review revalidation", () => {
     const reviewScript = await Bun.file("scripts/check-release-review.sh").text();
     const reviewEvaluator = await Bun.file("scripts/check-release-review.ts").text();
     expect(workflow).toContain("run: bash scripts/check-release-review.sh");
+    expect(workflow).toContain("run: bun scripts/check-repository-workflow-permissions.ts");
     expect(workflow).not.toContain("check_runs=");
     expect(reviewScript).toContain('commits/$reviewed_sha/statuses?per_page=100');
     expect(reviewEvaluator).toContain('check.name === name && check.conclusion === "success" && app.id === actionsAppId');
@@ -65,11 +66,13 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain("pull_request:");
     expect(workflow).not.toContain("pull_request_target:");
     expect(workflow).not.toContain("push:");
-    expect(workflow).toContain("if: github.event.sender.id == 280144521");
+    expect(workflow).toContain("DISPATCHER_ID: ${{ github.event.sender.id }}");
     expect(policy.prevent_self_review).toBe(true);
     expect(policy.reviewers.map(({ id }) => id)).toEqual([1345402]);
     expect(policy.reviewers.some(({ id }) => id === 280144521)).toBe(false);
-    expect(workflow).toContain("vars.CREDENTIAL_MIGRATION_OPEN == 'true'");
+    expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_MIGRATION_OPEN }}");
+    expect(workflow).not.toContain("if: github.event.sender.id");
+    expect(workflow).toContain("    needs: authorize-export");
     expect(workflow).not.toContain("inputs:");
     expect(workflow).not.toContain("${{ inputs.");
     expect(workflow).toContain("    environment: production");

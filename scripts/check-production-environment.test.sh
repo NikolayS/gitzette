@@ -31,11 +31,11 @@ case "$endpoint" in
     esac
     ;;
   *actions/secrets*)
-    if [[ "${FAKE_SECRET_MODE:-ok}" == repository-copy ]]; then
-      printf '%s\n' '[{"secrets":[{"name":"CLOUDFLARE_API_TOKEN"}]}]'
-    else
-      printf '%s\n' '[{"secrets":[{"name":"UNRELATED"}]}]'
-    fi
+    case "${FAKE_SECRET_MODE:-ok}" in
+      repository-copy) printf '%s\n' '[{"secrets":[{"name":"CLOUDFLARE_API_TOKEN"}]}]' ;;
+      identity-token) printf '%s\n' '[{"secrets":[{"name":"SAMO_AGENT_TOKEN"}]}]' ;;
+      *) printf '%s\n' '[{"secrets":[{"name":"UNRELATED"}]}]' ;;
+    esac
     ;;
   *actions/variables/CREDENTIAL_MIGRATION_OPEN)
     [[ "${FAKE_MIGRATION_OPEN:-false}" == true ]] || exit 1
@@ -67,6 +67,7 @@ run_case() {
 run_case 0 ok ok
 run_case 1 missing ok
 run_case 1 repository-copy ok
+run_case 1 identity-token ok
 run_case 1 ok wrong-reviewer
 
 actual=0

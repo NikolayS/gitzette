@@ -12,6 +12,14 @@
     "CLOUDFLARE_ACCOUNT_ID",
     "CLOUDFLARE_API_TOKEN"
   ],
+  "forbidden_repository_identity_secret_names": [
+    "GH_TOKEN",
+    "GITZETTE_GITHUB_TOKEN",
+    "RELEASE_GITHUB_TOKEN",
+    "SAMOREV_GITHUB_TOKEN",
+    "SAMO_AGENT_GITHUB_TOKEN",
+    "SAMO_AGENT_TOKEN"
+  ],
   "deployment_branch_policy": {
     "protected_branches": false,
     "custom_branch_policies": true

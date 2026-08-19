@@ -81,6 +81,8 @@ jobs:
           ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
           (.forbidden_repository_secret_names | sort) ==
           ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
+          (.forbidden_repository_identity_secret_names | sort) ==
+          ["GH_TOKEN","GITZETTE_GITHUB_TOKEN","RELEASE_GITHUB_TOKEN","SAMOREV_GITHUB_TOKEN","SAMO_AGENT_GITHUB_TOKEN","SAMO_AGENT_TOKEN"] and
           .deployment_branch_policy ==
           {"protected_branches":false,"custom_branch_policies":true} and
           (.branch_policies | sort_by(.name,.type)) ==

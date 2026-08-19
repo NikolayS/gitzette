@@ -31,6 +31,19 @@ is rejected. Tests cover all these forms. Production authorization remains the
 owner-only environment boundary because same-repository Actions share one app
 identity and cannot make a merge status intrinsically non-overwritable.
 
+The repository-wide companion audit snapshots every remote branch before and
+after fetching it and rejects any branch with GitHub-mutating workflow write
+authority. Its only exceptions are `samorev-gate.yml` with the sole
+`pull_request_target` trigger and `statuses: write` (GitHub loads that trigger
+from default `main`) and Claude's exact `id-token: write` permission with its
+fixed mention triggers. OIDC alone cannot write a commit status. Run this audit
+immediately before merge; the protected deploy review job repeats it before
+release validation:
+
+```bash
+bun scripts/check-repository-workflow-permissions.ts
+```
+
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
 remains meaningful. `dismiss_stale_reviews`, `dismissal_restrictions`, and
@@ -116,6 +129,9 @@ The `samo-agent` credential is operator-held outside GitHub Actions and must
 never be configured as a repository or environment secret. Making Nik the
 migration dispatcher would deadlock this boundary: `prevent_self_review` would
 then forbid the sole reviewer from authorizing the export job.
+The checked-in environment policy rejects known reviewer/release token names at
+repository scope, and the live readiness audit must list repository secret
+names to prove no such credential exists before every release.
 
 The initial scope migration uses
 `.github/workflows/migrate-production-credentials.yml` once, under that same
@@ -129,6 +145,9 @@ environment secrets and deleting the repository copies, delete the bootstrap
 workflow in the next reviewed PR;
 remove the temporary `main` policy in that same PR. Leaving a credential-export
 path around is needless attack surface.
+The dispatch authorization runs as an ordinary required job before the
+environment job. A wrong dispatcher or closed migration window therefore fails
+red; it cannot appear as a successful workflow containing a skipped export job.
 
 CI and `scripts/check-production-environment.sh` enforce that removal. The
 temporary `main` environment policy and migration workflow must appear or
@@ -146,8 +165,8 @@ GH_TOKEN="$(gh auth token --user samo-agent)" \
 After decrypting the ciphertext, creating both environment secrets, and deleting
 their repository-scoped copies, immediately run
 `gh variable delete CREDENTIAL_MIGRATION_OPEN --repo NikolayS/gitzette`. The
-workflow job cannot start while the variable is absent, even before the cleanup
-PR deletes the workflow itself.
+authorization job fails and the protected export job cannot start while the
+variable is absent, even before the cleanup PR deletes the workflow itself.
 
 Broadening a workflow's protected write set requires a three-PR recovery: first
 land a narrowly scoped, exact-head-reviewed exception in the base parser; then
@@ -291,6 +310,7 @@ bash scripts/apply-branch-protection.sh
 bash scripts/apply-production-environment.sh
 bash scripts/check-branch-protection.sh
 bash scripts/check-production-environment.sh
+bun scripts/check-repository-workflow-permissions.ts
 ```
 
 Reading or changing live protection requires repository-administration access.

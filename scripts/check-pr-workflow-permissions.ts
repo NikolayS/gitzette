@@ -53,12 +53,12 @@ export function workflowWritePermissions(source: string): Set<string> {
   return new Set(effectiveProtectedPermissions(parsed, false, true));
 }
 
-function explicitWorkflowWritePermissions(source: string): Set<string> {
+export function explicitWorkflowWritePermissions(source: string): Set<string> {
   const parsed = parseWorkflow(source);
   return new Set(effectiveProtectedPermissions(parsed, false, false));
 }
 
-function workflowTriggers(source: string): Set<string> {
+export function workflowTriggers(source: string): Set<string> {
   const on = parseWorkflow(source).on;
   if (typeof on === "string") return new Set([on]);
   if (Array.isArray(on) && on.every((trigger) => typeof trigger === "string")) return new Set(on);
@@ -98,7 +98,7 @@ function workflowFiles(cwd: string, baseSha: string, headSha: string): string[] 
   return output.split("\0").filter(Boolean);
 }
 
-function workflowAt(cwd: string, sha: string, path: string): string | null {
+export function workflowAt(cwd: string, sha: string, path: string): string | null {
   if (runGit(cwd, ["cat-file", "-e", `${sha}:${path}`], true) === null) return null;
   return runGit(cwd, ["show", `${sha}:${path}`]);
 }
@@ -115,7 +115,7 @@ function auditHeadPublishers(cwd: string, headSha: string): void {
       writes.join(",") === "workflow:statuses" && triggers.join(",") === "pull_request_target";
     const trustedClaudeOidc = path === ".github/workflows/claude.yml" &&
       writes.join(",") === "job:id-token" &&
-      triggers.join(",") === "issue_comment,issues,pull_request_review,workflow_dispatch";
+      triggers.join(",") === "issue_comment,issues,pull_request_review,pull_request_review_comment";
     if (!trustedPublisher && !trustedClaudeOidc) {
       throw new Error(`untrusted workflow has protected write authority in ${path}: ${writes.join(", ")}`);
     }
