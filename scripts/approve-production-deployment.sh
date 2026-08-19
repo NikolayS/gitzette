@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "approve-production-deployment.sh must be executed by path, not sourced or piped to Bash" >&2
+  exit 1
+fi
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 run_id="${1:-}"
 if [[ ! "$run_id" =~ ^[0-9]+$ ]]; then
-  echo "usage: GH_TOKEN=<samo-agent token> bash scripts/approve-production-deployment.sh RUN_ID" >&2
+  echo "usage: GH_TOKEN=<production reviewer token> bash scripts/approve-production-deployment.sh RUN_ID" >&2
   exit 1
 fi
 if [[ -z "${GH_TOKEN:-}" ]]; then
-  echo "GH_TOKEN for samo-agent is required" >&2
+  echo "GH_TOKEN for a configured production reviewer is required" >&2
   exit 1
 fi
 if [[ -n "$(git -C "$root" status --porcelain)" ]]; then
@@ -19,6 +23,7 @@ fi
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 local_sha="$(git -C "$root" rev-parse HEAD)"
 current_user_id="$(gh api user --jq .id)"
+current_user_login="$(gh api user --jq .login)"
 run="$(gh api "repos/$repository/actions/runs/$run_id")"
 main_sha="$(gh api "repos/$repository/git/ref/heads/main" --jq .object.sha)"
 pulls="$(gh api --paginate --slurp -H 'Accept: application/vnd.github+json' "repos/$repository/commits/$main_sha/pulls?per_page=100")"
@@ -48,4 +53,4 @@ jq -n --argjson environment_id "$environment_id" --arg reviewed_sha "$reviewed_s
   '{environment_ids:[$environment_id],state:"approved",comment:("Exact-head samorev and readiness verified for " + $reviewed_sha)}' |
   gh api --method POST "repos/$repository/actions/runs/$run_id/pending_deployments" --input - --silent
 
-echo "Production deployment approved by samo-agent for reviewed head $reviewed_sha"
+echo "Production deployment approved by $current_user_login for reviewed head $reviewed_sha"

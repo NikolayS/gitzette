@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "check-branch-protection.sh must be executed by path, not sourced or piped to Bash" >&2
+  exit 1
+fi
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

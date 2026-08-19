@@ -22,7 +22,7 @@ case "$endpoint" in
     }'
     ;;
   *deployment-branch-policies*)
-    printf '%s\n' '[{"branch_policies":[{"name":"v*","type":"tag"}]}]'
+    printf '%s\n' '[{"branch_policies":[{"name":"main","type":"branch"},{"name":"v*","type":"tag"}]}]'
     ;;
   *environments/production/secrets*)
     case "${FAKE_SECRET_MODE:-ok}" in

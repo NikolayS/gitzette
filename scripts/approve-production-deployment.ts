@@ -1,6 +1,8 @@
 type JsonRecord = Record<string, unknown>;
 
 const reviewerId = 280144521;
+const ownerId = 1345402;
+const releaseApproverIds = new Set([reviewerId, ownerId]);
 const actionsAppId = 15368;
 const actionsBotId = 41898282;
 
@@ -43,7 +45,9 @@ function latestStatus(statuses: unknown[], context: string): JsonRecord {
 
 export function productionDeploymentApproval(document: unknown): { environmentId: number; reviewedSha: string } {
   const input = record(document, "approval document");
-  if (input.current_user_id !== reviewerId) throw new Error("release approval requires the samo-agent identity");
+  if (typeof input.current_user_id !== "number" || !releaseApproverIds.has(input.current_user_id)) {
+    throw new Error("release approval requires a configured production reviewer identity");
+  }
   if (typeof input.local_sha !== "string" || input.local_sha.length === 0) throw new Error("local SHA is missing");
   if (typeof input.main_sha !== "string" || input.main_sha.length === 0) throw new Error("main SHA is missing");
 

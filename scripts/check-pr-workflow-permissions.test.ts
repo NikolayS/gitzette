@@ -45,6 +45,14 @@ describe("base-controlled workflow permission boundary", () => {
         "permissions: {}\njobs:\n  test:\n    permissions: {checks: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
         ["job:checks"],
       ],
+      [
+        "on: pull_request\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n",
+        ["job:checks", "job:statuses"],
+      ],
+      [
+        "on: pull_request\njobs:\n  test:\n    permissions: {contents: read}\n    runs-on: ubuntu-latest\n    steps: []\n",
+        [],
+      ],
     ];
     for (const [source, expected] of cases) {
       expect([...workflowWritePermissions(source)].sort()).toEqual(expected);
@@ -112,6 +120,13 @@ describe("base-controlled workflow permission boundary", () => {
       "on: pull_request_target\npermissions: {}\njobs:\n  renamed:\n    permissions: {statuses: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
     );
     const renamedJob = await commit(cwd, "rename privileged job");
-    expect(() => checkWorkflowChanges(cwd, jobScoped, renamedJob)).not.toThrow();
+    expect(() => checkWorkflowChanges(cwd, jobScoped, renamedJob)).toThrow("job:renamed:statuses");
+
+    await Bun.write(
+      join(cwd, ".github/workflows/implicit.yml"),
+      "on: pull_request\njobs:\n  attacker:\n    runs-on: ubuntu-latest\n    steps: []\n",
+    );
+    const implicitDefault = await commit(cwd, "implicit default");
+    expect(() => checkWorkflowChanges(cwd, renamedJob, implicitDefault)).toThrow("job:attacker:checks");
   });
 });

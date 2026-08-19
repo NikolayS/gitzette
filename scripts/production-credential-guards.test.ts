@@ -204,4 +204,30 @@ describe("production migration credential guards", () => {
     expect(stderr).toContain("check-schema.sh must be executed by path, not through stdin");
     expect(stderr).not.toContain("unbound variable");
   });
+
+  test("privileged policy and approval entrypoints reject sourcing and stdin", async () => {
+    for (const name of [
+      "approve-production-deployment.sh",
+      "check-branch-protection.sh",
+      "check-production-environment.sh",
+      "evaluate-samorev-gate-status.sh",
+      "evaluate-samorev-status.sh",
+      "poll-samorev-gate.sh",
+    ]) {
+      const path = `${repoRoot}/scripts/${name}`;
+      const sourced = Bun.spawn(["bash", "-c", 'source "$1"', "source-probe", path], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const sourcedExit = await sourced.exited;
+      expect(sourcedExit, `${name} sourced`).toBe(1);
+      const stdin = Bun.spawn(["bash"], {
+        stdin: Bun.file(path),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const stdinExit = await stdin.exited;
+      expect(stdinExit, `${name} stdin`).toBe(1);
+    }
+  });
 });

@@ -27,17 +27,29 @@ function permissionsFrom(value: unknown, location: string): Set<string> {
   return result;
 }
 
-export function workflowWritePermissions(source: string): Set<string> {
-  const parsed = parseWorkflow(source);
-  const result = permissionsFrom(parsed.permissions, "workflow");
+function effectiveProtectedPermissions(parsed: Document, includeJobNames: boolean): string[] {
+  const workflowPermissionsDefined = parsed.permissions !== undefined && parsed.permissions !== null;
+  const permissions = workflowPermissionsDefined ? [...permissionsFrom(parsed.permissions, "workflow")] : [];
   if (parsed.jobs !== undefined && !isRecord(parsed.jobs)) throw new Error("workflow jobs must be a mapping");
   if (isRecord(parsed.jobs)) {
-    for (const job of Object.values(parsed.jobs)) {
+    for (const [name, job] of Object.entries(parsed.jobs)) {
       if (!isRecord(job)) throw new Error("workflow job must be a mapping");
-      for (const scope of permissionsFrom(job.permissions, "job")) result.add(scope);
+      const location = includeJobNames ? `job:${name}` : "job";
+      if (!workflowPermissionsDefined && (job.permissions === undefined || job.permissions === null)) {
+        // Repository defaults can drift. Missing workflow and job permissions
+        // are conservatively treated as both protected writes.
+        permissions.push(...protectedScopes.map((scope) => `${location}:${scope}`));
+      } else {
+        permissions.push(...permissionsFrom(job.permissions, location));
+      }
     }
   }
-  return result;
+  return permissions;
+}
+
+export function workflowWritePermissions(source: string): Set<string> {
+  const parsed = parseWorkflow(source);
+  return new Set(effectiveProtectedPermissions(parsed, false));
 }
 
 function workflowTriggers(source: string): Set<string> {
@@ -51,14 +63,7 @@ function workflowTriggers(source: string): Set<string> {
 function workflowPrivileges(source: string): Map<string, number> {
   const parsed = parseWorkflow(source);
   const result = new Map<string, number>();
-  const permissions: string[] = [...permissionsFrom(parsed.permissions, "workflow")];
-  if (parsed.jobs !== undefined && !isRecord(parsed.jobs)) throw new Error("workflow jobs must be a mapping");
-  if (isRecord(parsed.jobs)) {
-    for (const job of Object.values(parsed.jobs)) {
-      if (!isRecord(job)) throw new Error("workflow job must be a mapping");
-      permissions.push(...permissionsFrom(job.permissions, "job"));
-    }
-  }
+  const permissions = effectiveProtectedPermissions(parsed, true);
   for (const trigger of workflowTriggers(source)) {
     for (const permission of permissions) {
       const privilege = `${trigger}|${permission}`;

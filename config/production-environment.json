@@ -18,6 +18,7 @@
     "custom_branch_policies": true
   },
   "branch_policies": [
+    { "name": "main", "type": "branch" },
     { "name": "v*", "type": "tag" }
   ]
 }

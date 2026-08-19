@@ -50,8 +50,12 @@ describe("production deployment approval", () => {
     expect(() => productionDeploymentApproval({ ...base, local_sha: "stale" })).toThrow("are not exact");
   });
 
+  test("accepts the owner break-glass approver", () => {
+    expect(productionDeploymentApproval({ ...base, current_user_id: 1345402 })).toEqual({ environmentId: 19965704930, reviewedSha });
+  });
+
   test("rejects an untrusted approver and non-production request", () => {
-    expect(() => productionDeploymentApproval({ ...base, current_user_id: 1345402 })).toThrow("samo-agent identity");
+    expect(() => productionDeploymentApproval({ ...base, current_user_id: 1 })).toThrow("configured production reviewer identity");
     expect(() => productionDeploymentApproval({ ...base, pending_deployments: [{ environment: { id: 1, name: "staging" }, current_user_can_approve: true }] }))
       .toThrow("not the production environment");
   });

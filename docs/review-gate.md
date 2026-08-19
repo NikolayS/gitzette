@@ -18,8 +18,12 @@ base-controlled publisher parses changed workflows as YAML and rejects any
 merge-base-to-head broadening of `statuses: write`, `checks: write`, or
 `write-all` across trigger, workflow, and job scope. Its tests cover
 aliases/tags/folded values, large files, deletions, empty workflow diffs,
-head-controlled trigger additions, unchanged existing privilege, and job
-renames. This detects and fails permission/trigger broadening in the
+head-controlled trigger additions, unchanged existing privilege, job-bound
+privilege relocation, and missing permission blocks. Missing workflow and job
+permissions are conservatively treated as protected writes, so this boundary
+does not depend on the repository default remaining read-only. A repository-
+level test pins `samorev-gate.yml` as the only workflow with `statuses: write`
+or `checks: write`. This detects and fails permission/trigger broadening in the
 protected-main publisher; because commit-status context names are overwriteable,
 it is defense in depth rather than a standalone identity anchor. The gate still trusts
 repository administrator credentials, installed Apps, and the identity-checked
@@ -79,9 +83,16 @@ The initial scope migration uses
 environment authorization. Only Nik may dispatch it, `samo-agent` must authorize
 the environment request, and the RSA public-key fingerprint is pinned in the
 reviewed workflow. It emits only an RSA-OAEP-SHA256 ciphertext for the
-operator-held private key. After setting both environment secrets and deleting
+operator-held private key. Dispatch it from `main`; the temporary `main` branch
+environment policy exists only for this bootstrap. After setting both environment secrets and deleting
 the repository copies, delete the bootstrap workflow in the next reviewed PR;
-leaving a credential-export path around is needless attack surface.
+remove the temporary `main` policy in that same PR. Leaving a credential-export
+path around is needless attack surface.
+
+```bash
+gh workflow run migrate-production-credentials.yml --ref main \
+  -f rsa_public_key_pem_b64="$(base64 -w0 /secure/path/migration-public.pem)"
+```
 
 Broadening a workflow's protected write set requires a three-PR recovery: first
 land a narrowly scoped, exact-head-reviewed exception in the base parser; then
