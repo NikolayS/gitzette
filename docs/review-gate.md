@@ -11,6 +11,14 @@ pushes the `v*` tag, and Nik performs the mandatory human authorization at the
 protected production environment. The checked-in approval validator permits
 only Nik and rejects the release actor.
 
+The accepted-risk decision depends on controls that are mandatory and audited,
+not advisory: strict exact-head checks, `enforce_admins`, the unbound external
+`samorev` context, app-`15368` bindings for `samorev-gate` and `typecheck`,
+conversation resolution, no force-push/delete path, the absolute workflow-write
+allowlist, and the separate owner-only production environment. The normalization
+regression suite mutates every status context/app binding and `enforce_admins`
+individually and requires the live audit to detect each drift.
+
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
 remains meaningful. `dismiss_stale_reviews`, `dismissal_restrictions`, and
@@ -112,9 +120,16 @@ The workflow never uploads an artifact or contains a decryption key; it prints
 only ciphertext for the operator-held private key.
 
 ```bash
+gh variable set CREDENTIAL_MIGRATION_OPEN --body true --repo NikolayS/gitzette
 GH_TOKEN="$(gh auth token --user samo-agent)" \
   gh workflow run migrate-production-credentials.yml --ref main
 ```
+
+After decrypting the ciphertext, creating both environment secrets, and deleting
+their repository-scoped copies, immediately run
+`gh variable delete CREDENTIAL_MIGRATION_OPEN --repo NikolayS/gitzette`. The
+workflow job cannot start while the variable is absent, even before the cleanup
+PR deletes the workflow itself.
 
 Broadening a workflow's protected write set requires a three-PR recovery: first
 land a narrowly scoped, exact-head-reviewed exception in the base parser; then

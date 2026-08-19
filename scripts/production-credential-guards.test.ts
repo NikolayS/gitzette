@@ -7,6 +7,17 @@ import { fileURLToPath } from "node:url";
 const repoRoot = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 describe("production migration credential guards", () => {
+  test("the credential export requires an independently removable repository-variable switch", async () => {
+    const [workflow, environmentCheck] = await Promise.all([
+      Bun.file(`${repoRoot}/.github/workflows/migrate-production-credentials.yml`).text(),
+      Bun.file(`${repoRoot}/scripts/check-production-environment.sh`).text(),
+    ]);
+    expect(workflow).toContain("github.event.sender.id == 280144521");
+    expect(workflow).toContain("vars.CREDENTIAL_MIGRATION_OPEN == 'true'");
+    expect(environmentCheck).toContain("actions/variables/CREDENTIAL_MIGRATION_OPEN");
+    expect(environmentCheck).toContain("CREDENTIAL_MIGRATION_OPEN must be deleted");
+  });
+
   test("fails explicitly before Wrangler when the applied-schema token is absent", async () => {
     const env = { ...process.env };
     delete env.CLOUDFLARE_API_TOKEN;
@@ -265,12 +276,19 @@ describe("production migration credential guards", () => {
       "poll-samorev-gate.sh",
     ]) {
       const path = `${repoRoot}/scripts/${name}`;
-      const sourced = Bun.spawn(["bash", "-c", 'source "$1"', "source-probe", path], {
+      const sourced = Bun.spawn([
+        "bash", "-c", 'rc=0; source "$1" || rc=$?; printf "caller-continued"; exit "$rc"',
+        "source-probe", path,
+      ], {
         stdout: "pipe",
         stderr: "pipe",
       });
-      const sourcedExit = await sourced.exited;
+      const [sourcedExit, sourcedStdout] = await Promise.all([
+        sourced.exited,
+        new Response(sourced.stdout).text(),
+      ]);
       expect(sourcedExit, `${name} sourced`).toBe(1);
+      expect(sourcedStdout, `${name} sourced caller`).toBe("caller-continued");
       const stdin = Bun.spawn(["bash"], {
         stdin: Bun.file(path),
         stdout: "pipe",

@@ -30,6 +30,12 @@ assert_drift() {
   [[ "$normalized" != "$expected" ]] || { echo "$name drift was not detected" >&2; exit 1; }
 }
 
+assert_drift status-strict "$(jq -c '.required_status_checks.strict=false' <<<"$protection")"
+assert_drift missing-samorev "$(jq -c '.required_status_checks.checks |= map(select(.context != "samorev"))' <<<"$protection")"
+assert_drift samorev-app "$(jq -c '(.required_status_checks.checks[] | select(.context == "samorev")).app_id=15368' <<<"$protection")"
+assert_drift gate-app "$(jq -c '(.required_status_checks.checks[] | select(.context == "samorev-gate")).app_id=null' <<<"$protection")"
+assert_drift typecheck-app "$(jq -c '(.required_status_checks.checks[] | select(.context == "typecheck")).app_id=null' <<<"$protection")"
+
 bypass="$(jq -c '.required_pull_request_reviews.bypass_pull_request_allowances={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 normalized="$(jq -nSc --argjson protection "$bypass" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
 [[ "$(jq -c '.required_pull_request_reviews.bypass_pull_request_allowances.users' <<<"$normalized")" == '["attacker"]' ]] || { echo "bypass allowance shape was hidden" >&2; exit 1; }

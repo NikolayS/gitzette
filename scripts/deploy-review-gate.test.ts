@@ -64,6 +64,7 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain("pull_request_target:");
     expect(workflow).not.toContain("push:");
     expect(workflow).toContain("if: github.event.sender.id == 280144521");
+    expect(workflow).toContain("vars.CREDENTIAL_MIGRATION_OPEN == 'true'");
     expect(workflow).not.toContain("inputs:");
     expect(workflow).not.toContain("${{ inputs.");
     expect(workflow).toContain("    environment: production");
@@ -77,5 +78,6 @@ describe("deploy review revalidation", () => {
     const environmentCheck = await Bun.file("scripts/check-production-environment.sh").text();
     expect(environmentCheck).toContain("credential migration is complete; remove its workflow");
     expect(environmentCheck).toContain("contents/.github/workflows/migrate-production-credentials.yml?ref=main");
+    expect(environmentCheck).toContain("actions/variables/CREDENTIAL_MIGRATION_OPEN");
   });
 });

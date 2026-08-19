@@ -64,8 +64,11 @@ Loss of Nik's account stops releases by design. Recovery requires a reviewed
 policy change that adds a named human's immutable ID to both
 `config/production-environment.json` and the checked-in approval validator,
 followed by the full exact-head CI and samorev gates and a live environment
-policy audit. There is no emergency bypass through repository secrets or an
-Actions actor.
+policy audit. Nik is the only person authorized to select that temporary human
+and apply the live reviewer change. Revert the temporary reviewer in the next
+reviewed PR immediately after the blocked release, then rerun the live audit.
+If Nik is unavailable, releases stop; there is no emergency bypass through
+repository secrets or an Actions actor.
 
 ## Captured baseline provenance
 

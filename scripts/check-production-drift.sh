@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
   echo "check-production-drift.sh must be executed by path, not through stdin" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
   exit 1
 fi
 set -euo pipefail

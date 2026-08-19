@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
   echo "check-production-environment.sh must be executed by path, not sourced or piped to Bash" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
   exit 1
 fi
 set -euo pipefail
@@ -18,6 +19,17 @@ bootstrap_workflow_present=false
 [[ ! -f "$bootstrap_workflow" ]] || bootstrap_workflow_present=true
 if [[ "$bootstrap_policy_enabled" != "$bootstrap_workflow_present" ]]; then
   echo "the temporary main environment policy and credential-migration workflow must be added or removed together" >&2
+  exit 1
+fi
+migration_variable_endpoint="repos/$repository/actions/variables/CREDENTIAL_MIGRATION_OPEN"
+if [[ "$bootstrap_workflow_present" == true ]]; then
+  if ! migration_variable="$(gh api "$migration_variable_endpoint" 2>/dev/null)" ||
+     [[ "$(jq -r '.value // ""' <<<"$migration_variable")" != true ]]; then
+    echo "CREDENTIAL_MIGRATION_OPEN=true is required only while the one-shot migration workflow is present" >&2
+    exit 1
+  fi
+elif gh api "$migration_variable_endpoint" >/dev/null 2>&1; then
+  echo "CREDENTIAL_MIGRATION_OPEN must be deleted after the one-shot migration workflow is removed" >&2
   exit 1
 fi
 expected="$(jq -Sc 'del(.environment_secret_names,.forbidden_repository_secret_names) | .reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
