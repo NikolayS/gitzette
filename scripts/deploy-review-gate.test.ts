@@ -13,8 +13,8 @@ describe("deploy review revalidation", () => {
     const applyBranchPolicy = await Bun.file("scripts/apply-branch-protection.sh").text();
     const reviewerWrapper = await Bun.file("scripts/run-samorev-review.sh").text();
     const tagActorGate = "scripts/check-release-tag-actor.sh";
-    expect(workflow).toContain('contents/scripts/check-release-review-evidence.sh?ref=$reviewed_sha');
-    expect(workflow).toContain('bash "$gate_file" "$reviewed_sha"');
+    expect(workflow).toContain('set -euo pipefail');
+    expect(workflow).toContain('bash scripts/check-release-review-evidence.sh "$reviewed_sha"');
     expect(workflow).toContain("TAG_PUSHER_ID: ${{ github.actor_id }}");
     expect(workflow).toContain('bash scripts/check-release-tag-actor.sh "$TAG_PUSHER_ID"');
     expect(workflow).not.toContain('/reviews\")');

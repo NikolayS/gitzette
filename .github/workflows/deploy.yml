@@ -26,6 +26,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG_PUSHER_ID: ${{ github.actor_id }}
         run: |
+          set -euo pipefail
           bash scripts/check-release-tag-actor.sh "$TAG_PUSHER_ID"
           git fetch --no-tags origin main
           main_sha="$(git rev-parse origin/main)"
@@ -42,12 +43,8 @@ jobs:
             exit 1
           fi
 
-          gate_file="$(mktemp)"
-          gh api "repos/$GITHUB_REPOSITORY/contents/scripts/check-release-review-evidence.sh?ref=$reviewed_sha" \
-            --jq .content | base64 --decode >"$gate_file"
-          chmod 0500 "$gate_file"
-          GITHUB_REPOSITORY="$GITHUB_REPOSITORY" bash "$gate_file" "$reviewed_sha"
-          rm -f "$gate_file"
+          GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            bash scripts/check-release-review-evidence.sh "$reviewed_sha"
 
   deploy:
     needs: review-gate

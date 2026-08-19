@@ -192,7 +192,8 @@ the PR-time evaluator and release gate both reject another target URL.
 Only after that exact-head review exits zero, CI is green, conversations are
 resolved, and the readiness review confirms the same head SHA may the PR merge.
 With the administrator's default `gh` credential, run
-`bash scripts/check-release-review-evidence.sh HEAD_SHA` immediately before
+`bash scripts/check-release-review-evidence.sh HEAD_SHA` from the clean exact
+reviewed head immediately before
 merge; a green checks UI is not evidence. Never grant `samo-agent` admin access
 to make an administration-scoped inventory call pass.
 A GitHub `APPROVED` review is not required evidence; the reviewed branch policy

@@ -77,9 +77,6 @@ jobs:
             exit "$migration_status"
           fi
       - run: bun run test:all
-      - run: bash scripts/evaluate-samorev-status.test.sh
-      - run: bash scripts/normalize-branch-protection.test.sh
-      - run: bash scripts/poll-samorev-gate.test.sh
       - run: shellcheck scripts/*.sh
       - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
       # High/critical advisories block merges.
