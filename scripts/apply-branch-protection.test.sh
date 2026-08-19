@@ -34,13 +34,13 @@ case "$endpoint" in
     if [[ "$mode" == nonadmin-zero ]]; then
       printf '[[]]\n'
     elif [[ "$mode" == nonadmin-multiple ]]; then
-      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":43,"name":"main-admin-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
+      printf '[[{"id":42,"name":"main-samo-only-updates"},{"id":43,"name":"main-samo-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
     elif [[ "${GH_TOKEN:-}" == fake-samo-token ]]; then
-      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
+      printf '[[{"id":42,"name":"main-samo-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
     elif [[ "$mode" == multiple ]]; then
-      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":43,"name":"main-admin-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
+      printf '[[{"id":42,"name":"main-samo-only-updates"},{"id":43,"name":"main-samo-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
     elif [[ "$mode" == one ]]; then
-      printf '[[{"id":42,"name":"main-admin-only-updates"}]]\n'
+      printf '[[{"id":42,"name":"main-samo-only-updates"}]]\n'
     else
       printf '[[]]\n'
     fi
@@ -53,24 +53,21 @@ case "$endpoint" in
       [[ "$(jq -r .name <<<"$payload")" != release-tags-samo-only ]] || id=44
       printf '{"id":%s}\n' "$id"
     else
-      index=0; current=always
-      [[ "$endpoint" != */44 ]] || { index=1; current=never; }
+      index=0; current=never
+      [[ "$endpoint" != */44 ]] || index=1
       if [[ "${GH_TOKEN:-}" == fake-samo-token ]]; then
-        current=never
-        [[ "$index" -ne 1 ]] || current=always
+        current=always
+        [[ "$mode" != nonadmin-main-denied || "$index" -ne 0 ]] || current=never
         [[ "$mode" != nonadmin-tag-denied || "$index" -ne 1 ]] || current=never
       fi
-      [[ "$mode" != admin-never || "$index" -ne 0 ]] || current=never
-      if [[ "$mode" == nonadmin-bypass || "$mode" == zero || "$mode" == one ]]; then
-        [[ "${GH_TOKEN:-}" != fake-samo-token || "$index" -ne 0 ]] || current=always
-      fi
+      [[ "$mode" != admin-bypass || "$index" -ne 0 || "${GH_TOKEN:-}" == fake-samo-token ]] || current=always
       jq -c --arg current "$current" --argjson index "$index" --argjson id "${endpoint##*/}" \
         '.repository_rulesets[$index] + {id:$id,current_user_can_bypass:$current}' "$FAKE_POLICY" |
         if [[ "$mode" == mismatch && "$index" -eq 0 && "${GH_TOKEN:-}" != fake-samo-token ]]; then jq -c '.name="wrong"'; else cat; fi
     fi
     ;;
   *rulesets\?includes_parents=true*)
-    printf '[[{"id":42,"name":"main-admin-only-updates","_links":{"self":{"href":"repos/example/gitzette/rulesets/42"}}},{"id":44,"name":"release-tags-samo-only","_links":{"self":{"href":"repos/example/gitzette/rulesets/44"}}}]]\n'
+    printf '[[{"id":42,"name":"main-samo-only-updates","_links":{"self":{"href":"repos/example/gitzette/rulesets/42"}}},{"id":44,"name":"release-tags-samo-only","_links":{"self":{"href":"repos/example/gitzette/rulesets/44"}}}]]\n'
     ;;
   *collaborators/samo-agent/permission)
     actor_id=280144521
@@ -146,16 +143,12 @@ run_failure() {
   [[ ! -e "$record.classic" ]] || { echo "$mode reached classic protection before the ruleset boundary passed" >&2; exit 1; }
 }
 
-run_failure zero
-assert_file_contains "$test_dir/zero.mutations" '--method POST repos/example/gitzette/rulesets'
-run_failure one
-assert_file_contains "$test_dir/one.mutations" '--method PUT repos/example/gitzette/rulesets/42'
 run_failure multiple
 [[ ! -e "$test_dir/multiple.mutations" ]]
-run_failure admin-never
+run_failure admin-bypass
 run_failure mismatch
-run_failure nonadmin-bypass
-assert_file_contains "$test_dir/nonadmin-bypass.err" 'unexpected bypass'
+run_failure nonadmin-main-denied
+assert_file_contains "$test_dir/nonadmin-main-denied.err" 'unexpected bypass'
 
 run_nonadmin_failure() {
   mode="$1"
@@ -168,14 +161,22 @@ run_nonadmin_failure() {
     exit 1
   fi
 }
-for mode in nonadmin-admin nonadmin-wrong-id nonadmin-zero nonadmin-multiple nonadmin-tag-denied; do
+for mode in nonadmin-admin nonadmin-wrong-id nonadmin-zero nonadmin-multiple nonadmin-main-denied nonadmin-tag-denied; do
   run_nonadmin_failure "$mode"
 done
+
+one_record="$test_dir/one"
+GITHUB_REPOSITORY=example/gitzette FAKE_MODE=one FAKE_RECORD="$one_record" \
+  FAKE_POLICY="$root/config/main-branch-protection.json" PATH="$test_dir:$PATH" \
+  bash "$root/scripts/apply-branch-protection.sh" >"$one_record.out" 2>"$one_record.err"
+assert_file_contains "$one_record.mutations" '--method PUT repos/example/gitzette/rulesets/42'
+assert_file_contains "$one_record.mutations" '--method POST repos/example/gitzette/rulesets'
 
 success_record="$test_dir/success"
 GITHUB_REPOSITORY=example/gitzette FAKE_MODE=success FAKE_RECORD="$success_record" \
   FAKE_POLICY="$root/config/main-branch-protection.json" PATH="$test_dir:$PATH" \
   bash "$root/scripts/apply-branch-protection.sh" >"$success_record.out" 2>"$success_record.err"
+assert_file_contains "$success_record.mutations" '--method POST repos/example/gitzette/rulesets'
 expected_classic=(
   '--method PUT repos/example/gitzette/actions/permissions/workflow'
   '--method PUT repos/example/gitzette/branches/main/protection'

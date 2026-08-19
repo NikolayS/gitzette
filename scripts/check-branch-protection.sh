@@ -3,7 +3,14 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
-expected="$(jq -Sc 'del(.audit_command,.allow_auto_merge) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
+expected="$(jq -Sc '
+  del(.audit_command,.allow_auto_merge) |
+  .required_status_checks.checks |= sort_by(.context) |
+  .repository_rulesets |= map(
+    .bypass_actors |= sort_by(.actor_type, .actor_id) |
+    .rules |= sort_by(.type)
+  ) | .repository_rulesets |= sort_by(.name)
+' "$root/config/main-branch-protection.json")"
 expected_auto_merge="$(jq -r .allow_auto_merge "$root/config/main-branch-protection.json")"
 actual_auto_merge="$(gh api "repos/$repository" --jq .allow_auto_merge)"
 if [[ "$actual_auto_merge" != "$expected_auto_merge" ]]; then
@@ -30,4 +37,4 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-echo "Branch protection OK: only repository administrators can update main, only samo-agent can mutate v* tags, and main remains subject to pull requests, exact-head technical gates, and resolved conversations; approval count is zero"
+echo "Branch protection OK: only samo-agent can update main or mutate v* tags, and main remains subject to pull requests, exact-head technical gates, and resolved conversations; approval count is zero"

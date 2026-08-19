@@ -133,6 +133,7 @@ describe("one-shot credential migration boundary", () => {
       migrationDoc.indexOf("--ref main -f operation=verify"),
     );
     expect(migrationDoc).toContain("remaining_repository_cloudflare_secrets");
+    expect(migrationDoc).toContain(".total_rows == 1 and .expected_rows == 1 and .other_rows == 0");
     expect(migrationDoc).toContain("GitHub can silently fall back");
     expect(migrationDoc).toContain("GitHub pins the workflow\n   run to the immutable `main` SHA at dispatch");
     expect(migrationDoc).toContain("Production is temporarily widened");
@@ -144,7 +145,9 @@ describe("one-shot credential migration boundary", () => {
       "scripts/check-production-drift.sh",
       "scripts/check-production-schema.sh",
     ]) {
-      expect(await Bun.file(schemaGate).text()).toContain("credential_migration_transfer");
+      const gate = await Bun.file(schemaGate).text();
+      expect(gate).toContain("credential_migration_transfer");
+      expect(gate).toContain("if [[ -f config/credential-migration-environment.json ]]");
     }
     expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
@@ -227,7 +230,7 @@ exit "\${FAKE_CHECKER_STATUS:-0}"
     expect(deploy).toContain("tags:\n      - 'v*'");
     expect(deploy).not.toContain("workflow_dispatch");
     const productionConsumers: string[] = [];
-    for await (const name of new Bun.Glob("*.yml").scan(".github/workflows")) {
+    for await (const name of new Bun.Glob("*.{yml,yaml}").scan(".github/workflows")) {
       const path = `.github/workflows/${name}`;
       if ((await Bun.file(path).text()).includes("environment: production")) productionConsumers.push(path);
     }

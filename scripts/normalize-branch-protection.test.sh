@@ -15,8 +15,15 @@ protection='{
 }'
 
 actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
-expected="$(jq -Sc 'del(.audit_command,.allow_auto_merge) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
+expected="$(jq -Sc 'del(.audit_command,.allow_auto_merge) |
+  .required_status_checks.checks |= sort_by(.context) |
+  .repository_rulesets |= map(.bypass_actors |= sort_by(.actor_type,.actor_id) | .rules |= sort_by(.type)) |
+  .repository_rulesets |= sort_by(.name)' "$root/config/main-branch-protection.json")"
 [[ "$actual" == "$expected" ]] || { echo "compliant protection fixture did not normalize to policy" >&2; exit 1; }
+
+reordered_rulesets="$(jq -c 'reverse | map(.rules |= reverse)' <<<"$rulesets")"
+actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$reordered_rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
+[[ "$actual" == "$expected" ]] || { echo "equivalent reordered rulesets did not normalize to policy" >&2; exit 1; }
 
 mutated="$(jq -c '.enforce_admins.enabled=false' <<<"$protection")"
 actual="$(jq -nSc --argjson protection "$mutated" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"

@@ -22,10 +22,14 @@ jobs:
         run: |
           # GitHub's Azure mirror can stall indefinitely; rewrite every apt source shape used by runner images.
           mapfile -t apt_sources < <(find /etc/apt -type f \( -name 'apt-mirrors.txt' -o -name 'sources.list' -o -name '*.sources' -o -name '*.list' \) -print)
+          if [[ "${#apt_sources[@]}" -eq 0 ]]; then
+            echo "no apt source files found" >&2
+            exit 1
+          fi
           for apt_source in "${apt_sources[@]}"; do
             sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$apt_source"
           done
-          if [[ "${#apt_sources[@]}" -gt 0 ]] && sudo grep -HEq 'azure\.archive\.ubuntu\.com' "${apt_sources[@]}"; then
+          if sudo grep -HEq 'azure\.archive\.ubuntu\.com' "${apt_sources[@]}"; then
             echo "Azure Ubuntu mirror rewrite did not take effect" >&2
             exit 1
           fi
@@ -47,9 +51,9 @@ jobs:
           .required_pull_request_reviews.required_approving_review_count == 0 and
           .required_pull_request_reviews.require_last_push_approval == false and
           (.repository_rulesets | length) == 2 and
-          .repository_rulesets[0].name == "main-admin-only-updates" and
+          .repository_rulesets[0].name == "main-samo-only-updates" and
           .repository_rulesets[0].enforcement == "active" and
-          .repository_rulesets[0].bypass_actors == [{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}] and
+          .repository_rulesets[0].bypass_actors == [{"actor_id":280144521,"actor_type":"User","bypass_mode":"always"}] and
           .repository_rulesets[0].rules == [{"type":"update","parameters":{"update_allows_fetch_and_merge":false}}] and
           .repository_rulesets[1].name == "release-tags-samo-only" and
           .repository_rulesets[1].target == "tag" and

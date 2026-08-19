@@ -72,15 +72,19 @@ text matching is not the authorization proof.
    The fingerprint must be
    `7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc`.
 
-1. From a clean checkout of protected `main`, first verify that production
-   admits exactly reviewed `main` and `v*` refs. Investigate any diff before changing
-   it; do not erase a tamper signal by applying over it. Then apply the
-   dedicated migration environment. GitHub's environment API cannot set
+1. From a clean checkout of protected `main`, apply the newly reviewed
+   production policy before its first checker run, then apply the dedicated
+   migration environment. This merge intentionally changes production from the
+   old `v*`-only policy to `main` plus `v*`; outside this exact merge-to-reapply
+   window, investigate any diff before changing it and never erase a tamper
+   signal by applying over it. GitHub's environment API cannot set
    `can_admins_bypass`; if the migration check reports that field as `true`,
    disable **Allow administrators to bypass configured protection rules** in
    Settings -> Environments -> `credential-migration`, then rerun the apply
-   command. This UI-only action is expected after first creating the
-   environment and is required before export. Production is temporarily widened
+   command. Apply production has the same caveat: if it reports
+   `can_admins_bypass: true`, disable the setting for `production` and rerun.
+   This UI-only action is expected after first creating an environment and is
+   required before export. Production is temporarily widened
    from `v*` tags to reviewed `main` plus `v*` for this bootstrap so the one-shot
    verifier can run. Every production job still requires Nik's environment
    approval, and #67 restores the `v*`-only policy during teardown.
@@ -96,6 +100,7 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
+   bash scripts/apply-production-environment.sh
    bash scripts/check-production-environment.sh
    bash scripts/apply-credential-migration-environment.sh
    bash scripts/check-credential-migration-inventory.sh
@@ -113,13 +118,15 @@ text matching is not the authorization proof.
    does not claim that the intentionally installed bootstrap workflow or
    migration environment has already been removed.
 
-   From merge until `scripts/apply-credential-migration-environment.sh`
-   succeeds, the scheduled guard's `production-policy` job is expected red
-   with exit 4 because the temporary environment does not yet exist. This is
-   the only expected red `production-policy` window; afterward, red is drift.
+   From merge until both environment apply commands succeed, the scheduled
+   guard's `production-policy` job is expected red: production policy is stale
+   until `scripts/apply-production-environment.sh` succeeds, and the temporary
+   environment is absent with exit 4 until its apply succeeds. This bounded
+   merge-to-reapply interval is the only expected red `production-policy`
+   window; afterward, red is drift.
 
-   The production policy does not change during export or verification; any
-   checker failure is therefore real drift, never an expected migration window.
+   After both applies, production policy does not change during export or
+   verification; any checker failure is therefore real drift.
 
 2. Open the independently removable switch and dispatch exactly one export as
    immutable runner ID `280144521` (`samo-agent`). Workflow concurrency only
@@ -163,7 +170,9 @@ text matching is not the authorization proof.
    D1-only token. Decrypt locally without printing plaintext. Only after valid
    JSON is in memory, delete the workflow logs but retain the entire transfer
    table as a durable consumed-once marker. A second export cannot recreate
-   that table. Keep repository secrets as rollback copies.
+   that table. The retrieval must prove the table contains exactly one row,
+   that row belongs to the expected `RUN_ID`, and no other `run_id` exists.
+   Keep repository secrets as rollback copies.
 
    The export POST is deliberately never retried. If its job is red because the
    response was lost, do not dispatch another export. Close the switch, run the
@@ -185,7 +194,7 @@ text matching is not the authorization proof.
    migration_dir="$MIGRATION_KEY_DIR/run-RUN_ID-1"
    install -d -m 0700 "$migration_dir"
    jq -n --arg run_id RUN_ID '{
-     sql:"select ciphertext from credential_migration_transfer where run_id = ?1",
+     sql:"select ciphertext, (select count(*) from credential_migration_transfer) as total_rows, (select count(*) from credential_migration_transfer where run_id = ?1) as expected_rows, (select count(*) from credential_migration_transfer where run_id <> ?1) as other_rows from credential_migration_transfer where run_id = ?1",
      params:[$run_id]
    }' >"$migration_dir/select.json"
    ciphertext="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
@@ -193,7 +202,9 @@ text matching is not the authorization proof.
      -H 'Content-Type: application/json' --data-binary "@$migration_dir/select.json" \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
      <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -er '.result[0].results[0].ciphertext')"
+     jq -er '.result[0].results[0] |
+       select(.total_rows == 1 and .expected_rows == 1 and .other_rows == 0) |
+       .ciphertext')"
    printf '%s' "$ciphertext" | base64 --decode >"$migration_dir/credentials.bin"
    plaintext="$(openssl pkeyutl -decrypt \
      -inkey "$MIGRATION_KEY_DIR/production-migration-private.pem" \

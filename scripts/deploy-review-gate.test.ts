@@ -34,8 +34,8 @@ describe("deploy review revalidation", () => {
     expect(codeowners.trim()).toBe("* @samo-agent");
     expect(branchPolicy.repository_rulesets).toEqual([
       {
-        name: "main-admin-only-updates", target: "branch", enforcement: "active",
-        bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+        name: "main-samo-only-updates", target: "branch", enforcement: "active",
+        bypass_actors: [{ actor_id: 280144521, actor_type: "User", bypass_mode: "always" }],
         conditions: { ref_name: { exclude: [], include: ["refs/heads/main"] } },
         rules: [{ type: "update", parameters: { update_allows_fetch_and_merge: false } }],
       },
@@ -52,7 +52,7 @@ describe("deploy review revalidation", () => {
     ]);
     expect(branchPolicy.allow_auto_merge).toBe(false);
     expect(applyBranchPolicy).toContain("{allow_auto_merge}");
-    expect(documentation).toContain("Repository auto-merge is disabled and audited");
+    expect(documentation).toContain("auto-merge is disabled and audited");
     expect(documentation).toContain("scripts/run-samorev-review.sh");
     expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_RUN_IDS");
     expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_NAME");
@@ -76,9 +76,9 @@ describe("deploy review revalidation", () => {
     expect(applyBranchPolicy).toContain("current_user_can_bypass");
     expect(documentation).toContain("every changed enforcement script under\n`scripts/check-*.sh`");
     expect(documentation).toContain("Actions bot's immutable ID, not `280144521`");
-    expect(documentation).toContain("GitHub Actions is not a bypass actor");
+    expect(documentation).toContain("GitHub Actions and repository administrators are\nnot bypass actors");
     expect(documentation).toContain("Administrator policy authorization is explicit");
-    expect(documentation).toContain("intentionally removed formal GitHub pull-request\napproval as evidence");
+    expect(documentation).toContain("intentionally removed formal GitHub\npull-request approval as evidence");
     expect(documentation).toContain("release-tags-samo-only");
     expect(documentation).toContain('tag_sha="$(gh api');
     expect(documentation).toContain('[[ "$tag_sha" == "$main_sha" ]]');

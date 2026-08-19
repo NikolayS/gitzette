@@ -32,5 +32,9 @@
   lock_branch: (.lock_branch.enabled // false),
   block_creations: (.block_creations.enabled // false),
   restrictions: (.restrictions // null),
-  repository_rulesets: ($rulesets | map({name,target,enforcement,bypass_actors,conditions,rules}) | sort_by(.name))
+  repository_rulesets: ($rulesets | map(
+    {name,target,enforcement,bypass_actors,conditions,rules} |
+    .bypass_actors |= sort_by(.actor_type, .actor_id) |
+    .rules |= sort_by(.type)
+  ) | sort_by(.name))
 })

@@ -24,11 +24,9 @@ while IFS= read -r ruleset_name; do
     exit 1
   fi
   live="$(gh api "repos/$repository/rulesets/$ruleset_ids")"
-  expected_bypass=never
-  [[ "$ruleset_name" != release-tags-samo-only ]] || expected_bypass=always
-  if [[ "$(jq -r .current_user_can_bypass <<<"$live")" != "$expected_bypass" ]]; then
+  if [[ "$(jq -r .current_user_can_bypass <<<"$live")" != always ]]; then
     echo "samo-agent has an unexpected bypass for $ruleset_name" >&2
     exit 1
   fi
 done < <(jq -r '.repository_rulesets[].name' "$root/config/main-branch-protection.json")
-echo "Non-admin ruleset boundary OK: samo-agent ID 280144521 cannot update main and is the release-tag bypass identity"
+echo "External boundary OK: only samo-agent ID 280144521 can update main or mutate release tags"

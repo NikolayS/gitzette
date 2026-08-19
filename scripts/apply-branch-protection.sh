@@ -17,8 +17,8 @@ audit_partial_apply() {
 trap audit_partial_apply EXIT
 
 # Install the non-forgeable update boundary before reducing formal approvals.
-# RepositoryRole 5 is the repository administrator; GitHub Actions is not a
-# bypass actor and therefore cannot update main even if it forges every context.
+# Only immutable external user ID 280144521 can update main; GitHub Actions and
+# repository administrators are not bypass actors even if contexts are forged.
 if [[ "$(jq '.repository_rulesets | length' "$policy")" -ne 2 ]]; then
   echo "branch policy must define exactly the main and release-tag rulesets" >&2
   exit 1
@@ -43,22 +43,22 @@ while IFS= read -r ruleset_payload; do
     gh api --method "$ruleset_method" "$ruleset_endpoint" --input -)"
   ruleset_id="$(jq -er .id <<<"$ruleset_mutation")"
   live_ruleset="$(gh api "repos/$repository/rulesets/$ruleset_id")"
-  expected_bypass=never
-  [[ "$ruleset_name" != main-admin-only-updates ]] || expected_bypass=always
-  if [[ "$(jq -r .current_user_can_bypass <<<"$live_ruleset")" != "$expected_bypass" ]]; then
+  if [[ "$(jq -r .current_user_can_bypass <<<"$live_ruleset")" != never ]]; then
     echo "the applying administrator has an unexpected bypass for $ruleset_name" >&2
     exit 1
   fi
-  normalized_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$live_ruleset")"
-  expected_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload")"
+  normalized_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules} |
+    .bypass_actors |= sort_by(.actor_type, .actor_id) | .rules |= sort_by(.type)' <<<"$live_ruleset")"
+  expected_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules} |
+    .bypass_actors |= sort_by(.actor_type, .actor_id) | .rules |= sort_by(.type)' <<<"$ruleset_payload")"
   if [[ "$normalized_ruleset" != "$expected_ruleset" ]]; then
     echo "$ruleset_name did not apply exactly" >&2
     exit 1
   fi
 done < <(jq -c '.repository_rulesets[]' "$policy")
 
-# GitHub's built-in RepositoryRole ID 5 is documented as admin. Prove the
-# effective boundary too: the write-role samo-agent identity must not bypass it.
+# Prove the effective boundary too: the exact non-admin samo-agent identity must
+# be the bypass actor for both protected main updates and release tags.
 samo_token="$(env -u GH_TOKEN gh auth token --user samo-agent)"
 GH_TOKEN="$samo_token" GITHUB_REPOSITORY="$repository" \
   "$root/scripts/check-branch-protection-nonadmin.sh"

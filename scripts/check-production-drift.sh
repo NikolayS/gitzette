@@ -62,7 +62,11 @@ if [[ "$(bun scripts/cutover-state.ts "$cutover_json")" != "cutover" ]]; then
 fi
 
 local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --file fixtures/production-baseline-2026-08-15.sql >/dev/null
-query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ('d1_migrations','credential_migration_transfer') ORDER BY type,name"
+schema_exclusions="'d1_migrations'"
+if [[ -f config/credential-migration-environment.json ]]; then
+  schema_exclusions+=",'credential_migration_transfer'"
+fi
+query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ($schema_exclusions) ORDER BY type,name"
 local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
 "$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
 

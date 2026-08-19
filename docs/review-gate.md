@@ -6,10 +6,12 @@ Those context names are not an identity boundary: a same-repository workflow
 can request `statuses: write`, and GitHub Actions check names share app ID
 `15368`. A GitHub `APPROVED` review is not accepted as merge or release
 evidence. Branch protection requires a pull request but sets the approval count
-to zero. A separate active ruleset restricts every `main` update to repository
-administrators; GitHub Actions is not a bypass actor and cannot merge even after
-forging all displayed contexts. Nik merges only after exact-head CI,
-terminal-clean samorev, resolved conversations, and readiness review. Any push after a verdict invalidates it: merge requires a new
+to zero. A separate active ruleset restricts every `main` update to immutable
+external user ID `280144521`; GitHub Actions and repository administrators are
+not bypass actors and cannot merge even after forging all displayed contexts.
+The external operator merges with the `samo-agent` credential only after
+exact-head CI, terminal-clean samorev, resolved conversations, and readiness
+review. Any push after a verdict invalidates it: merge requires a new
 terminal-clean samorev verdict on the exact current head, and a green pipeline
 is never a substitute.
 
@@ -59,19 +61,15 @@ scripts, but is intentionally not a merge gate. The final
 deploy job also requires Nik's approval in the non-bypassable `production`
 environment.
 
-Classic branch protection requires pull requests for administrators while its
-approval count is zero. The active `main-admin-only-updates` ruleset permits
-only RepositoryRole 5 (repository administrator) to update `main`, so a
-same-repository Actions token cannot turn forged contexts into a merge. The
-administrator remains subject to classic technical gates and resolved
-conversations. Repository auto-merge is disabled and audited; only Nik's
-explicit merge can use the administrator bypass. The policy uses GitHub's
-built-in RepositoryRole ID 5 for repository administrators; the pre-apply
-inventory requires the only admin to be NikolayS (`1345402`). After mutation,
-the apply script re-GETs the ruleset and requires the admin's
-`current_user_can_bypass` to be `always`, then queries the same ruleset with the
-non-admin `samo-agent` token and requires `current_user_can_bypass` to be
-`never`. Merge does not authorize a release:
+Classic branch protection requires a pull request while its approval count is
+zero. The active `main-samo-only-updates` ruleset permits only immutable user ID
+`280144521` to update `main`, so neither a same-repository Actions token nor the
+repository administrator can turn forged contexts into a merge. Repository
+auto-merge is disabled and audited. The pre-apply inventory requires the only
+administrator to be NikolayS (`1345402`). After mutation, the apply script
+requires the administrator's `current_user_can_bypass` to be `never`, then
+queries both rulesets with the non-admin `samo-agent` token and requires
+`current_user_can_bypass` to be `always`. Merge does not authorize a release:
 the tag workflow revalidates the external exact-head evidence, and its
 deployment cannot read production credentials without a new approval from Nik
 in the non-bypassable `production` environment. Repository Actions cannot mint
@@ -79,12 +77,13 @@ that environment approval. This is why a PR approval is redundant for the
 release identity boundary without pretending that status names are equivalent
 to approvals.
 
-Administrator policy authorization is explicit: Nik chose this admin-only
-manual merge boundary and intentionally removed formal GitHub pull-request
-approval as evidence. That is not a reusable `APPROVED` review and does not
-waive any technical gate. The readiness record must name the exact head, prove
-the live sole-admin and non-admin ruleset views, record terminal-clean samorev
-and exact-head CI, and then Nik performs the one permitted `main` update.
+Administrator policy authorization is explicit: Nik chose the external
+immutable-user merge boundary and intentionally removed formal GitHub
+pull-request approval as evidence. That is not a reusable `APPROVED` review and
+does not waive any technical gate. The readiness record must name the exact
+head, prove the live administrator and external-user ruleset views, and record
+terminal-clean samorev plus exact-head CI before `samo-agent` performs the only
+permitted `main` update.
 
 The repository Actions token cannot read the administration-scoped ruleset and
 collaborator inventories needed by `scripts/check-branch-protection.sh`; putting
@@ -212,13 +211,15 @@ resolved, and the readiness review confirms the same head SHA may the PR merge.
 With the administrator's default `gh` credential, run
 `bash scripts/check-release-review-evidence.sh HEAD_SHA` from the clean exact
 reviewed head immediately before
-merge; a green checks UI is not evidence. Never grant `samo-agent` admin access
-to make an administration-scoped inventory call pass.
+merge; a green checks UI is not evidence. Then merge through `GH_TOKEN="$(gh
+auth token --user samo-agent)" gh pr merge`, never through the administrator
+credential. Never grant `samo-agent` admin access to make an
+administration-scoped inventory call pass.
 A GitHub `APPROVED` review is not required evidence; the reviewed branch policy
 requires a pull request with zero approvals instead. For the bootstrap that
 changes this policy, run `bash scripts/apply-branch-protection.sh` from the
 terminal-clean exact reviewed head, rerun its audit, and only then merge that
-same SHA. The apply creates and verifies the admin-only update ruleset and the
+same SHA. The apply creates and verifies the external-user update ruleset and the
 immutable-user release-tag ruleset before it
 changes formal approval requirements to zero/false, and keeps admin enforcement,
 required technical statuses, required conversations, and force-push/deletion denial.
@@ -298,14 +299,13 @@ gh api 'repos/NikolayS/gitzette/contents/.github/workflows/samorev-gate.yml?ref=
 ## Policy audit and bootstrap
 
 `config/main-branch-protection.json` records the reviewed classic-branch policy,
-the active `main-admin-only-updates` ruleset, and the active
+the active `main-samo-only-updates` ruleset, and the active
 `release-tags-samo-only` tag ruleset.
 `scripts/check-branch-protection.sh` exact-matches it against live
 classic branch protection, Actions workflow permissions, and full repository or
 inherited ruleset details. Its approval count is zero and must not be restored
-or awaited. The ruleset's only bypass actor is RepositoryRole 5; no Integration
-or GitHub Actions actor may update `main`. The tag ruleset's only bypass actor
-is immutable user ID `280144521`; no Integration or GitHub Actions actor may
+or awaited. Both rulesets' only bypass actor is immutable user ID `280144521`;
+no administrator, Integration, or GitHub Actions actor may update `main` or
 create, update, or delete `v*`. The apply script does not delete rulesets; unexpected
 rulesets must be reconciled deliberately.
 
