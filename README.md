@@ -75,8 +75,11 @@ reviewed forward repair or restoring a verified pre-migration backup.
 Before cutover, delete the retired Worker secrets `OPENROUTER_API_KEY`,
 `OPENAI_API_KEY`, `GITHUB_TOKEN`, and `NEWSPAPERIFY_SECRET` with
 `wrangler secret delete`, and revoke the corresponding provider-side keys.
-`scripts/check-production-secrets.sh` enforces the exact remaining Worker secret
-set and rejects any retired or unknown standing credential.
+Execute `scripts/check-production-secrets.sh` by its checked-in path to enforce
+the exact remaining Worker secret set and reject retired or unknown standing
+credentials. Sourcing, piping, and symlinked wrappers fail closed. The reviewed
+allowlist lives in `scripts/check-production-secrets.ts`; update it with any
+production secret-set change.
 
 ## Development
 

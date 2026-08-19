@@ -15,6 +15,7 @@ set -euo pipefail
 production_secrets_script_directory="$(
   CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null && pwd
 )"
+readonly production_secrets_script_directory
 for production_secrets_required_file in require-wrangler.sh check-production-secrets.ts; do
   if [[ ! -r "$production_secrets_script_directory/$production_secrets_required_file" ]]; then
     echo "cannot find $production_secrets_required_file under resolved script directory $production_secrets_script_directory; execute the checked-in script by a supported path" >&2

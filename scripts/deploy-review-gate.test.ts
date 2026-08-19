@@ -9,6 +9,12 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain('commits/$reviewed_sha/status\")');
     expect(workflow).toContain('.context == "samorev" and .state == "success" and .creator.login == "samo-agent"');
     expect(workflow).toContain('.context == "samorev-gate" and .state == "success"');
+    const secretStepStart = workflow.indexOf("      - name: Verify required Worker secrets");
+    expect(secretStepStart).toBeGreaterThanOrEqual(0);
+    const secretStepEnd = workflow.indexOf("\n      - ", secretStepStart + 1);
+    const secretStep = workflow.slice(secretStepStart, secretStepEnd < 0 ? undefined : secretStepEnd);
+    expect(secretStep).toContain("run: bash scripts/check-production-secrets.sh");
+    expect(secretStep).not.toContain("working-directory:");
     const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
     const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
     expect(reviewGate).toContain("checks: read");
