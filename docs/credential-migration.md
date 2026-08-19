@@ -385,7 +385,8 @@ text matching is not the authorization proof.
    Retain `scripts/get-github-environment.sh`: it is a shared helper used by
    the permanent production-environment audit and apply scripts.
    Tighten `scripts/check-reviewer-credential-isolation.sh` at the same time:
-   repository Actions secrets and repository Actions variables must both be
-   empty after migration, while only the `production` environment retains the
-   two reviewed Cloudflare secret names. Run that audit in the post-teardown
-   proof so re-created repository rollback copies or switches fail closed.
+   repository Actions variables must be empty and repository Actions secrets
+   may contain only the reviewed `CLAUDE_CODE_OAUTH_TOKEN` after migration,
+   while only the `production` environment retains the two reviewed Cloudflare
+   secret names. Run that audit in the post-teardown proof so re-created
+   repository rollback copies or switches fail closed.

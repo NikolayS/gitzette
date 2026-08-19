@@ -8,6 +8,7 @@
   "required_status_checks": {
     "strict": true,
     "checks": [
+      { "context": "policy-api-readability", "app_id": 15368 },
       { "context": "samorev", "app_id": null },
       { "context": "samorev-gate", "app_id": 15368 },
       { "context": "typecheck", "app_id": 15368 }
@@ -42,7 +43,9 @@
         "ref_name": { "exclude": [], "include": ["refs/heads/main"] }
       },
       "rules": [
-        { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } }
+        { "type": "creation" },
+        { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } },
+        { "type": "deletion" }
       ]
     },
     {

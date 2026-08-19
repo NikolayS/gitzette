@@ -13,6 +13,19 @@ export GITHUB_SERVER_URL=https://github.com
 export GITHUB_REPOSITORY=NikolayS/gitzette
 export GITHUB_RUN_ID=7
 
+for required in GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID; do
+  missing_error="$test_dir/missing-$required.err"
+  if env -u "$required" bash "$root/scripts/poll-samorev-gate.sh" \
+    >/dev/null 2>"$missing_error"; then
+    echo "$required unexpectedly passed while missing" >&2
+    exit 1
+  fi
+  grep -q "$required is required" "$missing_error" || {
+    echo "$required did not produce its explicit diagnostic" >&2
+    exit 1
+  }
+done
+
 run_case() {
   name="$1"
   expected_rc="$2"

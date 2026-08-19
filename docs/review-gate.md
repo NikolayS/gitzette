@@ -1,7 +1,8 @@
 # Exact-head review gate
 
-Protected `main` currently displays `typecheck`, `samorev`, and `samorev-gate`
-on the exact pull-request head and requires every conversation to be resolved.
+Protected `main` currently displays `policy-api-readability`, `typecheck`,
+`samorev`, and `samorev-gate` on the exact pull-request head and requires every
+conversation to be resolved.
 Those context names are not an identity boundary: a same-repository workflow
 can request `statuses: write`, and GitHub Actions check names share app ID
 `15368`. A GitHub `APPROVED` review is not accepted as merge or release
@@ -35,8 +36,11 @@ declared `actions: read`; admin-only protection/ruleset APIs are deliberately
 kept out of the deploy job. The latest
 `.github/workflows/samorev-gate.yml` run must also name `main` as its PR base
 and `NikolayS/gitzette` as both its base and head repository. The workflow
-requires the latest CI and publisher runs to have succeeded, and separately
-requires the latest `samorev` status to come from immutable user ID `280144521`,
+requires the latest CI run and the publisher run targeted by the immutable
+verdict to have succeeded. A later failed publisher run at the same head does
+not invalidate that targeted evidence; before merge, its required
+`samorev-gate` status still blocks until a new exact-head verdict succeeds. The
+workflow separately requires the latest `samorev` status to come from immutable user ID `280144521`,
 target that exact publisher run, and post after the run began.
 The `pull_request` CI workflow is head-controlled evidence, not an identity
 boundary; a PR can rewrite its own `ci.yml`. The unforgeable legs are the
@@ -48,9 +52,10 @@ environment secrets, must never be added there under any name, and is
 unavailable to repository workflows or the self-hosted GitZette runner.
 `scripts/check-reviewer-credential-isolation.sh` enforces that Actions variables
 are only the two boolean migration switches, Dependabot has no secrets,
-repository secrets and `production` contain only the two independently validated
-Cloudflare names, and every environment has no variables while every other
-environment has no secrets; the external
+repository secrets contain only the reviewed mention-driven Claude OAuth token
+and the two temporary Cloudflare migration names, `production` contains only
+the two independently validated Cloudflare names, and every environment has no
+variables while every other environment has no secrets; the external
 readiness operator runs that inventory check with repository-administration
 read access. Before
 publishing success, the external reviewer must inspect every

@@ -9,16 +9,17 @@ set -euo pipefail
 root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 allowed_cloudflare='["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
+allowed_repository='["CLAUDE_CODE_OAUTH_TOKEN","CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
 
-collaborators="$(gh api --paginate --slurp "repos/$repository/collaborators?affiliation=all&per_page=100" | jq -c 'add')"
+collaborators="$(gh api --paginate --slurp "repos/$repository/collaborators?affiliation=all&per_page=100" | jq -c 'add // []')"
 if ! jq -e '[.[] | select(.permissions.admin == true) | .id] == [1345402]' <<<"$collaborators" >/dev/null; then
   echo "repository administrator set must be exactly NikolayS (immutable ID 1345402); automation must not be an administrator" >&2
   exit 1
 fi
 
 repository_secrets="$(gh api --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
-if ! jq -e --argjson allowed "$allowed_cloudflare" 'all(.[]; .name as $name | $allowed | index($name))' <<<"$repository_secrets" >/dev/null; then
-  echo "repository contains a secret outside the reviewed Cloudflare migration allowlist" >&2
+if ! jq -e --argjson allowed "$allowed_repository" 'all(.[]; .name as $name | $allowed | index($name))' <<<"$repository_secrets" >/dev/null; then
+  echo "repository contains a secret outside the reviewed Claude/migration allowlist" >&2
   exit 1
 fi
 

@@ -37,7 +37,11 @@ describe("deploy review revalidation", () => {
         name: "main-samo-only-updates", target: "branch", enforcement: "active",
         bypass_actors: [{ actor_id: 280144521, actor_type: "User", bypass_mode: "always" }],
         conditions: { ref_name: { exclude: [], include: ["refs/heads/main"] } },
-        rules: [{ type: "update", parameters: { update_allows_fetch_and_merge: false } }],
+        rules: [
+          { type: "creation" },
+          { type: "update", parameters: { update_allows_fetch_and_merge: false } },
+          { type: "deletion" },
+        ],
       },
       {
         name: "release-tags-samo-only", target: "tag", enforcement: "active",
@@ -241,13 +245,17 @@ set -euo pipefail
 endpoint="\${*: -1}"
 case "$endpoint" in
   *collaborators*)
+    if [[ "\${FAKE_MODE:-ok}" == empty-admin ]]; then printf '[[]]\n'; exit 0; fi
     id=1345402; login=NikolayS
     [[ "\${FAKE_MODE:-ok}" != admin ]] || { id=280144521; login=samo-agent; }
     jq -nc --argjson id "$id" --arg login "$login" '[[{id:$id,login:$login,permissions:{admin:true}}]]'
     ;;
   *actions/secrets*)
-    name=CLOUDFLARE_API_TOKEN; [[ "\${FAKE_MODE:-ok}" != repository ]] || name=SAMO_AGENT_TOKEN
-    jq -nc --arg name "$name" '[{secrets:[{name:$name}]}]'
+    if [[ "\${FAKE_MODE:-ok}" == repository ]]; then
+      printf '[{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN"},{"name":"SAMO_AGENT_TOKEN"}]}]\n'
+    else
+      printf '[{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN"},{"name":"CLOUDFLARE_API_TOKEN"}]}]\n'
+    fi
     ;;
   *actions/variables*)
     name=CREDENTIAL_EXPORT_OPEN; value=true
@@ -289,6 +297,14 @@ esac
     expect(await run("dependabot")).toBe(1);
     expect(await run("environment-variable")).toBe(1);
     expect(await run("admin")).toBe(1);
+    const emptyAdmin = Bun.spawn(["bash", "scripts/check-reviewer-credential-isolation.sh"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "empty-admin" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const emptyAdminError = await new Response(emptyAdmin.stderr).text();
+    expect(await emptyAdmin.exited).toBe(1);
+    expect(emptyAdminError).toContain("repository administrator set must be exactly NikolayS");
     expect(await Bun.file("scripts/check-branch-protection.sh").text()).not.toContain("check-reviewer-credential-isolation.sh");
   });
 });

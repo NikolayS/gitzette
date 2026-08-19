@@ -5,7 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow_permissions='{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}'
 rulesets="$(jq -c .repository_rulesets "$root/config/main-branch-protection.json")"
 protection='{
-  "required_status_checks":{"strict":true,"checks":[{"context":"typecheck","app_id":15368},{"context":"samorev-gate","app_id":15368},{"context":"samorev","app_id":null}]},
+  "required_status_checks":{"strict":true,"checks":[{"context":"typecheck","app_id":15368},{"context":"samorev-gate","app_id":15368},{"context":"samorev","app_id":null},{"context":"policy-api-readability","app_id":15368}]},
   "enforce_admins":{"enabled":true},
   "required_pull_request_reviews":{"dismiss_stale_reviews":false,"require_code_owner_reviews":false,"required_approving_review_count":0,"require_last_push_approval":false},
   "required_conversation_resolution":{"enabled":true},
@@ -46,6 +46,8 @@ assert_drift missing-tag-ruleset "$protection" "$(jq -c 'del(.[1])' <<<"$ruleset
 assert_drift tag-user-widened "$protection" "$(jq -c '.[1].bypass_actors[0].actor_id=1' <<<"$rulesets")"
 assert_drift ruleset-disabled "$protection" "$(jq -c '.[0].enforcement="disabled"' <<<"$rulesets")"
 assert_drift update-rule-removed "$protection" "$(jq -c '.[0].rules=[]' <<<"$rulesets")"
+assert_drift main-deletion-rule-removed "$protection" "$(jq -c '.[0].rules |= map(select(.type != "deletion"))' <<<"$rulesets")"
+assert_drift main-creation-rule-removed "$protection" "$(jq -c '.[0].rules |= map(select(.type != "creation"))' <<<"$rulesets")"
 assert_drift ref-widened "$protection" "$(jq -c '.[0].conditions.ref_name.include=["~ALL"]' <<<"$rulesets")"
 
 stub_dir="$(mktemp -d)"

@@ -164,7 +164,7 @@ describe("one-shot credential migration boundary", () => {
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);
     expect(migrationDoc).toContain("Retain `scripts/get-github-environment.sh`");
-    expect(migrationDoc).toContain("repository Actions secrets and repository Actions variables must both be\n   empty after migration");
+    expect(migrationDoc).toContain("repository Actions variables must be empty and repository Actions secrets\n   may contain only the reviewed `CLAUDE_CODE_OAUTH_TOKEN` after migration");
     expect(migrationDoc).toContain("production-policy` job is expected red");
     expect(migrationDoc).toContain("environment_credentials_ready=true");
 

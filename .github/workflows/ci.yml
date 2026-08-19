@@ -68,7 +68,7 @@ jobs:
         run: >-
           jq -e '.required_status_checks.strict == true and
           (.required_status_checks.checks | sort_by(.context)) ==
-          [{"context":"samorev","app_id":null},{"context":"samorev-gate","app_id":15368},{"context":"typecheck","app_id":15368}] and
+          [{"context":"policy-api-readability","app_id":15368},{"context":"samorev","app_id":null},{"context":"samorev-gate","app_id":15368},{"context":"typecheck","app_id":15368}] and
           .enforce_admins == true and .required_conversation_resolution == true and
           .required_pull_request_reviews.require_code_owner_reviews == false and
           .required_pull_request_reviews.required_approving_review_count == 0 and
@@ -77,7 +77,7 @@ jobs:
           .repository_rulesets[0].name == "main-samo-only-updates" and
           .repository_rulesets[0].enforcement == "active" and
           .repository_rulesets[0].bypass_actors == [{"actor_id":280144521,"actor_type":"User","bypass_mode":"always"}] and
-          .repository_rulesets[0].rules == [{"type":"update","parameters":{"update_allows_fetch_and_merge":false}}] and
+          .repository_rulesets[0].rules == [{"type":"creation"},{"type":"update","parameters":{"update_allows_fetch_and_merge":false}},{"type":"deletion"}] and
           .repository_rulesets[1].name == "release-tags-samo-only" and
           .repository_rulesets[1].target == "tag" and
           .repository_rulesets[1].enforcement == "active" and
