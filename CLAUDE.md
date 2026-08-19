@@ -2,8 +2,9 @@
 
 Before merging, follow [`docs/review-gate.md`](docs/review-gate.md). The former
 automatic PR workflow `claude-code-review.yml` was removed; the mention-driven
-`claude.yml` workflow remains. The canonical check and CODEOWNER requirements
-live only in `docs/review-gate.md`.
+`claude.yml` workflow remains. The canonical exact-head check requirements live
+only in `docs/review-gate.md`; `.github/CODEOWNERS` routes advisory review
+requests but formal GitHub approval is not a gate.
 
 Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or illustration rules.
 
@@ -18,7 +19,8 @@ Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or il
 
 Run `bun run test:all`. The E2E must exercise the real local Worker, D1, R2, HTTP queue/runner APIs, and public read path. A mocked handler test is not a replacement.
 
-Green CI alone is not a review. The separate `samo-agent` CODEOWNER runs
-Tanya301/samorev on every exact head and approves only after a clean exit.
+Green CI alone is not a review. The separate `samo-agent` runner executes
+Tanya301/samorev on every exact head, publishes the identity-checked verdict,
+and requires the base-controlled publisher to finish green.
 
 Before production activation, complete the canaries and mandatory post-deploy smoke test listed in `DISPATCH_SPEC.md`.

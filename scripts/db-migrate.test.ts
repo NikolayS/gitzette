@@ -10,7 +10,7 @@ afterEach(async () => {
 });
 
 describe("production migration orchestration", () => {
-  test("fails closed when the applied-schema ledger probe is not a result envelope", async () => {
+  test("fails closed when a ledger probe is not a result envelope", async () => {
     const root = new URL("..", import.meta.url).pathname;
     workspace = await mkdtemp(join(tmpdir(), "gitzette-applied-schema-envelope-test-"));
     await cp(join(root, "scripts"), join(workspace, "scripts"), { recursive: true });
@@ -22,18 +22,20 @@ printf '%s\\n' '[{"error":"remote query failed"}]'
 `);
     await chmod(wrangler, 0o755);
 
-    const process = Bun.spawn(["bash", "scripts/check-production-applied-schema.sh"], {
-      cwd: workspace,
-      env: { ...Bun.env, CLOUDFLARE_API_TOKEN: "integration-test-token" },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, exitCode] = await Promise.all([
-      new Response(process.stdout).text(),
-      process.exited,
-    ]);
-    expect(exitCode).not.toBe(0);
-    expect(stdout).not.toContain("Applied-schema gate skipped");
+    for (const script of ["check-production-applied-schema.sh", "check-production-drift.sh"]) {
+      const process = Bun.spawn(["bash", `scripts/${script}`], {
+        cwd: workspace,
+        env: { ...Bun.env, CLOUDFLARE_API_TOKEN: "integration-test-token" },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, exitCode] = await Promise.all([
+        new Response(process.stdout).text(),
+        process.exited,
+      ]);
+      expect(exitCode, script).not.toBe(0);
+      expect(stdout).not.toContain("gate skipped");
+    }
   });
 
   test("runs the complete db:migrate chain from an unmigrated database", async () => {

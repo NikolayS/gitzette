@@ -5,11 +5,15 @@ exact pull-request head, applies those checks to administrators, and requires
 every conversation to be resolved. A separate formal GitHub approval is not a
 merge or release gate.
 
-The external `samo-agent` status plus the base-controlled publisher are the
-identity boundary. A same-repository PR workflow can request `statuses: write`,
-but it cannot create a status as immutable user ID `280144521` or forge the
-app-bound publisher check. The publisher validates both identity and freshness
-before it turns the external verdict into the required app-bound gate.
+The non-null zero-approval review policy still forces every change through a
+pull request, so the protected-main publisher runs and conversation resolution
+remains meaningful. Classic branch protection cannot bind a status to its
+creator: any repository workflow with `statuses: write` runs as the shared
+Actions app. The protected-main publisher itself validates the external
+`samo-agent` status's immutable user ID and freshness before publishing its
+result, and deployment revalidates the latest statuses. This gate trusts
+repository write/admin credentials and is not a defense against a malicious
+write-access actor adding a self-publishing workflow.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,

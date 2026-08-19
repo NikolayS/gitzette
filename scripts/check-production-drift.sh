@@ -36,7 +36,9 @@ trap cleanup EXIT
 # not compare the expanded schema with the old fixture.
 "$wrangler_bin" d1 execute gitzette-db --remote --command \
   "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name='d1_migrations'" --json >"$cutover_json"
-ledger_table_count="$(jq -r '.[0].results[0].total' "$cutover_json")"
+ledger_table_count="$(
+  jq -er '.[0].results[0].total | select(type == "number")' "$cutover_json"
+)"
 "$wrangler_bin" d1 execute gitzette-db --remote --command \
   "SELECT lower(username) AS username,COUNT(*) AS total FROM users GROUP BY lower(username) HAVING COUNT(*)>1" \
   --json >"$collision_json"
