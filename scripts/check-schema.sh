@@ -3,7 +3,8 @@ set -euo pipefail
 
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
-gitzette_require_checked_in_caller "check-schema.sh" "${BASH_SOURCE[0]:-}"
+gitzette_require_checked_in_caller \
+  "check-schema.sh" "${BASH_SOURCE[0]:-}" "$0" "schema-equivalence.ts"
 gitzette_require_local
 
 migration_state="$(mktemp -d)"
@@ -21,6 +22,7 @@ local_wrangler d1 execute gitzette-db --local --persist-to "$migration_state" --
 local_wrangler d1 execute gitzette-db --local --persist-to "$schema_state" --command "$query" --json >"$schema_state/schema.json"
 
 bun "$gitzette_scripts_directory/schema-equivalence.ts" \
-  "$migration_state/schema.json" "$schema_state/schema.json"
+  "$migration_state/schema.json" "$schema_state/schema.json" \
+  "schema.sql differs from migrations" --strict
 
 echo "Schema OK: schema.sql matches the complete migration chain"

@@ -2,7 +2,9 @@
 set -euo pipefail
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
-gitzette_require_checked_in_caller "check-production-drift.sh" "${BASH_SOURCE[0]:-}"
+gitzette_require_checked_in_caller \
+  "check-production-drift.sh" "${BASH_SOURCE[0]:-}" "$0" \
+  "username-collision-preflight.ts" "cutover-state.ts" "schema-equivalence.ts"
 
 # This is a one-time pre-cutover baseline gate. After cutover, Wrangler's D1
 # migration ledger records and applies reviewed migrations; this script does not
@@ -40,11 +42,11 @@ echo "Production username collision preflight OK: zero case-fold collisions"
 if [[ "$ledger_table_count" -gt 0 ]]; then
   "$wrangler_bin" d1 execute gitzette-db --remote --command \
     "SELECT name FROM d1_migrations ORDER BY id" --json >"$ledger_json"
-  bun scripts/cutover-state.ts "$cutover_json" "$ledger_json" >/dev/null
+  bun "$gitzette_scripts_directory/cutover-state.ts" "$cutover_json" "$ledger_json" >/dev/null
   echo "Production cutover gate skipped: D1 migration ledger already exists"
   exit 0
 fi
-if [[ "$(bun scripts/cutover-state.ts "$cutover_json")" != "cutover" ]]; then
+if [[ "$(bun "$gitzette_scripts_directory/cutover-state.ts" "$cutover_json")" != "cutover" ]]; then
   echo "unexpected cutover state" >&2
   exit 1
 fi
@@ -54,6 +56,8 @@ query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','t
 local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
 "$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
 
-bun "$gitzette_scripts_directory/schema-equivalence.ts" "$fixture_state/schema.json" "$remote_json"
+bun "$gitzette_scripts_directory/schema-equivalence.ts" \
+  "$fixture_state/schema.json" "$remote_json" \
+  "production schema drifted from the reviewed baseline; aborting migration"
 
 echo "Production cutover gate OK: unmigrated live D1 matches the reviewed baseline"

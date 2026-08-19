@@ -53,6 +53,21 @@ describe("production migration credential guards", () => {
       `${repoRoot}/node_modules/.bin/wrangler`,
     ]);
 
+    const relativeCaller = Bun.spawn([
+      "bash", "-c",
+      'set -euo pipefail; source scripts/require-wrangler.sh; '
+        + 'gitzette_require_checked_in_caller "check-schema.sh" '
+        + '"scripts/check-schema.sh" "scripts/check-schema.sh" "schema-equivalence.ts"; echo OK',
+    ], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" });
+    const [relativeExit, relativeStdout, relativeStderr] = await Promise.all([
+      relativeCaller.exited,
+      new Response(relativeCaller.stdout).text(),
+      new Response(relativeCaller.stderr).text(),
+    ]);
+    expect(relativeExit).toBe(0);
+    expect(relativeStderr).toBe("");
+    expect(relativeStdout.trim()).toBe("OK");
+
     const wranglerCallers = [
       "bootstrap-production-db.sh",
       "check-production-applied-schema.sh",
@@ -66,7 +81,10 @@ describe("production migration credential guards", () => {
     ];
     for (const name of wranglerCallers) {
       const script = await Bun.file(`${repoRoot}/scripts/${name}`).text();
-      expect(script).toContain("gitzette_require_checked_in_caller");
+      const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(script).toMatch(new RegExp(
+        `gitzette_require_checked_in_caller[\\s\\\\]*"${escapedName}"`,
+      ));
     }
   });
 

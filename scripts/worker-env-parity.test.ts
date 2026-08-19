@@ -34,7 +34,7 @@ describe("Worker environment provenance", () => {
     expect(secrets.length).toBeGreaterThan(0);
     expect(
       new Set(expectedProductionSecrets),
-      "scripts/check-production-secrets.ts, wrangler.toml, and src/index.ts must agree",
+      "scripts/check-production-secrets.ts and wrangler.toml must agree exactly",
     ).toEqual(new Set(secrets));
     for (const name of [...bindings, ...vars]) {
       expectEnvField(generatedEnv, name);

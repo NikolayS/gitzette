@@ -55,6 +55,22 @@ function canonicalSql(sql: string | null): string | null {
 }
 
 export function canonicalSchema(document: unknown): SchemaRow[] {
+  return mapSchema(document, canonicalSql);
+}
+
+function strictSql(sql: string | null): string | null {
+  if (sql === null) return null;
+  return sql.replace(/\s+/g, " ").replace(/\s*([(),])\s*/g, "$1").trim();
+}
+
+export function strictSchema(document: unknown): SchemaRow[] {
+  return mapSchema(document, strictSql);
+}
+
+function mapSchema(
+  document: unknown,
+  normalizeSql: (sql: string | null) => string | null,
+): SchemaRow[] {
   if (!Array.isArray(document) || document.length !== 1 || !isRecord(document[0])) {
     throw new Error("invalid Wrangler schema result");
   }
@@ -69,7 +85,7 @@ export function canonicalSchema(document: unknown): SchemaRow[] {
       || (row.sql !== null && typeof row.sql !== "string")) {
       throw new Error("invalid Wrangler schema row");
     }
-    return { type: row.type, name: row.name, sql: canonicalSql(row.sql) };
+    return { type: row.type, name: row.name, sql: normalizeSql(row.sql) };
   });
 }
 
@@ -77,21 +93,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-export function schemasMatch(left: unknown, right: unknown): boolean {
-  return JSON.stringify(canonicalSchema(left)) === JSON.stringify(canonicalSchema(right));
+export function schemasMatch(left: unknown, right: unknown, strict = false): boolean {
+  const normalize = strict ? strictSchema : canonicalSchema;
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 
 if (import.meta.main) {
-  const [expectedPath, actualPath] = process.argv.slice(2);
+  const [expectedPath, actualPath, label = "schema mismatch", mode] = process.argv.slice(2);
   if (!expectedPath || !actualPath) {
-    throw new Error("usage: bun scripts/schema-equivalence.ts <expected-json> <actual-json>");
+    throw new Error(
+      "usage: bun scripts/schema-equivalence.ts <expected-json> <actual-json> [label] [--strict]",
+    );
   }
+  if (mode && mode !== "--strict") throw new Error(`unknown schema comparison mode: ${mode}`);
   const expected = JSON.parse(await Bun.file(expectedPath).text());
   const actual = JSON.parse(await Bun.file(actualPath).text());
-  if (!schemasMatch(expected, actual)) {
-    console.error("schema mismatch", {
-      expected: canonicalSchema(expected),
-      actual: canonicalSchema(actual),
+  const strict = mode === "--strict";
+  const normalize = strict ? strictSchema : canonicalSchema;
+  if (!schemasMatch(expected, actual, strict)) {
+    console.error(label, {
+      expected: normalize(expected),
+      actual: normalize(actual),
     });
     process.exit(1);
   }

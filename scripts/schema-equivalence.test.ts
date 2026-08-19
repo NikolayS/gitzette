@@ -46,6 +46,29 @@ describe("schema equivalence", () => {
     )).toBe(false);
   });
 
+  test("strict mode preserves authored DDL while tolerating layout around punctuation", () => {
+    expect(schemasMatch(
+      schema("CREATE TABLE jobs (id TEXT, state TEXT)"),
+      schema("CREATE TABLE jobs(id TEXT,state TEXT)"),
+      true,
+    )).toBe(true);
+    expect(schemasMatch(
+      schema("CREATE TABLE IF NOT EXISTS jobs(id TEXT)"),
+      schema("CREATE TABLE jobs(id TEXT)"),
+      true,
+    )).toBe(false);
+    expect(schemasMatch(
+      schema("CREATE TABLE jobs(id TEXT /* reviewed */)"),
+      schema("CREATE TABLE jobs(id TEXT)"),
+      true,
+    )).toBe(false);
+    expect(schemasMatch(
+      schema('CREATE TABLE "jobs"(id TEXT)'),
+      schema("CREATE TABLE jobs(id TEXT)"),
+      true,
+    )).toBe(false);
+  });
+
   test("new-object migration fails closed on a pre-existing object", async () => {
     const migration = await Bun.file("migrations/0001_generation_queue.sql").text();
     expect(migration).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS/i);

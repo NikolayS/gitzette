@@ -30,7 +30,7 @@ fi
 source "$production_secrets_script_directory/require-wrangler.sh"
 gitzette_require_checked_in_caller \
   "check-production-secrets.sh" "$production_secrets_invocation_path" \
-  "check-production-secrets.ts" "$production_secrets_executable_path"
+  "$production_secrets_executable_path" "check-production-secrets.ts"
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required to verify Worker secrets" >&2

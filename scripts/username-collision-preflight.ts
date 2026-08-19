@@ -17,11 +17,33 @@ export function assertNoUsernameCollisions(document: unknown): void {
   }
 }
 
-if (import.meta.main) {
-  const [jsonPath] = process.argv.slice(2);
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function main(args: string[]): Promise<void> {
+  const [jsonPath] = args;
   if (!jsonPath) {
     throw new Error("usage: bun scripts/username-collision-preflight.ts <wrangler-json>");
   }
-  const document: unknown = JSON.parse(await Bun.file(jsonPath).text());
+  let raw: string;
+  try {
+    raw = await Bun.file(jsonPath).text();
+  } catch (error) {
+    throw new Error(`could not read username-collision response: ${formatError(error)}`);
+  }
+  let document: unknown;
+  try {
+    document = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`invalid username-collision JSON: ${formatError(error)}`);
+  }
   assertNoUsernameCollisions(document);
+}
+
+if (import.meta.main) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(formatError(error));
+    process.exitCode = 1;
+  });
 }

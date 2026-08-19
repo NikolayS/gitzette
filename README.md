@@ -81,7 +81,8 @@ credentials. The script must sit next to its checked-in helper and TypeScript
 entrypoint; sourcing and stdin-piped invocation are rejected. Secret-set changes
 must update `scripts/check-production-secrets.ts`, the bounded `# secrets` block
 in `wrangler.toml`, and the `Env` interface in `src/index.ts` together;
-`scripts/worker-env-parity.test.ts` enforces their exact agreement.
+`scripts/worker-env-parity.test.ts` enforces exact agreement between the first
+two and requires every declared secret in `Env`.
 
 ## Development
 

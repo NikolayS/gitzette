@@ -3,7 +3,8 @@ set -euo pipefail
 
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
-gitzette_require_checked_in_caller "check-production-baseline.sh" "${BASH_SOURCE[0]:-}"
+gitzette_require_checked_in_caller \
+  "check-production-baseline.sh" "${BASH_SOURCE[0]:-}" "$0" "schema-equivalence.ts"
 gitzette_require_local
 
 baseline_state="$(mktemp -d)"
@@ -21,6 +22,7 @@ local_wrangler d1 execute gitzette-db --local --persist-to "$baseline_state" --c
 local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
 
 bun "$gitzette_scripts_directory/schema-equivalence.ts" \
-  "$baseline_state/schema.json" "$fixture_state/schema.json"
+  "$baseline_state/schema.json" "$fixture_state/schema.json" \
+  "0000_base.sql differs from committed production snapshot"
 
 echo "Production baseline OK: 0000_base.sql matches the committed read-only D1 snapshot"

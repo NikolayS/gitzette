@@ -3,7 +3,7 @@ set -euo pipefail
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 gitzette_require_checked_in_caller \
-  "check-weekly-profiles.sh" "${BASH_SOURCE[0]:-}" "check-weekly-profiles.ts"
+  "check-weekly-profiles.sh" "${BASH_SOURCE[0]:-}" "$0" "check-weekly-profiles.ts"
 
 weekly_enabled="$(bun -e '
   const config = Bun.TOML.parse(await Bun.file("wrangler.toml").text());

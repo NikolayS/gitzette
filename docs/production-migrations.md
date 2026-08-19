@@ -46,6 +46,10 @@ the committed fixture and migration chain; they do not inspect or mutate live
 D1. All production schema checks are read-only. Only Wrangler's migration apply
 step mutates production.
 
+Run these checked-in shell entry points from the repository root. They reject
+sourcing, copied wrappers, stdin execution, and missing checked-in helpers; use
+the documented `bun run` commands or `bash scripts/<name>.sh` exactly.
+
 ## Captured baseline provenance
 
 `fixtures/production-baseline-2026-08-15.sql` is a canonical SQL reconstruction
