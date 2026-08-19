@@ -57,6 +57,8 @@ describe("one-shot credential migration boundary", () => {
     expect(parsed.jobs["verify-production-credentials"].if).toBe("${{ inputs.operation == 'verify' }}");
     expect(parsed.jobs["verify-production-credentials"].environment).toBe("production");
     expect(parsed.jobs["authorize-export"].permissions).toEqual({ actions: "read", contents: "read" });
+    expect(parsed.jobs["export-encrypted-credentials"].permissions).toEqual({ actions: "read", contents: "read" });
+    expect(parsed.jobs["verify-production-credentials"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(workflow).not.toContain("earliest credential export run");
     expect(workflow).not.toContain("display_title == \"credential migration: export\"");
     for (const name of ["export-encrypted-credentials", "verify-production-credentials"]) {
@@ -439,13 +441,16 @@ fi
       ...process.env,
       RUNNER_TEMP: throwawayRoot,
       RSA_PUBLIC_KEY_PEM_B64: Buffer.from(throwawayPublicPem).toString("base64"),
-      CLOUDFLARE_ACCOUNT_ID: "exact-account",
+      CLOUDFLARE_ACCOUNT_ID: "a3265e0d0db71fdece29365819452f00",
       CLOUDFLARE_API_TOKEN: "exact-token",
       CLOUDFLARE_D1_DATABASE_ID: "exact-database",
       GITHUB_RUN_ID: "77",
       PATH: `${gateBin}:${process.env.PATH}`,
     };
     expect(await Bun.spawn(["bash", "-c", executableExport], { env: exportEnv, stdout: "pipe", stderr: "pipe" }).exited).toBe(0);
+    expect(await Bun.spawn(["bash", "-c", executableExport], {
+      env: { ...exportEnv, CLOUDFLARE_ACCOUNT_ID: "wrong-account" }, stdout: "pipe", stderr: "pipe",
+    }).exited).toBe(1);
     const encryptedPath = join(throwawayRoot, "gitzette-credential-migration", "credentials.bin");
     const decrypted = Bun.spawnSync({
       cmd: ["openssl", "pkeyutl", "-decrypt", "-inkey", privatePath,
@@ -455,7 +460,7 @@ fi
     });
     expect(decrypted.exitCode).toBe(0);
     expect(JSON.parse(new TextDecoder().decode(decrypted.stdout))).toEqual({
-      CLOUDFLARE_ACCOUNT_ID: "exact-account",
+      CLOUDFLARE_ACCOUNT_ID: "a3265e0d0db71fdece29365819452f00",
       CLOUDFLARE_API_TOKEN: "exact-token",
     });
     expect(exportRun).not.toContain('--arg api_token "$CLOUDFLARE_API_TOKEN"');
@@ -492,6 +497,51 @@ fi
     expect(await Bun.spawn(["bash", "-c", exportRun ?? "exit 99"], {
       env: exportEnv, stdout: "pipe", stderr: "pipe",
     }).exited).toBe(1);
+  });
+
+  test("compiles every operational runbook block and jq filter", async () => {
+    const migrationDoc = await Bun.file("docs/credential-migration.md").text();
+    const bashBlocks = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
+      .map((match) => match[1] ?? "");
+    expect(bashBlocks).toHaveLength(11);
+
+    const runbookRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-runbook-"));
+    try {
+      for (const [index, block] of bashBlocks.entries()) {
+        const path = join(runbookRoot, `block-${index}.sh`);
+        await Bun.write(path, block);
+        const syntax = Bun.spawn(["bash", "-n", path], { stdout: "pipe", stderr: "pipe" });
+        const [status, stderr] = await Promise.all([
+          syntax.exited,
+          new Response(syntax.stderr).text(),
+        ]);
+        expect(status, `runbook Bash block ${index + 1} failed to parse: ${stderr}`).toBe(0);
+      }
+
+      const shell = bashBlocks.join("\n");
+      const invocationCount = [...shell.matchAll(/\bjq\b/g)].length;
+      const quotedPrograms = [...shell.matchAll(/\bjq\b(?:[^\n']|\\\n)*'([\s\S]*?)'/g)]
+        .map((match) => match[1] ?? "");
+      const unquotedPrograms = [...shell.matchAll(/(?:\bjq\b(?:\s+-[A-Za-z]+)+|--jq)\s+(\.[A-Za-z_][A-Za-z0-9_.]*)\b/g)]
+        .map((match) => match[1] ?? "");
+      const jqPrograms = [...quotedPrograms, ...unquotedPrograms];
+      expect(jqPrograms, "every runbook jq invocation must expose one statically compilable filter")
+        .toHaveLength(invocationCount);
+
+      for (const [index, program] of jqPrograms.entries()) {
+        const compile = Bun.spawn([
+          "jq", "-n", "--argjson", "before", "[]", "--arg", "run_id", "1",
+          `def runbook_program: (${program}); empty`,
+        ], { stdout: "pipe", stderr: "pipe" });
+        const [status, stderr] = await Promise.all([
+          compile.exited,
+          new Response(compile.stderr).text(),
+        ]);
+        expect(status, `runbook jq filter ${index + 1} failed to compile: ${stderr}`).toBe(0);
+      }
+    } finally {
+      await rm(runbookRoot, { recursive: true, force: true });
+    }
   });
 
   test("executes the required policy API readability gate fail closed", async () => {

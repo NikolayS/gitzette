@@ -296,7 +296,7 @@ text matching is not the authorization proof.
      jq -c 'map(.secrets) | add // []')"
    jq -e --argjson before "$environment_secrets_before" '
      ([.[].name] | sort) == ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
-     all(.[] as $current;
+     all(.[]; . as $current |
        ($before | map(select(.name == $current.name)) | .[0].updated_at // "") <
        $current.updated_at)' <<<"$environment_secrets" >/dev/null
    curl --fail --silent --show-error --connect-timeout 10 --max-time 20 --config - \
