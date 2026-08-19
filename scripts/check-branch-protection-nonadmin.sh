@@ -10,22 +10,25 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository="${GITHUB_REPOSITORY:-NikolayS/gitzette}"
 expected_id=280144521
-ruleset_name="$(jq -er '.repository_rulesets[0].name' "$root/config/main-branch-protection.json")"
 permission="$(gh api "repos/$repository/collaborators/samo-agent/permission")"
 if [[ "$(jq -er .user.id <<<"$permission")" != "$expected_id" ||
       "$(jq -er .permission <<<"$permission")" == admin ]]; then
   echo "samo-agent identity or repository role differs from the non-admin boundary" >&2
   exit 1
 fi
-ruleset_ids="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=false&per_page=100" |
-  jq -r --arg name "$ruleset_name" 'add // [] | .[] | select(.name == $name) | .id')"
-if [[ "$(wc -w <<<"$ruleset_ids")" -ne 1 ]]; then
-  echo "expected exactly one live $ruleset_name ruleset" >&2
-  exit 1
-fi
-live="$(gh api "repos/$repository/rulesets/$ruleset_ids")"
-if [[ "$(jq -r .current_user_can_bypass <<<"$live")" != never ]]; then
-  echo "samo-agent can bypass the admin-only main update ruleset" >&2
-  exit 1
-fi
-echo "Non-admin ruleset boundary OK: samo-agent ID 280144521 cannot bypass main updates"
+ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=false&per_page=100" | jq -c 'add // []')"
+while IFS= read -r ruleset_name; do
+  ruleset_ids="$(jq -r --arg name "$ruleset_name" '.[] | select(.name == $name) | .id' <<<"$ruleset_summaries")"
+  if [[ "$(wc -w <<<"$ruleset_ids")" -ne 1 ]]; then
+    echo "expected exactly one live $ruleset_name ruleset" >&2
+    exit 1
+  fi
+  live="$(gh api "repos/$repository/rulesets/$ruleset_ids")"
+  expected_bypass=never
+  [[ "$ruleset_name" != release-tags-samo-only ]] || expected_bypass=always
+  if [[ "$(jq -r .current_user_can_bypass <<<"$live")" != "$expected_bypass" ]]; then
+    echo "samo-agent has an unexpected bypass for $ruleset_name" >&2
+    exit 1
+  fi
+done < <(jq -r '.repository_rulesets[].name' "$root/config/main-branch-protection.json")
+echo "Non-admin ruleset boundary OK: samo-agent ID 280144521 cannot update main and is the release-tag bypass identity"

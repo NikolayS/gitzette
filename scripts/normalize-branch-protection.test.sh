@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow_permissions='{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}'
-rulesets='[{"name":"main-admin-only-updates","target":"branch","enforcement":"active","bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}],"conditions":{"ref_name":{"exclude":[],"include":["refs/heads/main"]}},"rules":[{"type":"update","parameters":{"update_allows_fetch_and_merge":false}}]}]'
+rulesets="$(jq -c .repository_rulesets "$root/config/main-branch-protection.json")"
 protection='{
   "required_status_checks":{"strict":true,"checks":[{"context":"typecheck","app_id":15368},{"context":"samorev-gate","app_id":15368},{"context":"samorev","app_id":null}]},
   "enforce_admins":{"enabled":true},
@@ -34,7 +34,9 @@ assert_drift bypass "$(jq -c '.required_pull_request_reviews.bypass_pull_request
 assert_drift dismissal "$(jq -c '.required_pull_request_reviews.dismissal_restrictions={users:[{login:"attacker"}],teams:[]}' <<<"$protection")"
 assert_drift restrictions "$(jq -c '.restrictions={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 assert_drift missing-ruleset "$protection" '[]'
-assert_drift actions-bypass "$protection" '[{"name":"main-admin-only-updates","target":"branch","enforcement":"active","bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"},{"actor_id":15368,"actor_type":"Integration","bypass_mode":"always"}],"conditions":{"ref_name":{"exclude":[],"include":["refs/heads/main"]}},"rules":[{"type":"update","parameters":{"update_allows_fetch_and_merge":false}}]}]'
+assert_drift actions-bypass "$protection" "$(jq -c '.[0].bypass_actors += [{actor_id:15368,actor_type:"Integration",bypass_mode:"always"}]' <<<"$rulesets")"
+assert_drift missing-tag-ruleset "$protection" "$(jq -c 'del(.[1])' <<<"$rulesets")"
+assert_drift tag-user-widened "$protection" "$(jq -c '.[1].bypass_actors[0].actor_id=1' <<<"$rulesets")"
 assert_drift ruleset-disabled "$protection" "$(jq -c '.[0].enforcement="disabled"' <<<"$rulesets")"
 assert_drift update-rule-removed "$protection" "$(jq -c '.[0].rules=[]' <<<"$rulesets")"
 assert_drift ref-widened "$protection" "$(jq -c '.[0].conditions.ref_name.include=["~ALL"]' <<<"$rulesets")"

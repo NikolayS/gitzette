@@ -331,16 +331,19 @@ fi
     expect(await execute(verifyApprovalRun, { ...verify, DISPATCH_REF: "refs/heads/other" })).toBe(1);
     expect(await execute(verifyApprovalRun, { ...verify, DISPATCH_SHA: "stale" })).toBe(1);
     expect(await execute(verifyCredentialsRun, {
-      CLOUDFLARE_ACCOUNT_ID: "exact-account", CLOUDFLARE_API_TOKEN: "exact-token",
+      CLOUDFLARE_ACCOUNT_ID: "a3265e0d0db71fdece29365819452f00", CLOUDFLARE_API_TOKEN: "exact-token",
     })).toBe(0);
     expect(await execute(verifyCredentialsRun, {
-      CLOUDFLARE_ACCOUNT_ID: "exact-account", CLOUDFLARE_API_TOKEN: "exact-token", FAKE_CF_SUCCESS: "false",
+      CLOUDFLARE_ACCOUNT_ID: "a3265e0d0db71fdece29365819452f00", CLOUDFLARE_API_TOKEN: "exact-token", FAKE_CF_SUCCESS: "false",
+    })).not.toBe(0);
+    expect(await execute(verifyCredentialsRun, {
+      CLOUDFLARE_ACCOUNT_ID: "other-account", CLOUDFLARE_API_TOKEN: "exact-token",
     })).not.toBe(0);
     expect(await execute(verifyCredentialsRun, {
       CLOUDFLARE_ACCOUNT_ID: "", CLOUDFLARE_API_TOKEN: "exact-token",
     })).toBe(1);
     expect(await execute(verifyCredentialsRun, {
-      CLOUDFLARE_ACCOUNT_ID: "exact-account", CLOUDFLARE_API_TOKEN: undefined,
+      CLOUDFLARE_ACCOUNT_ID: "a3265e0d0db71fdece29365819452f00", CLOUDFLARE_API_TOKEN: undefined,
     })).toBe(1);
 
     const throwaway = generateKeyPairSync("rsa", { modulusLength: 4096 });
@@ -546,6 +549,32 @@ esac
     await rm(`${state}.put-count`, { force: true });
     expect(await run(false, true)).toBe(1);
     expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
+
+    const applySource = await Bun.file("scripts/apply-production-environment.sh").text();
+    const policyBlock = applySource.slice(
+      applySource.indexOf('expected_policies='),
+      applySource.lastIndexOf('\n"$root/scripts/check-production-environment.sh"'),
+    );
+    const protectedPolicy = join(root, "protected-policy.json");
+    await Bun.write(protectedPolicy, JSON.stringify({
+      deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+      branch_policies: [],
+    }));
+    const rejectingGh = join(bin, "rejecting-gh");
+    await Bun.write(rejectingGh, "#!/usr/bin/env bash\necho unexpected-policy-API-call >&2\nexit 77\n");
+    await Bun.spawn(["chmod", "+x", rejectingGh]).exited;
+    const protectedBlock = Bun.spawn([
+      "bash", "-c", `set -euo pipefail
+policy="$FAKE_POLICY"
+repository=example/gitzette
+gh() { "$FAKE_GH" "$@"; }
+${policyBlock}`,
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, FAKE_POLICY: protectedPolicy, FAKE_GH: rejectingGh },
+      stdout: "pipe", stderr: "pipe",
+    });
+    expect(await protectedBlock.exited).toBe(0);
   });
 
   test("executes the reviewed environment policy against live-response shapes", async () => {

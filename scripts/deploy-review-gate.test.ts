@@ -32,12 +32,24 @@ describe("deploy review revalidation", () => {
     expect(gate).toContain("gh api --paginate --slurp");
     expect(gate).not.toContain('.creator.login == "samo-agent"');
     expect(codeowners.trim()).toBe("* @samo-agent");
-    expect(branchPolicy.repository_rulesets).toEqual([{
-      name: "main-admin-only-updates", target: "branch", enforcement: "active",
-      bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
-      conditions: { ref_name: { exclude: [], include: ["refs/heads/main"] } },
-      rules: [{ type: "update", parameters: { update_allows_fetch_and_merge: false } }],
-    }]);
+    expect(branchPolicy.repository_rulesets).toEqual([
+      {
+        name: "main-admin-only-updates", target: "branch", enforcement: "active",
+        bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+        conditions: { ref_name: { exclude: [], include: ["refs/heads/main"] } },
+        rules: [{ type: "update", parameters: { update_allows_fetch_and_merge: false } }],
+      },
+      {
+        name: "release-tags-samo-only", target: "tag", enforcement: "active",
+        bypass_actors: [{ actor_id: 280144521, actor_type: "User", bypass_mode: "always" }],
+        conditions: { ref_name: { exclude: [], include: ["refs/tags/v*"] } },
+        rules: [
+          { type: "creation" },
+          { type: "update", parameters: { update_allows_fetch_and_merge: false } },
+          { type: "deletion" },
+        ],
+      },
+    ]);
     expect(branchPolicy.allow_auto_merge).toBe(false);
     expect(applyBranchPolicy).toContain("{allow_auto_merge}");
     expect(documentation).toContain("Repository auto-merge is disabled and audited");
@@ -58,7 +70,7 @@ describe("deploy review revalidation", () => {
     expect(applyBranchPolicy.indexOf("trap audit_partial_apply EXIT")).toBeLessThan(
       applyBranchPolicy.indexOf("{allow_auto_merge}"),
     );
-    expect(applyBranchPolicy.indexOf("ruleset_payload=")).toBeLessThan(
+    expect(applyBranchPolicy.indexOf("repository_rulesets[]")).toBeLessThan(
       applyBranchPolicy.indexOf("actions/permissions/workflow"),
     );
     expect(applyBranchPolicy).toContain("current_user_can_bypass");
@@ -67,6 +79,9 @@ describe("deploy review revalidation", () => {
     expect(documentation).toContain("GitHub Actions is not a bypass actor");
     expect(documentation).toContain("Administrator policy authorization is explicit");
     expect(documentation).toContain("intentionally removed formal GitHub pull-request\napproval as evidence");
+    expect(documentation).toContain("release-tags-samo-only");
+    expect(documentation).toContain('tag_sha="$(gh api');
+    expect(documentation).toContain('[[ "$tag_sha" == "$main_sha" ]]');
     const runTagActorGate = (actor?: string): Promise<number> => Bun.spawn([
       "bash", tagActorGate, ...(actor === undefined ? [] : [actor]),
     ], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" }).exited;
@@ -87,6 +102,57 @@ describe("deploy review revalidation", () => {
     expect(deploy).not.toContain("actions: read");
     expect(deploy).not.toContain("pull-requests: read");
     expect(deploy).not.toContain("statuses: read");
+  });
+
+  test("executes the reviewed-current-main workflow block", async () => {
+    const workflow = Bun.YAML.parse(await Bun.file(".github/workflows/deploy.yml").text()) as {
+      jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }>;
+    };
+    const raw = workflow.jobs["review-gate"].steps.find(({ name }) =>
+      name === "Require the reviewed current main merge")?.run;
+    expect(raw).toBeDefined();
+    const runBlock = (raw ?? "exit 99").replace(
+      'bash scripts/check-release-review-evidence.sh "$reviewed_sha"',
+      ': "$reviewed_sha"',
+    );
+    const root = await mkdtemp(join(tmpdir(), "gitzette-deploy-main-gate-"));
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    await Bun.write(join(bin, "git"), `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" != fetch ]] || exit 0
+[[ "$1" != rev-parse ]] || { printf '%s\\n' "$FAKE_MAIN_SHA"; exit 0; }
+exit 91
+`);
+    await Bun.write(join(bin, "gh"), `#!/usr/bin/env bash
+set -euo pipefail
+base=main; merged=2026-01-01T00:00:00Z; merge_sha="$GITHUB_SHA"
+case "\${FAKE_MODE:-success}" in
+  none) printf '[]\\n'; exit 0 ;;
+  unmerged) merged=null ;;
+  wrong-base) base=attacker ;;
+esac
+jq -nc --arg base "$base" --arg merged "$merged" --arg merge_sha "$merge_sha" \
+  '[{base:{ref:$base},merged_at:(if $merged == "null" then null else $merged end),merge_commit_sha:$merge_sha,head:{sha:("b" * 40)}}]'
+`);
+    await Bun.spawn(["chmod", "+x", join(bin, "git"), join(bin, "gh")]).exited;
+    const sha = "a".repeat(40);
+    const execute = (mode: string, mainSha = sha): Promise<number> => Bun.spawn([
+      "bash", "-c", runBlock,
+    ], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_SHA: sha,
+        FAKE_MAIN_SHA: mainSha, FAKE_MODE: mode, GITHUB_REPOSITORY: "example/gitzette",
+        TAG_PUSHER_ID: "280144521",
+      },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await execute("success")).toBe(0);
+    expect(await execute("success", "c".repeat(40))).not.toBe(0);
+    expect(await execute("none")).not.toBe(0);
+    expect(await execute("unmerged")).not.toBe(0);
+    expect(await execute("wrong-base")).not.toBe(0);
   });
 
   test("fails closed on stale, forged, or failed latest evidence", async () => {

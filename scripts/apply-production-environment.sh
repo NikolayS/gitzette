@@ -53,22 +53,20 @@ if [[ "$(jq -r .can_admins_bypass <<<"$post_apply_environment")" != false ]]; th
   exit 1
 fi
 
-live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
 expected_policies="$(jq -c '.branch_policies' "$policy")"
-stale_policy_ids="$(jq -r --argjson expected "$expected_policies" '
-  group_by([.name,.type])[] as $group |
-  if any($expected[]; .name == $group[0].name and .type == $group[0].type)
-  then $group[1:][]?.id
-  else $group[].id
-  end
-' <<<"$live")"
-while IFS= read -r policy_id; do
-  [[ -n "$policy_id" ]] || continue
-  gh api --method DELETE "repos/$repository/environments/production/deployment-branch-policies/$policy_id" --silent
-done <<<"$stale_policy_ids"
-
 if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies "$policy")" == true ]]; then
   live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+  stale_policy_ids="$(jq -r --argjson expected "$expected_policies" '
+    group_by([.name,.type])[] as $group |
+    if any($expected[]; .name == $group[0].name and .type == $group[0].type)
+    then $group[1:][]?.id
+    else $group[].id
+    end
+  ' <<<"$live")"
+  while IFS= read -r policy_id; do
+    [[ -n "$policy_id" ]] || continue
+    gh api --method DELETE "repos/$repository/environments/production/deployment-branch-policies/$policy_id" --silent
+  done <<<"$stale_policy_ids"
   desired_policies="$(jq -r '[.branch_policies[] | [.name,.type] | @tsv] | .[]' "$policy")"
   while IFS=$'\t' read -r name type; do
     [[ -n "$name" && -n "$type" ]] || continue

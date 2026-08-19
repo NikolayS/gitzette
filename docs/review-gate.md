@@ -23,7 +23,10 @@ current gate run began and published by immutable user ID `280144521`
 binding means every push, ready/draft transition, reopen, or PR edit requires a
 new verdict.
 
-Release enforcement does not trust those displayed names. The reviewed tag
+Release enforcement does not trust those displayed names. The active
+`release-tags-samo-only` tag ruleset restricts creation, update, and deletion
+of `refs/tags/v*` to immutable user ID `280144521`; repository Actions and
+other write credentials cannot bypass it. The reviewed tag
 workflow queries GitHub's workflow-run records by exact path, event, same-repo
 head, `main` base, and PR head SHA. These endpoints require only the job's
 declared `actions: read`; admin-only protection/ruleset APIs are deliberately
@@ -90,6 +93,21 @@ external readiness operator therefore runs that live audit after every policy
 or repository-settings change, immediately before publishing terminal samorev
 success, immediately before merge, and immediately before creating a release
 tag. Any unreadable or drifting audit blocks the operation.
+
+Immediately before approving a `production` deployment, Nik independently
+proves that the lightweight release tag still targets the protected `main` tip;
+workflow logs are not evidence:
+
+```bash
+tag="vX.Y.Z"
+tag_sha="$(gh api "repos/NikolayS/gitzette/git/ref/tags/$tag" --jq .object.sha)"
+main_sha="$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
+[[ "$tag_sha" == "$main_sha" ]]
+```
+
+An annotated tag is rejected because its ref targets a tag object rather than
+the reviewed commit. A mismatch blocks approval and requires the same external
+identity to delete the bad tag before retrying.
 
 The live GitHub API shape was checked while PR #68 was open at head
 `b55b9da15c142ed35ba9541a3b6652f0f3e631ec`: run `32266543608` reported event
@@ -200,7 +218,8 @@ A GitHub `APPROVED` review is not required evidence; the reviewed branch policy
 requires a pull request with zero approvals instead. For the bootstrap that
 changes this policy, run `bash scripts/apply-branch-protection.sh` from the
 terminal-clean exact reviewed head, rerun its audit, and only then merge that
-same SHA. The apply creates and verifies the admin-only update ruleset before it
+same SHA. The apply creates and verifies the admin-only update ruleset and the
+immutable-user release-tag ruleset before it
 changes formal approval requirements to zero/false, and keeps admin enforcement,
 required technical statuses, required conversations, and force-push/deletion denial.
 

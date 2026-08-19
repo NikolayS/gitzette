@@ -19,40 +19,43 @@ trap audit_partial_apply EXIT
 # Install the non-forgeable update boundary before reducing formal approvals.
 # RepositoryRole 5 is the repository administrator; GitHub Actions is not a
 # bypass actor and therefore cannot update main even if it forges every context.
-if [[ "$(jq '.repository_rulesets | length' "$policy")" -ne 1 ]]; then
-  echo "branch policy must define exactly one main update-restriction ruleset" >&2
+if [[ "$(jq '.repository_rulesets | length' "$policy")" -ne 2 ]]; then
+  echo "branch policy must define exactly the main and release-tag rulesets" >&2
   exit 1
 fi
-ruleset_payload="$(jq -c '.repository_rulesets[0]' "$policy")"
 jq '{allow_auto_merge}' "$policy" | gh api --method PATCH "repos/$repository" --input - --silent
-ruleset_name="$(jq -r .name <<<"$ruleset_payload")"
 ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=false&per_page=100" | jq -c 'add')"
-matching_ids="$(jq -r --arg name "$ruleset_name" '.[] | select(.name == $name) | .id' <<<"$ruleset_summaries")"
-if [[ "$(wc -w <<<"$matching_ids")" -gt 1 ]]; then
-  echo "multiple repository rulesets are named $ruleset_name" >&2
-  exit 1
-fi
-if [[ -n "$matching_ids" ]]; then
-  ruleset_endpoint="repos/$repository/rulesets/$matching_ids"
-  ruleset_method=PUT
-else
-  ruleset_endpoint="repos/$repository/rulesets"
-  ruleset_method=POST
-fi
-ruleset_mutation="$(jq '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload" |
-  gh api --method "$ruleset_method" "$ruleset_endpoint" --input -)"
-ruleset_id="$(jq -er .id <<<"$ruleset_mutation")"
-live_ruleset="$(gh api "repos/$repository/rulesets/$ruleset_id")"
-if [[ "$(jq -r .current_user_can_bypass <<<"$live_ruleset")" != always ]]; then
-  echo "the applying repository administrator does not have the expected ruleset bypass" >&2
-  exit 1
-fi
-normalized_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$live_ruleset")"
-expected_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload")"
-if [[ "$normalized_ruleset" != "$expected_ruleset" ]]; then
-  echo "main update-restriction ruleset did not apply exactly" >&2
-  exit 1
-fi
+while IFS= read -r ruleset_payload; do
+  ruleset_name="$(jq -r .name <<<"$ruleset_payload")"
+  matching_ids="$(jq -r --arg name "$ruleset_name" '.[] | select(.name == $name) | .id' <<<"$ruleset_summaries")"
+  if [[ "$(wc -w <<<"$matching_ids")" -gt 1 ]]; then
+    echo "multiple repository rulesets are named $ruleset_name" >&2
+    exit 1
+  fi
+  if [[ -n "$matching_ids" ]]; then
+    ruleset_endpoint="repos/$repository/rulesets/$matching_ids"
+    ruleset_method=PUT
+  else
+    ruleset_endpoint="repos/$repository/rulesets"
+    ruleset_method=POST
+  fi
+  ruleset_mutation="$(jq '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload" |
+    gh api --method "$ruleset_method" "$ruleset_endpoint" --input -)"
+  ruleset_id="$(jq -er .id <<<"$ruleset_mutation")"
+  live_ruleset="$(gh api "repos/$repository/rulesets/$ruleset_id")"
+  expected_bypass=never
+  [[ "$ruleset_name" != main-admin-only-updates ]] || expected_bypass=always
+  if [[ "$(jq -r .current_user_can_bypass <<<"$live_ruleset")" != "$expected_bypass" ]]; then
+    echo "the applying administrator has an unexpected bypass for $ruleset_name" >&2
+    exit 1
+  fi
+  normalized_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$live_ruleset")"
+  expected_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload")"
+  if [[ "$normalized_ruleset" != "$expected_ruleset" ]]; then
+    echo "$ruleset_name did not apply exactly" >&2
+    exit 1
+  fi
+done < <(jq -c '.repository_rulesets[]' "$policy")
 
 # GitHub's built-in RepositoryRole ID 5 is documented as admin. Prove the
 # effective boundary too: the write-role samo-agent identity must not bypass it.

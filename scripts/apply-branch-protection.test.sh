@@ -34,35 +34,43 @@ case "$endpoint" in
     if [[ "$mode" == nonadmin-zero ]]; then
       printf '[[]]\n'
     elif [[ "$mode" == nonadmin-multiple ]]; then
-      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":43,"name":"main-admin-only-updates"}]]\n'
+      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":43,"name":"main-admin-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
     elif [[ "${GH_TOKEN:-}" == fake-samo-token ]]; then
-      printf '[[{"id":42,"name":"main-admin-only-updates"}]]\n'
+      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
     elif [[ "$mode" == multiple ]]; then
-      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":43,"name":"main-admin-only-updates"}]]\n'
+      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":43,"name":"main-admin-only-updates"},{"id":44,"name":"release-tags-samo-only"}]]\n'
     elif [[ "$mode" == one ]]; then
       printf '[[{"id":42,"name":"main-admin-only-updates"}]]\n'
     else
       printf '[[]]\n'
     fi
     ;;
-  repos/example/gitzette/rulesets|repos/example/gitzette/rulesets/42)
+  repos/example/gitzette/rulesets|repos/example/gitzette/rulesets/42|repos/example/gitzette/rulesets/44)
     if [[ "$*" == *'--method POST'* || "$*" == *'--method PUT'* ]]; then
       printf '%s\n' "$*" >>"$record.mutations"
-      cat >/dev/null
-      printf '{"id":42}\n'
+      payload="$(cat)"
+      id=42
+      [[ "$(jq -r .name <<<"$payload")" != release-tags-samo-only ]] || id=44
+      printf '{"id":%s}\n' "$id"
     else
-      current=always
-      [[ "${GH_TOKEN:-}" != fake-samo-token ]] || current=never
-      [[ "$mode" != admin-never ]] || current=never
-      if [[ "$mode" == nonadmin-bypass || "$mode" == zero || "$mode" == one ]]; then
-        [[ "${GH_TOKEN:-}" != fake-samo-token ]] || current=always
+      index=0; current=always
+      [[ "$endpoint" != */44 ]] || { index=1; current=never; }
+      if [[ "${GH_TOKEN:-}" == fake-samo-token ]]; then
+        current=never
+        [[ "$index" -ne 1 ]] || current=always
+        [[ "$mode" != nonadmin-tag-denied || "$index" -ne 1 ]] || current=never
       fi
-      jq -c --arg current "$current" '.repository_rulesets[0] + {id:42,current_user_can_bypass:$current}' "$FAKE_POLICY" |
-        if [[ "$mode" == mismatch && "${GH_TOKEN:-}" != fake-samo-token ]]; then jq -c '.name="wrong"'; else cat; fi
+      [[ "$mode" != admin-never || "$index" -ne 0 ]] || current=never
+      if [[ "$mode" == nonadmin-bypass || "$mode" == zero || "$mode" == one ]]; then
+        [[ "${GH_TOKEN:-}" != fake-samo-token || "$index" -ne 0 ]] || current=always
+      fi
+      jq -c --arg current "$current" --argjson index "$index" --argjson id "${endpoint##*/}" \
+        '.repository_rulesets[$index] + {id:$id,current_user_can_bypass:$current}' "$FAKE_POLICY" |
+        if [[ "$mode" == mismatch && "$index" -eq 0 && "${GH_TOKEN:-}" != fake-samo-token ]]; then jq -c '.name="wrong"'; else cat; fi
     fi
     ;;
   *rulesets\?includes_parents=true*)
-    printf '[[{"id":42,"name":"main-admin-only-updates","_links":{"self":{"href":"repos/example/gitzette/rulesets/42"}}}]]\n'
+    printf '[[{"id":42,"name":"main-admin-only-updates","_links":{"self":{"href":"repos/example/gitzette/rulesets/42"}}},{"id":44,"name":"release-tags-samo-only","_links":{"self":{"href":"repos/example/gitzette/rulesets/44"}}}]]\n'
     ;;
   *collaborators/samo-agent/permission)
     actor_id=280144521
@@ -147,7 +155,7 @@ run_failure multiple
 run_failure admin-never
 run_failure mismatch
 run_failure nonadmin-bypass
-assert_file_contains "$test_dir/nonadmin-bypass.err" 'samo-agent can bypass'
+assert_file_contains "$test_dir/nonadmin-bypass.err" 'unexpected bypass'
 
 run_nonadmin_failure() {
   mode="$1"
@@ -160,7 +168,7 @@ run_nonadmin_failure() {
     exit 1
   fi
 }
-for mode in nonadmin-admin nonadmin-wrong-id nonadmin-zero nonadmin-multiple; do
+for mode in nonadmin-admin nonadmin-wrong-id nonadmin-zero nonadmin-multiple nonadmin-tag-denied; do
   run_nonadmin_failure "$mode"
 done
 

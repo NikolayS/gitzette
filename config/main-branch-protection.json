@@ -44,6 +44,22 @@
       "rules": [
         { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } }
       ]
+    },
+    {
+      "name": "release-tags-samo-only",
+      "target": "tag",
+      "enforcement": "active",
+      "bypass_actors": [
+        { "actor_id": 280144521, "actor_type": "User", "bypass_mode": "always" }
+      ],
+      "conditions": {
+        "ref_name": { "exclude": [], "include": ["refs/tags/v*"] }
+      },
+      "rules": [
+        { "type": "creation" },
+        { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } },
+        { "type": "deletion" }
+      ]
     }
   ]
 }
