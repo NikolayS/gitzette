@@ -18,9 +18,10 @@ base-controlled publisher parses changed workflows as YAML and rejects any
 merge-base-to-head broadening of `statuses: write`, `checks: write`, or
 `write-all` across trigger, workflow, and job scope. Its tests cover
 aliases/tags/folded values, large files, deletions, empty workflow diffs,
-head-controlled trigger additions, and unchanged existing privilege. This blocks
-a PR from adding a new self-publishing workflow without permanently locking the
-publisher workflow against behavior-only maintenance. The gate still trusts
+head-controlled trigger additions, unchanged existing privilege, and job
+renames. This detects and fails permission/trigger broadening in the
+protected-main publisher; because commit-status context names are overwriteable,
+it is defense in depth rather than a standalone identity anchor. The gate still trusts
 repository administrator credentials, installed Apps, and the identity-checked
 samorev verdict to review behavior changes that retain an existing permission
 set.
@@ -42,8 +43,9 @@ binding means every push, ready/draft transition, reopen, or PR edit requires a
 new verdict.
 
 `samorev-gate` is fail-closed orchestration, not a second identity boundary. It
-publishes pending immediately, retries transient API/malformed-response failures
-three times, and waits up to 30 minutes. A later verdict needs a failed-job
+checks out protected-main code and audits workflow privilege changes before it
+publishes pending, retries transient API/malformed-response failures three
+times, and waits up to 30 minutes. A later verdict needs a failed-job
 rerun. Strict protection means updating the branch creates a new head and
 requires another complete review.
 

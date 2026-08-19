@@ -25,16 +25,19 @@ afterEach(async () => {
 
 describe("base-controlled workflow permission boundary", () => {
   test("resolves YAML spellings and aliases", () => {
-    const sources = [
-      "permissions:\n  statuses:\n    write\njobs: {}\n",
-      "permissions:\n  statuses: >-\n    write\njobs: {}\n",
-      "name: &access write\npermissions: {statuses: *access}\njobs: {}\n",
-      "permissions: {statuses: !!str write}\njobs: {}\n",
-      "permissions: write-all\njobs: {}\n",
-      "permissions: {}\njobs:\n  test:\n    permissions: {checks: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
+    const cases: Array<[string, string[]]> = [
+      ["permissions:\n  statuses:\n    write\njobs: {}\n", ["workflow:statuses"]],
+      ["permissions:\n  statuses: >-\n    write\njobs: {}\n", ["workflow:statuses"]],
+      ["name: &access write\npermissions: {statuses: *access}\njobs: {}\n", ["workflow:statuses"]],
+      ["permissions: {statuses: !!str write}\njobs: {}\n", ["workflow:statuses"]],
+      ["permissions: write-all\njobs: {}\n", ["workflow:checks", "workflow:statuses"]],
+      [
+        "permissions: {}\njobs:\n  test:\n    permissions: {checks: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
+        ["job:checks"],
+      ],
     ];
-    for (const source of sources) {
-      expect(workflowWritePermissions(source).size).toBeGreaterThan(0);
+    for (const [source, expected] of cases) {
+      expect([...workflowWritePermissions(source)].sort()).toEqual(expected);
     }
     expect(() => workflowWritePermissions("permissions: {statuses: execute}\njobs: {}\n"))
       .toThrow("statuses permission");
@@ -59,7 +62,7 @@ describe("base-controlled workflow permission boundary", () => {
     const deleted = await commit(cwd, "deleted workflow");
     expect(() => checkWorkflowChanges(cwd, noWorkflow, deleted)).not.toThrow();
 
-    const large = `on: pull_request_target\npermissions: {statuses: write}\njobs: {}\n# ${"x".repeat(70_000)}\n`;
+    const large = `on:\n  pull_request_target:\n    branches: [main]\n    types: [opened, synchronize]\npermissions: {statuses: write}\njobs: {}\n# ${"x".repeat(70_000)}\n`;
     await Bun.write(join(cwd, ".github/workflows/large.yml"), large);
     const privileged = await commit(cwd, "large privileged workflow");
     expect(() => checkWorkflowChanges(cwd, deleted, privileged)).toThrow("statuses");
@@ -70,7 +73,7 @@ describe("base-controlled workflow permission boundary", () => {
 
     await Bun.write(
       join(cwd, ".github/workflows/large.yml"),
-      large.replace("on: pull_request_target", "on: [pull_request_target, push]"),
+      large.replace("  pull_request_target:\n", "  pull_request_target:\n  push:\n"),
     );
     const broadenedTrigger = await commit(cwd, "broaden trigger");
     expect(() => checkWorkflowChanges(cwd, unchangedPermissions, broadenedTrigger)).toThrow("push");
@@ -93,5 +96,12 @@ describe("base-controlled workflow permission boundary", () => {
     );
     const workflowScoped = await commit(cwd, "workflow-scoped privilege");
     expect(() => checkWorkflowChanges(cwd, jobScoped, workflowScoped)).toThrow("workflow:statuses");
+
+    await Bun.write(
+      join(cwd, ".github/workflows/scoped.yml"),
+      "on: pull_request_target\npermissions: {}\njobs:\n  renamed:\n    permissions: {statuses: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
+    );
+    const renamedJob = await commit(cwd, "rename privileged job");
+    expect(() => checkWorkflowChanges(cwd, jobScoped, renamedJob)).not.toThrow();
   });
 });

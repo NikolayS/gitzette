@@ -32,9 +32,9 @@ export function workflowWritePermissions(source: string): Set<string> {
   const result = permissionsFrom(parsed.permissions, "workflow");
   if (parsed.jobs !== undefined && !isRecord(parsed.jobs)) throw new Error("workflow jobs must be a mapping");
   if (isRecord(parsed.jobs)) {
-    for (const [name, job] of Object.entries(parsed.jobs)) {
+    for (const job of Object.values(parsed.jobs)) {
       if (!isRecord(job)) throw new Error("workflow job must be a mapping");
-      for (const scope of permissionsFrom(job.permissions, `job:${name}`)) result.add(scope);
+      for (const scope of permissionsFrom(job.permissions, "job")) result.add(scope);
     }
   }
   return result;
@@ -48,11 +48,22 @@ function workflowTriggers(source: string): Set<string> {
   throw new Error("workflow on trigger must be a string, array, or mapping");
 }
 
-function workflowPrivileges(source: string): Set<string> {
-  const permissions = workflowWritePermissions(source);
-  const result = new Set<string>();
+function workflowPrivileges(source: string): Map<string, number> {
+  const parsed = parseWorkflow(source);
+  const result = new Map<string, number>();
+  const permissions: string[] = [...permissionsFrom(parsed.permissions, "workflow")];
+  if (parsed.jobs !== undefined && !isRecord(parsed.jobs)) throw new Error("workflow jobs must be a mapping");
+  if (isRecord(parsed.jobs)) {
+    for (const job of Object.values(parsed.jobs)) {
+      if (!isRecord(job)) throw new Error("workflow job must be a mapping");
+      permissions.push(...permissionsFrom(job.permissions, "job"));
+    }
+  }
   for (const trigger of workflowTriggers(source)) {
-    for (const permission of permissions) result.add(`${trigger}|${permission}`);
+    for (const permission of permissions) {
+      const privilege = `${trigger}|${permission}`;
+      result.set(privilege, (result.get(privilege) ?? 0) + 1);
+    }
   }
   return result;
 }
@@ -81,11 +92,15 @@ function workflowAt(cwd: string, sha: string, path: string): string | null {
   return runGit(cwd, ["show", `${sha}:${path}`]);
 }
 
-function privilegeIsCovered(privilege: string, basePrivileges: Set<string>): boolean {
-  if (basePrivileges.has(privilege)) return true;
+function privilegeIsCovered(
+  privilege: string,
+  count: number,
+  basePrivileges: Map<string, number>,
+): boolean {
   const [trigger, permission] = privilege.split("|");
   const parts = permission.split(":");
-  return parts[0] === "job" && basePrivileges.has(`${trigger}|workflow:${parts.at(-1)}`);
+  if (parts[0] === "job" && basePrivileges.has(`${trigger}|workflow:${parts.at(-1)}`)) return true;
+  return (basePrivileges.get(privilege) ?? 0) >= count;
 }
 
 export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: string): void {
@@ -95,9 +110,11 @@ export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: stri
     const headSource = workflowAt(cwd, headSha, path);
     if (headSource === null) continue;
     const baseSource = workflowAt(cwd, baseSha, path);
-    const basePrivileges = baseSource === null ? new Set<string>() : workflowPrivileges(baseSource);
+    const basePrivileges = baseSource === null ? new Map<string, number>() : workflowPrivileges(baseSource);
     const headPrivileges = workflowPrivileges(headSource);
-    const broadened = [...headPrivileges].filter((scope) => !privilegeIsCovered(scope, basePrivileges));
+    const broadened = [...headPrivileges]
+      .filter(([scope, count]) => !privilegeIsCovered(scope, count, basePrivileges))
+      .map(([scope]) => scope);
     if (broadened.length > 0) {
       throw new Error(`PR broadens privileged workflow permissions in ${path}: ${broadened.join(", ")}`);
     }
