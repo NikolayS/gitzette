@@ -13,7 +13,8 @@ afterEach(async () => {
 });
 
 type FakeWranglerMode = "success" | "failure" | "empty";
-type WrapperInvocation = "bash-absolute" | "bash-bare" | "bash-relative" | "direct-absolute" | "direct-relative";
+type WrapperInvocation = "bash-absolute" | "bash-bare" | "bash-path" | "bash-relative"
+  | "direct-absolute" | "direct-relative";
 type SecretCheckOptions = {
   adversarialCdPath?: boolean;
   includeToken?: boolean;
@@ -64,6 +65,7 @@ esac
 
   const environment: Record<string, string> = {
     PATH: [
+      invocation === "bash-path" ? dirname(scriptPath) : undefined,
       join(root, "node_modules", ".bin"),
       dirname(process.execPath),
       process.env.PATH,
@@ -89,6 +91,9 @@ esac
     case "bash-bare":
       command = ["bash", scriptPath.split("/").at(-1) ?? scriptPath];
       cwd = dirname(scriptPath);
+      break;
+    case "bash-path":
+      command = ["bash", scriptPath.split("/").at(-1) ?? scriptPath];
       break;
     case "bash-relative":
       command = ["bash", "scripts/check-production-secrets.sh"];
@@ -244,6 +249,32 @@ describe("production secret preflight", () => {
     expect(exitCode).toBe(1);
     expect(stdout).toBe("");
     expect(stderr).toContain("must be executed, not sourced");
+  });
+
+  test("fails loudly when piped to bash instead of executed by path", async () => {
+    const wrapper = join(repoRoot, "scripts", "check-production-secrets.sh");
+    const child = Bun.spawn(["bash", "-c", `bash < "$1"`, "--", wrapper], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("must be executed from its checked-in path, not piped to bash");
+  });
+
+  test("uses Bash's resolved path for a bare PATH invocation", async () => {
+    const result = await runRawSecretCheck(
+      JSON.stringify(expectedProductionSecrets.map(name => ({ name }))),
+      { invocation: "bash-path" },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.fakeInvoked).toBe(true);
+    expect(result.stdout).toContain("Production secrets OK");
   });
 
   test("requires the secret-list argv path", async () => {

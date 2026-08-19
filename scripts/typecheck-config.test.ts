@@ -38,34 +38,27 @@ describe("TypeScript project coverage", () => {
     const testCommand = runnerCommand?.split(/\s*&&\s*/)
       .find(command => /^bun\s+test(?:\s|$)/.test(command.trim()));
     expect(testCommand).toBeDefined();
-    const argumentSource = testCommand?.trim().replace(/^bun\s+test(?:\s+|$)/, "") ?? "";
-    expect(argumentSource.length).toBeGreaterThan(0);
-    expect(argumentSource).toMatch(/^[A-Za-z0-9_./*?\[\]{} -]+$/);
-    const child = Bun.spawn(["bash", "-c", `printf '%s\\0' ${argumentSource}`], {
-      cwd: resolve("."),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).arrayBuffer(),
-      new Response(child.stderr).text(),
-    ]);
-    if (exitCode !== 0) {
-      throw new Error(`unable to expand configured test selectors (${exitCode}): ${stderr}`);
-    }
-    const expandedArguments = new TextDecoder().decode(stdout).split("\0").filter(Boolean);
+    const tokens = testCommand?.trim().match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"])*"|'[^']*')+/g) ?? [];
+    expect(tokens.slice(0, 2)).toEqual(["bun", "test"]);
+    const unquote = (token: string) => token.replace(/^(['"])([\s\S]*)\1$/, "$2").replace(/\\(.)/g, "$1");
+    const expandedArguments = tokens.slice(2).map(unquote);
     expect(expandedArguments.some(argument => argument === "-t"
       || argument === "--only"
       || argument.startsWith("--test-name-pattern"))).toBe(false);
     const selectors = expandedArguments.filter(argument => !argument.startsWith("-"));
-    expect(selectors.length).toBeGreaterThan(0);
     const discovered = ts.sys.readDirectory(resolve("scripts"), [".ts"], undefined, ["*.test.ts"], 1);
     expect(discovered.length).toBeGreaterThan(0);
+    if (selectors.length === 0) return;
+    const globMatches = new Set(
+      selectors.filter(selector => /[*?\[\]{}]/.test(selector)).flatMap(selector => [
+        ...new Bun.Glob(selector).scanSync({ cwd: resolve("."), absolute: true }),
+      ]).map(name => resolve(name)),
+    );
     for (const name of discovered) {
       const repoRelativeName = relative(resolve("."), resolve(name));
       expect(
-        selectors.some(selector => repoRelativeName === selector || repoRelativeName.includes(selector)),
+        globMatches.has(resolve(name))
+          || selectors.some(selector => !/[*?\[\]{}]/.test(selector) && repoRelativeName.includes(selector)),
         `script test not selected by test:runner: ${name}`,
       ).toBe(true);
     }
