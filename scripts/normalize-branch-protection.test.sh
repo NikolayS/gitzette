@@ -7,7 +7,7 @@ rulesets='[]'
 protection='{
   "required_status_checks":{"strict":true,"checks":[{"context":"typecheck","app_id":15368},{"context":"samorev-gate","app_id":15368},{"context":"samorev","app_id":null}]},
   "enforce_admins":{"enabled":true},
-  "required_pull_request_reviews":{"dismiss_stale_reviews":true,"require_code_owner_reviews":true,"required_approving_review_count":1,"require_last_push_approval":true},
+  "required_pull_request_reviews":{"dismiss_stale_reviews":false,"require_code_owner_reviews":false,"required_approving_review_count":0,"require_last_push_approval":false},
   "required_conversation_resolution":{"enabled":true},
   "allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":false},
   "required_linear_history":{"enabled":false},"required_signatures":{"enabled":false},
