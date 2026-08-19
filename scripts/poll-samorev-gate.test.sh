@@ -41,4 +41,11 @@ IS_DRAFT=true SAMOREV_FETCH_FIXTURE=/dev/null SAMOREV_MAX_ATTEMPTS=1 \
   exit 1
 }
 
+source_rc=0
+bash -c 'source "$1"' _ "$root/scripts/poll-samorev-gate.sh" >/dev/null 2>&1 || source_rc=$?
+[[ "$source_rc" == 1 ]] || { echo "sourced poller returned $source_rc" >&2; exit 1; }
+stdin_rc=0
+bash <"$root/scripts/poll-samorev-gate.sh" >/dev/null 2>&1 || stdin_rc=$?
+[[ "$stdin_rc" == 1 ]] || { echo "stdin poller returned $stdin_rc" >&2; exit 1; }
+
 echo "samorev gate polling tests passed"

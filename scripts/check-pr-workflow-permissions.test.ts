@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkWorkflowChanges, workflowWritePermissions } from "./check-pr-workflow-permissions";
@@ -24,6 +24,16 @@ afterEach(async () => {
 });
 
 describe("base-controlled workflow permission boundary", () => {
+  test("keeps protected write authority in the base-controlled publisher only", async () => {
+    const privileged: Record<string, string[]> = {};
+    for (const name of await readdir(".github/workflows")) {
+      const source = await Bun.file(join(".github/workflows", name)).text();
+      const permissions = [...workflowWritePermissions(source)].sort();
+      if (permissions.length > 0) privileged[name] = permissions;
+    }
+    expect(privileged).toEqual({ "samorev-gate.yml": ["workflow:statuses"] });
+  });
+
   test("resolves YAML spellings and aliases", () => {
     const cases: Array<[string, string[]]> = [
       ["permissions:\n  statuses:\n    write\njobs: {}\n", ["workflow:statuses"]],

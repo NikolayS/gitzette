@@ -1,2 +1,2 @@
-# Advisory review routing; branch protection requires zero formal approvals.
+# Advisory review routing; see docs/review-gate.md for the gate.
 * @samo-agent

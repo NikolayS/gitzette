@@ -52,11 +52,13 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain("pull_request:");
     expect(workflow).not.toContain("pull_request_target:");
     expect(workflow).not.toContain("push:");
+    expect(workflow).toContain("if: github.actor == 'NikolayS'");
     expect(workflow).toContain("    environment: production");
     expect(workflow).toContain("  contents: read");
     expect(workflow).not.toContain("actions/checkout");
     expect(workflow).toContain("rsa_padding_mode:oaep");
     expect(workflow).toContain("rsa_oaep_md:sha256");
+    expect(workflow).toContain("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
     expect(workflow).toContain("encrypted_credentials=%s");
   });
 });

@@ -11,9 +11,13 @@ set -euo pipefail
 endpoint="${*: -1}"
 case "$endpoint" in
   repos/example/gitzette/environments/production)
-    if [[ "${FAKE_POLICY_MODE:-ok}" == wrong-reviewer ]]; then reviewer_id=1345402; reviewer_login=NikolayS; else reviewer_id=280144521; reviewer_login=samo-agent; fi
-    jq -n --argjson reviewer_id "$reviewer_id" --arg reviewer_login "$reviewer_login" '{
-      protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:$reviewer_id,login:$reviewer_login}}]}],
+    if [[ "${FAKE_POLICY_MODE:-ok}" == wrong-reviewer ]]; then
+      reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
+    else
+      reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
+    fi
+    jq -n --argjson reviewers "$reviewers" '{
+      protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:$reviewers}],
       deployment_branch_policy:{protected_branches:false,custom_branch_policies:true}
     }'
     ;;

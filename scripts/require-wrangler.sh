@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
-readonly gitzette_invocation_directory="$PWD"
+if [[ -n "${gitzette_require_wrangler_loaded:-}" ]]; then
+  return 0
+fi
+readonly gitzette_require_wrangler_loaded=1
+gitzette_invocation_directory="$(CDPATH='' cd -P -- "$PWD" >/dev/null && pwd)"
+readonly gitzette_invocation_directory
 gitzette_scripts_directory="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 readonly gitzette_scripts_directory
 gitzette_repo_root="$(CDPATH='' cd -P -- "$gitzette_scripts_directory/.." >/dev/null && pwd)"

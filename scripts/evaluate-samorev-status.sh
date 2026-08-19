@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "evaluate-samorev-status.sh must be executed by path, not sourced or piped to Bash" >&2
+  exit 1
+fi
 set -euo pipefail
 
 # samo-agent; verified with: gh api users/samo-agent --jq .id

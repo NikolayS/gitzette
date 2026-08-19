@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,6 +135,30 @@ describe("production migration credential guards", () => {
 
     for (const script of ["check-production-baseline.sh", "check-schema.sh", "e2e.sh"]) {
       expect(await Bun.file(`${repoRoot}/scripts/${script}`).text()).toContain("gitzette_require_local");
+    }
+  });
+
+  test("the shared Wrangler guard is idempotent and records a physical invocation directory", async () => {
+    const root = await mkdtemp(join(process.env.RUNNER_TEMP || tmpdir(), "wrangler-helper-"));
+    const linkedRepo = join(root, "repo");
+    try {
+      await symlink(repoRoot, linkedRepo, "dir");
+      const helperPath = `${repoRoot}/scripts/require-wrangler.sh`;
+      const child = Bun.spawn([
+        "bash", "-c",
+        'set -euo pipefail; cd -L "$1"; source "$2"; source "$2"; printf "%s" "$gitzette_invocation_directory"',
+        "helper-probe", linkedRepo, helperPath,
+      ], { stdout: "pipe", stderr: "pipe" });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe("");
+      expect(stdout).toBe(repoRoot);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
