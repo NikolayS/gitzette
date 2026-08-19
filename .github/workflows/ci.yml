@@ -20,6 +20,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install image validation runtime
         run: |
+          sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
           sudo apt-get update
           sudo apt-get install -y \
             imagemagick=8:6.9.12.98+dfsg1-5.2build2 \
