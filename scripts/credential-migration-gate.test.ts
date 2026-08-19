@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createHash, createPublicKey } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +28,10 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_MIGRATION_OPEN }}");
     expect(workflow).toContain("    needs: authorize-export");
     expect(workflow).toContain("    environment: credential-migration");
+    expect(workflow).toContain("  verify-production-credentials:");
+    expect(workflow).toContain("    if: ${{ inputs.operation == 'verify' }}");
+    expect(workflow).toContain("    environment: production");
+    expect(workflow).toContain("both production environment credentials must be present");
     expect(workflow).toContain("both Cloudflare repository secrets must be present");
     expect(workflow).toContain("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
     expect(workflow).toContain("rsa_mgf1_md:sha256");
@@ -36,7 +40,8 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("retention-days: 1");
     expect(workflow).not.toContain("encrypted_credentials=");
     expect(workflow).not.toContain("set -x");
-    expect(workflow).not.toMatch(/CLOUDFLARE_[A-Z_]+.*(?:GITHUB_OUTPUT|GITHUB_ENV)/);
+    expect(workflow).not.toContain("GITHUB_OUTPUT");
+    expect(workflow).not.toContain("GITHUB_ENV");
     expect(workflow).not.toContain("credentials.json");
     expect(workflow).toContain("permissions: {}");
     expect(policy.can_admins_bypass).toBe(false);
@@ -51,16 +56,27 @@ describe("one-shot credential migration boundary", () => {
       .update(publicKey.export({ type: "spki", format: "der" }))
       .digest("hex");
     expect(fingerprint).toBe("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
+    const migrationDoc = await Bun.file("docs/credential-migration.md").text();
+    const documentedFingerprints = migrationDoc.match(/[0-9a-f]{64}/g) ?? [];
+    expect(documentedFingerprints.length).toBeGreaterThan(0);
+    expect([...new Set(documentedFingerprints)]).toEqual([fingerprint]);
 
     const authorizeRun = parsed.jobs["authorize-export"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
     const revalidateRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Revalidate"))?.run;
+    const exportRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Export only"))?.run;
     expect(authorizeRun).toBeDefined();
     expect(revalidateRun).toBeDefined();
+    expect(exportRun).toBeDefined();
     const gateRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-gate-"));
     const gateBin = join(gateRoot, "bin");
     await mkdir(gateBin);
     const curl = join(gateBin, "curl");
-    await Bun.write(curl, "#!/usr/bin/env bash\nset -euo pipefail\nprintf '{\"id\":%s}\\n' \"${FAKE_ACTOR_ID:-280144521}\"\n");
+    await Bun.write(curl, `#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "\${FAKE_CURL_RECORD:-}" ]]; then printf '%s\\n' "$@" >"$FAKE_CURL_RECORD.args"; cat >"$FAKE_CURL_RECORD.stdin"; else cat >/dev/null; fi
+[[ "\${FAKE_CURL_FAIL:-false}" != true ]] || exit 22
+printf '{"id":%s}\\n' "\${FAKE_ACTOR_ID:-280144521}"
+`);
     await Bun.spawn(["chmod", "+x", curl]).exited;
     const execute = async (run: string | undefined, overrides: Record<string, string | undefined> = {}): Promise<number> => {
       const env: Record<string, string> = {
@@ -70,6 +86,7 @@ describe("one-shot credential migration boundary", () => {
         TRIGGERING_ACTOR: "samo-agent",
         DISPATCH_REF: "refs/heads/main",
         RUN_ATTEMPT: "1",
+        OPERATION: "export",
         MIGRATION_OPEN: "true",
         GH_TOKEN: "fake",
       };
@@ -88,7 +105,52 @@ describe("one-shot credential migration boundary", () => {
       expect(await execute(run, { MIGRATION_OPEN: "True" })).toBe(1);
       expect(await execute(run, { MIGRATION_OPEN: "true " })).toBe(1);
     }
+    expect(await execute(authorizeRun, { OPERATION: "attacker" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_ACTOR_ID: "1" })).toBe(1);
+    const curlRecord = join(gateRoot, "curl-record");
+    expect(await execute(revalidateRun, { FAKE_CURL_RECORD: curlRecord })).toBe(0);
+    const curlArgs = await Bun.file(`${curlRecord}.args`).text();
+    const curlStdin = await Bun.file(`${curlRecord}.stdin`).text();
+    expect(curlArgs).toContain("--config\n-\n");
+    expect(curlArgs).toContain("https://api.github.com/users/samo-agent");
+    expect(curlArgs).not.toContain("fake");
+    expect(curlStdin).toBe('header = "Authorization: Bearer fake"\n');
+    expect(await execute(revalidateRun, { FAKE_CURL_FAIL: "true" })).not.toBe(0);
+
+    const throwaway = generateKeyPairSync("rsa", { modulusLength: 4096 });
+    const throwawayPublicPem = throwaway.publicKey.export({ type: "spki", format: "pem" }).toString();
+    const throwawayPublicDer = throwaway.publicKey.export({ type: "spki", format: "der" });
+    const throwawayFingerprint = createHash("sha256").update(throwawayPublicDer).digest("hex");
+    const throwawayRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-export-"));
+    const privatePath = join(throwawayRoot, "private.pem");
+    await Bun.write(privatePath, throwaway.privateKey.export({ type: "pkcs8", format: "pem" }));
+    const executableExport = (exportRun ?? "exit 99").replace(fingerprint, throwawayFingerprint);
+    const exportEnv = {
+      ...process.env,
+      RUNNER_TEMP: throwawayRoot,
+      RSA_PUBLIC_KEY_PEM_B64: Buffer.from(throwawayPublicPem).toString("base64"),
+      CLOUDFLARE_ACCOUNT_ID: "exact-account",
+      CLOUDFLARE_API_TOKEN: "exact-token",
+    };
+    expect(await Bun.spawn(["bash", "-c", executableExport], { env: exportEnv, stdout: "pipe", stderr: "pipe" }).exited).toBe(0);
+    const encryptedPath = join(throwawayRoot, "gitzette-credential-migration", "credentials.bin");
+    const decrypted = Bun.spawnSync({
+      cmd: ["openssl", "pkeyutl", "-decrypt", "-inkey", privatePath,
+        "-pkeyopt", "rsa_padding_mode:oaep", "-pkeyopt", "rsa_oaep_md:sha256", "-pkeyopt", "rsa_mgf1_md:sha256",
+        "-in", encryptedPath],
+      stdout: "pipe", stderr: "pipe",
+    });
+    expect(decrypted.exitCode).toBe(0);
+    expect(JSON.parse(new TextDecoder().decode(decrypted.stdout))).toEqual({
+      CLOUDFLARE_ACCOUNT_ID: "exact-account",
+      CLOUDFLARE_API_TOKEN: "exact-token",
+    });
+    expect(await Bun.spawn(["bash", "-c", executableExport], {
+      env: { ...exportEnv, CLOUDFLARE_API_TOKEN: "" }, stdout: "pipe", stderr: "pipe",
+    }).exited).toBe(1);
+    expect(await Bun.spawn(["bash", "-c", exportRun ?? "exit 99"], {
+      env: exportEnv, stdout: "pipe", stderr: "pipe",
+    }).exited).toBe(1);
   });
 
   test("executes the reviewed environment policy against live-response shapes", async () => {
@@ -126,6 +188,12 @@ case "$endpoint" in
       printf '%s\\n' '[{"branch_policies":[{"name":"main","type":"branch"}]}]'
     fi
     ;;
+  *credential-migration/variables*)
+    if [[ "\${FAKE_MODE:-ok}" == environment-variable ]]; then printf '%s\\n' '[{"variables":[{"name":"CREDENTIAL_MIGRATION_OPEN","value":"true"}]}]'; else printf '%s\\n' '[{"variables":[]}]'; fi
+    ;;
+  *credential-migration/secrets*)
+    if [[ "\${FAKE_MODE:-ok}" == environment-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"SHADOW"}]}]'; else printf '%s\\n' '[{"secrets":[]}]'; fi
+    ;;
   *) exit 91 ;;
 esac
 `);
@@ -147,6 +215,8 @@ esac
     expect(await run("wait-timer")).toBe(1);
     expect(await run("protected-branches")).toBe(1);
     expect(await run("admin-bypass")).toBe(1);
+    expect(await run("environment-variable")).toBe(1);
+    expect(await run("environment-secret")).toBe(1);
     expect(await run("missing")).toBe(1);
 
     const apply = await Bun.file("scripts/apply-credential-migration-environment.sh").text();
@@ -175,12 +245,18 @@ case "$endpoint" in
     ;;
   *deployment-branch-policies*)
     count_file="$FAKE_RECORD/policy-count"; count=0; [[ ! -f "$count_file" ]] || count="$(<"$count_file")"; count=$((count + 1)); printf '%s' "$count" >"$count_file"
-    if [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 1 ]]; then
+    if [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 2 ]]; then
+      printf '%s\\n' '[{"branch_policies":[]}]'
+    elif [[ "\${FAKE_MODE:-correct}" == duplicate && "$count" -eq 1 ]]; then
+      printf '%s\\n' '[{"branch_policies":[{"id":10,"name":"main","type":"branch"},{"id":11,"name":"main","type":"branch"}]}]'
+    elif [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[{"id":9,"name":"other","type":"branch"}]}]'
     else
       printf '%s\\n' '[{"branch_policies":[{"id":10,"name":"main","type":"branch"}]}]'
     fi
     ;;
+  *credential-migration/variables*) printf '%s\\n' '[{"variables":[]}]' ;;
+  *credential-migration/secrets*) printf '%s\\n' '[{"secrets":[]}]' ;;
   *) exit 91 ;;
 esac
 `);
@@ -205,5 +281,10 @@ esac
     expect(await run("correct", correct)).toBe(0);
     expect(await Bun.file(join(correct, "delete.log")).exists()).toBe(false);
     expect(await Bun.file(join(correct, "post.log")).exists()).toBe(false);
+
+    const duplicate = join(root, "duplicate");
+    expect(await run("duplicate", duplicate)).toBe(0);
+    expect(await Bun.file(join(duplicate, "delete.log")).text()).toContain("deployment-branch-policies/11");
+    expect(await Bun.file(join(duplicate, "post.log")).exists()).toBe(false);
   });
 });

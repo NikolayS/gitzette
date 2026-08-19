@@ -14,6 +14,12 @@ if ! environment="$(gh api "repos/$repository/environments/credential-migration"
   exit 1
 fi
 policies="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+variables="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
+secrets="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
+if [[ "$(jq -r 'length' <<<"$variables")" -ne 0 || "$(jq -r 'length' <<<"$secrets")" -ne 0 ]]; then
+  echo "credential-migration environment must not define variables or secrets" >&2
+  exit 1
+fi
 expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$policies" '{
   wait_timer: ([ $environment.protection_rules[] | select(.type == "wait_timer") | .wait_timer ][0] // 0),
