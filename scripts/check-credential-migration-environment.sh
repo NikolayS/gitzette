@@ -9,8 +9,11 @@ set -euo pipefail
 root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 policy="$root/config/credential-migration-environment.json"
-if ! environment="$(gh api "repos/$repository/environments/credential-migration" 2>/dev/null)"; then
-  echo "credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh" >&2
+error_file="$(mktemp)"
+trap 'rm -f "$error_file"' EXIT
+if ! environment="$(gh api "repos/$repository/environments/credential-migration" 2>"$error_file")"; then
+  echo "unable to read credential-migration environment; apply only after resolving this API error:" >&2
+  sed 's/^/  /' "$error_file" >&2
   exit 1
 fi
 policies="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"

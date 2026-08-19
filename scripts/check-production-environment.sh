@@ -29,4 +29,4 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-echo "Production environment OK: two-person approval and v* tag restriction are active"
+echo "Production environment OK: two-person approval and reviewed tag restrictions are active"

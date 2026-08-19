@@ -45,9 +45,12 @@ and environment in the same recovery cycle. After its stored-value verification
 and repository-copy deletion, deployment credentials are available only to the
 protected `production` environment; tag-triggered deploys require that
 environment's approval.
-Stored-value verification temporarily admits `main` to `production`; the
-runbook installs an exit trap that removes that policy and reapplies/audits the
-reviewed production configuration on every exit path.
+The exporter writes only RSA-encrypted ciphertext to a transient table in the
+private D1 database; no public Actions artifact is created. Stored-value
+verification uses the exact non-release tag `credential-migration-verify`,
+which is included in the reviewed temporary production policy and must resolve
+to the current protected `main` tip. No out-of-band production-policy widening
+or trap-based restoration is required.
 
 ## Artifact cleanup recovery
 

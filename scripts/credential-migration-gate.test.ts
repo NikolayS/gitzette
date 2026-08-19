@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 describe("one-shot credential migration boundary", () => {
-  test("pins dispatcher, rerun actor, environment, encryption, and artifact lifetime", async () => {
+  test("pins dispatcher, approvals, encryption, and private transfer storage", async () => {
     const workflow = await Bun.file(".github/workflows/migrate-production-credentials.yml").text();
     const policy = JSON.parse(await Bun.file("config/credential-migration-environment.json").text()) as {
       can_admins_bypass: boolean;
@@ -15,6 +15,7 @@ describe("one-shot credential migration boundary", () => {
     };
     const parsed = Bun.YAML.parse(workflow) as {
       on: Record<string, unknown>;
+      concurrency: { group: string; "cancel-in-progress": boolean };
       jobs: Record<string, {
         needs?: string;
         environment?: string;
@@ -23,13 +24,13 @@ describe("one-shot credential migration boundary", () => {
       }>;
     };
     expect(Object.keys(parsed.on)).toEqual(["workflow_dispatch"]);
+    expect(parsed.concurrency).toEqual({ group: "credential-migration", "cancel-in-progress": false });
     expect(workflow).toContain('[[ "$DISPATCHER_ID" != "280144521" ]]');
     expect(workflow).toContain('[[ "$TRIGGERING_ACTOR" != "samo-agent" ]]');
-    expect(workflow).toContain('[[ "$DISPATCH_REF" != "refs/heads/main" ]]');
+    expect(workflow).toContain('"$DISPATCH_REF" != "refs/heads/main"');
+    expect(workflow).toContain('"$DISPATCH_REF" != "refs/tags/credential-migration-verify"');
     expect(workflow).toContain('[[ "$RUN_ATTEMPT" != "1" ]]');
     expect(workflow.match(/MIGRATION_OPEN: \$\{\{ vars\.CREDENTIAL_MIGRATION_OPEN \}\}/g)?.length).toBe(3);
-    expect(workflow).toContain('triggering_actor_id="$(curl');
-    expect(workflow).toContain('[[ "$triggering_actor_id" != "280144521" ]]');
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_MIGRATION_OPEN }}");
     expect(workflow).toContain("    needs: authorize-export");
     expect(workflow).toContain("    environment: credential-migration");
@@ -40,9 +41,10 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("both Cloudflare repository secrets must be present");
     expect(workflow).toContain("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
     expect(workflow).toContain("rsa_mgf1_md:sha256");
-    expect(workflow).toContain("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
-    expect(workflow).toContain("name: encrypted-credentials-${{ github.run_id }}-${{ github.run_attempt }}");
-    expect(workflow).toContain("retention-days: 1");
+    expect(workflow).toContain("credential_migration_transfer");
+    expect(workflow).toContain("4a3624d7-7de8-46d5-91f5-7ee79856ccaa");
+    expect(workflow).not.toContain("actions/upload-artifact");
+    expect(workflow).not.toContain("retention-days:");
     expect(workflow).not.toContain("encrypted_credentials=");
     expect(workflow).not.toContain("set -x");
     expect(workflow).not.toContain("GITHUB_OUTPUT");
@@ -53,14 +55,26 @@ describe("one-shot credential migration boundary", () => {
     expect(parsed.jobs["export-encrypted-credentials"].environment).toBe("credential-migration");
     expect(parsed.jobs["verify-production-credentials"].needs).toBe("authorize-export");
     expect(parsed.jobs["verify-production-credentials"].environment).toBe("production");
+    for (const name of ["export-encrypted-credentials", "verify-production-credentials"]) {
+      const jobRun = parsed.jobs[name].steps.map(({ run }) => run ?? "").join("\n");
+      expect(jobRun).toContain('triggering_actor_id="$(curl');
+      expect(jobRun).toContain('[[ "$triggering_actor_id" != "280144521" ]]');
+      expect(jobRun).toContain(`/actions/runs/$GITHUB_RUN_ID/approvals`);
+      expect(jobRun).toContain('.state == "approved" and .user.id == 1345402');
+    }
     expect(policy.can_admins_bypass).toBe(false);
     expect(policy.prevent_self_review).toBe(true);
     expect(policy.reviewers.map(({ id }) => id)).toEqual([1345402]);
     expect(policy.branch_policies).toEqual([{ name: "main", type: "branch" }]);
     const productionPolicy = JSON.parse(await Bun.file("config/production-environment.json").text()) as {
       can_admins_bypass: boolean;
+      branch_policies: Array<{ name: string; type: string }>;
     };
     expect(productionPolicy.can_admins_bypass).toBe(false);
+    expect(productionPolicy.branch_policies).toEqual([
+      { name: "v*", type: "tag" },
+      { name: "credential-migration-verify", type: "tag" },
+    ]);
     expect(await Bun.file("scripts/apply-production-environment.sh").text()).toContain("can_admins_bypass");
     expect(await Bun.file("scripts/check-production-environment.sh").text()).toContain("can_admins_bypass: $environment.can_admins_bypass");
 
@@ -75,10 +89,13 @@ describe("one-shot credential migration boundary", () => {
     const documentedFingerprints = migrationDoc.match(/[0-9a-f]{64}/g) ?? [];
     expect(documentedFingerprints.length).toBeGreaterThan(0);
     expect([...new Set(documentedFingerprints)]).toEqual([fingerprint]);
+    expect(migrationDoc).toContain("-v2 aes-256-cbc");
+    expect(migrationDoc).toContain("$MIGRATION_KEY_DIR/production-migration-private.pem");
+    expect(migrationDoc).not.toContain("/home/tars/");
 
     const authorizeRun = parsed.jobs["authorize-export"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
     const revalidateRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Revalidate"))?.run;
-    const exportRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Export only"))?.run;
+    const exportRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Export encrypted"))?.run;
     const verifyApprovalRun = parsed.jobs["verify-production-credentials"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
     const verifyCredentialsRun = parsed.jobs["verify-production-credentials"].steps.find(({ name }) => name?.startsWith("Verify stored"))?.run;
     expect(authorizeRun).toBeDefined();
@@ -101,8 +118,10 @@ if [[ "$arguments" == *'/approvals'* ]]; then
   fi
 elif [[ "$arguments" == *'api.github.com/users/'* ]]; then
   printf '{"id":%s}\\n' "\${FAKE_ACTOR_ID:-280144521}"
+elif [[ "$arguments" == *'/commits/main'* ]]; then
+  printf '{"sha":"%s"}\\n' "\${FAKE_MAIN_SHA:-exact-sha}"
 else
-  printf '{"success":%s}\\n' "\${FAKE_CF_SUCCESS:-true}"
+  printf '{"success":%s,"result":[{"success":%s},{"success":%s}]}\\n' "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_CF_SUCCESS:-true}"
 fi
 `);
     await Bun.spawn(["chmod", "+x", curl]).exited;
@@ -119,6 +138,8 @@ fi
         GH_TOKEN: "fake",
         GITHUB_REPOSITORY: "example/gitzette",
         GITHUB_RUN_ID: "77",
+        GITHUB_SHA: "exact-sha",
+        DISPATCH_SHA: "exact-sha",
       };
       for (const [name, value] of Object.entries(overrides)) {
         if (value === undefined) delete env[name]; else env[name] = value;
@@ -151,13 +172,17 @@ fi
     expect(curlArgs).not.toContain("fake");
     expect(curlStdin.match(/header = "Authorization: Bearer fake"/g)?.length).toBe(2);
     expect(await execute(revalidateRun, { FAKE_CURL_FAIL: "true" })).not.toBe(0);
-    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production" })).toBe(0);
-    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "other" })).toBe(1);
-    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", FAKE_APPROVER_ID: "1" })).toBe(1);
-    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", FAKE_APPROVAL_STATE: "rejected" })).toBe(1);
-    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", FAKE_APPROVAL_EMPTY: "true" })).toBe(1);
-    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", MIGRATION_OPEN: "false" })).toBe(1);
-    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", DISPATCH_REF: "refs/heads/other" })).toBe(1);
+    const verify = { OPERATION: "verify", DISPATCH_REF: "refs/tags/credential-migration-verify", FAKE_APPROVAL_ENV: "production" };
+    expect(await execute(authorizeRun, verify)).toBe(0);
+    expect(await execute(authorizeRun, { ...verify, GITHUB_SHA: "stale" })).toBe(1);
+    expect(await execute(verifyApprovalRun, verify)).toBe(0);
+    expect(await execute(verifyApprovalRun, { ...verify, FAKE_APPROVAL_ENV: "other" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { ...verify, FAKE_APPROVER_ID: "1" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { ...verify, FAKE_APPROVAL_STATE: "rejected" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { ...verify, FAKE_APPROVAL_EMPTY: "true" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { ...verify, MIGRATION_OPEN: "false" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { ...verify, DISPATCH_REF: "refs/heads/other" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { ...verify, DISPATCH_SHA: "stale" })).toBe(1);
     expect(await execute(verifyCredentialsRun, {
       CLOUDFLARE_ACCOUNT_ID: "exact-account", CLOUDFLARE_API_TOKEN: "exact-token",
     })).toBe(0);
@@ -185,6 +210,9 @@ fi
       RSA_PUBLIC_KEY_PEM_B64: Buffer.from(throwawayPublicPem).toString("base64"),
       CLOUDFLARE_ACCOUNT_ID: "exact-account",
       CLOUDFLARE_API_TOKEN: "exact-token",
+      CLOUDFLARE_D1_DATABASE_ID: "exact-database",
+      GITHUB_RUN_ID: "77",
+      PATH: `${gateBin}:${process.env.PATH}`,
     };
     expect(await Bun.spawn(["bash", "-c", executableExport], { env: exportEnv, stdout: "pipe", stderr: "pipe" }).exited).toBe(0);
     const encryptedPath = join(throwawayRoot, "gitzette-credential-migration", "credentials.bin");
@@ -199,6 +227,12 @@ fi
       CLOUDFLARE_ACCOUNT_ID: "exact-account",
       CLOUDFLARE_API_TOKEN: "exact-token",
     });
+    const d1Request = JSON.parse(await Bun.file(join(throwawayRoot, "gitzette-credential-migration", "d1-request.json")).text());
+    expect(d1Request.batch).toHaveLength(2);
+    expect(d1Request.batch[0].sql).toContain("create table credential_migration_transfer");
+    expect(d1Request.batch[1].sql).toContain("insert into credential_migration_transfer");
+    expect(d1Request.batch[1].params[0]).toBe("77");
+    expect(d1Request.batch[1].params[1]).toBe(Buffer.from(await Bun.file(encryptedPath).arrayBuffer()).toString("base64"));
     expect(await Bun.spawn(["bash", "-c", executableExport], {
       env: { ...exportEnv, CLOUDFLARE_API_TOKEN: "" }, stdout: "pipe", stderr: "pipe",
     }).exited).toBe(1);
@@ -217,7 +251,7 @@ set -euo pipefail
 endpoint="\${*: -1}"
 case "$endpoint" in
   repos/example/gitzette/environments/credential-migration)
-    [[ "\${FAKE_MODE:-ok}" != missing ]] || exit 1
+    [[ "\${FAKE_MODE:-ok}" != missing ]] || { echo "fake API failure" >&2; exit 1; }
     reviewer_id=1345402; reviewer_login=NikolayS; prevent=true; admin_bypass=false; wait_timer=0; protected=false
     [[ "\${FAKE_MODE:-ok}" != reviewer ]] || { reviewer_id=280144521; reviewer_login=samo-agent; }
     [[ "\${FAKE_MODE:-ok}" != self-review ]] || prevent=false
@@ -272,6 +306,15 @@ esac
     expect(await run("environment-variable")).toBe(1);
     expect(await run("environment-secret")).toBe(1);
     expect(await run("missing")).toBe(1);
+    const missing = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "missing" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const missingStderr = await new Response(missing.stderr).text();
+    expect(await missing.exited).toBe(1);
+    expect(missingStderr).toContain("unable to read credential-migration environment");
+    expect(missingStderr).toContain("fake API failure");
 
     const apply = await Bun.file("scripts/apply-credential-migration-environment.sh").text();
     expect(apply).toContain(".branch_policies[] | [.name,.type] | @tsv");
