@@ -15,12 +15,16 @@ jq '{wait_timer,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deploymen
   gh api --method PUT "repos/$repository/environments/$environment" --input - --silent
 
 live="$(gh api --paginate --slurp "repos/$repository/environments/$environment/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add')"
+expected_policies="$(jq -c '.branch_policies' "$policy")"
 while IFS= read -r policy_id; do
   gh api --method DELETE "repos/$repository/environments/$environment/deployment-branch-policies/$policy_id" --silent
-done < <(jq -r '.[] | select(.name != "main" or .type != "branch") | .id' <<<"$live")
-if ! jq -e 'any(.[]; .name == "main" and .type == "branch")' <<<"$live" >/dev/null; then
-  gh api --method POST "repos/$repository/environments/$environment/deployment-branch-policies" \
-    -f name=main -f type=branch --silent
-fi
+done < <(jq -r --argjson expected "$expected_policies" '.[] | select(. as $live | any($expected[]; .name == $live.name and .type == $live.type) | not) | .id' <<<"$live")
+
+while IFS=$'\t' read -r name type; do
+  if ! jq -e --arg name "$name" --arg type "$type" 'any(.[]; .name == $name and .type == $type)' <<<"$live" >/dev/null; then
+    gh api --method POST "repos/$repository/environments/$environment/deployment-branch-policies" \
+      -f name="$name" -f type="$type" --silent
+  fi
+done < <(jq -r '.branch_policies[] | [.name,.type] | @tsv' "$policy")
 
 bash "$root/scripts/check-credential-migration-environment.sh"

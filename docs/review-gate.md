@@ -37,6 +37,11 @@ cache scope with a read-only token, no repository secrets, and no persisted Git
 credential. The `pull_request_target` publisher executes only protected-main
 code. Deployment credentials are available only to the protected `production`
 environment; tag-triggered deploys require that environment's approval.
+During the one-shot recovery only, the repository-scoped Cloudflare secrets are
+also readable by `.github/workflows/migrate-production-credentials.yml` behind
+the temporary Nik-only, self-review-blocked, main-only `credential-migration`
+environment. Follow `docs/credential-migration.md`; #67 deletes that workflow
+and environment in the same recovery cycle.
 
 ## Artifact cleanup recovery
 
