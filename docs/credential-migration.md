@@ -15,6 +15,21 @@ cannot create or replace a Worker-capable production token. A dashboard-authoriz
 remains required after service restoration; this exporter exists only to avoid
 destroying the sole currently deploy-capable credential before that handoff.
 
+0. Generate the migration-only RSA-4096 key inside the operator session, keep
+   the private key mode `0600`, record the public DER fingerprint out of band,
+   and never copy the unencrypted private key outside this host:
+
+   ```bash
+   umask 077
+   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 \
+     -out /home/tars/.secrets/gitzette-production-migration-private.pem
+   chmod 600 /home/tars/.secrets/gitzette-production-migration-private.pem
+   openssl pkey -in /home/tars/.secrets/gitzette-production-migration-private.pem \
+     -pubout -out /home/tars/.secrets/gitzette-production-migration-public.pem
+   openssl pkey -in /home/tars/.secrets/gitzette-production-migration-private.pem \
+     -pubout -outform DER | sha256sum
+   ```
+
 1. From a clean checkout of protected `main`, apply and verify the temporary
    Nik-only environment:
 
@@ -61,15 +76,26 @@ destroying the sole currently deploy-capable credential before that handoff.
    repository-scoped copies.
 
    ```bash
-   jq -er .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext" |
+   jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext" |
      gh secret set CLOUDFLARE_ACCOUNT_ID --env production
-   jq -er .CLOUDFLARE_API_TOKEN <<<"$plaintext" |
+   jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext" |
      gh secret set CLOUDFLARE_API_TOKEN --env production
-   unset plaintext
    gh secret list --env production
+   account_id="$(jq -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
+   api_token="$(jq -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
+   curl --fail --silent --show-error \
+     -H "Authorization: Bearer $api_token" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/workers/services/gitzette" |
+     jq -e '.success == true' >/dev/null
+   unset plaintext account_id api_token
    gh secret delete CLOUDFLARE_ACCOUNT_ID
    gh secret delete CLOUDFLARE_API_TOKEN
    ```
+
+   Do not delete either repository secret unless the environment-secret names
+   and the read-only exact-account Worker API check both pass. They are the
+   rollback copies until this verification succeeds; the two `gh secret
+   delete` commands are the point of no return.
 
 6. Delete the encrypted artifact, delete the migration run logs, and delete
    `CREDENTIAL_MIGRATION_OPEN`. Securely remove the local plaintext and destroy
@@ -82,7 +108,14 @@ destroying the sole currently deploy-capable credential before that handoff.
    gh api --method DELETE "repos/NikolayS/gitzette/actions/artifacts/$artifact_id"
    gh api --method DELETE repos/NikolayS/gitzette/actions/runs/RUN_ID/logs
    gh variable delete CREDENTIAL_MIGRATION_OPEN
+   shred -u "$migration_dir/credentials.bin"
+   rmdir "$migration_dir"
+   shred -u /home/tars/.secrets/gitzette-production-migration-private.pem
+   rm -f /home/tars/.secrets/gitzette-production-migration-public.pem
    ```
+
+   Remove `$migration_dir` on any aborted attempt too. Do not destroy the key
+   until the functional verification in step 5 has passed.
 
 7. Through the exact-head review gate, delete the migration workflow, its
    temporary environment config/scripts, and the live `credential-migration`

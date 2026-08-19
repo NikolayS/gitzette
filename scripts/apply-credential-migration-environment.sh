@@ -11,7 +11,7 @@ repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url
 policy="$root/config/credential-migration-environment.json"
 environment=credential-migration
 
-jq '{wait_timer,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' "$policy" |
+jq '{wait_timer,can_admins_bypass,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' "$policy" |
   gh api --method PUT "repos/$repository/environments/$environment" --input - --silent
 
 live="$(gh api --paginate --slurp "repos/$repository/environments/$environment/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add')"
