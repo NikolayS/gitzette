@@ -20,7 +20,11 @@ if ! environment="$(gh api "repos/$repository/environments/credential-migration"
   sed 's/^/  /' "$error_file" >&2
   exit 1
 fi
-policies="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies "$policy")" == true ]]; then
+  policies="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+else
+  policies='[]'
+fi
 variables="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
 secrets="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
 if [[ "$(jq -r 'length' <<<"$variables")" -ne 0 || "$(jq -r 'length' <<<"$secrets")" -ne 0 ]]; then
@@ -37,9 +41,17 @@ actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$poli
   branch_policies: ($policies | map({name,type}) | sort_by(.name,.type))
 }')"
 if [[ "$actual" != "$expected" ]]; then
+  expected_without_bypass="$(jq -Sc 'del(.can_admins_bypass)' <<<"$expected")"
+  actual_without_bypass="$(jq -Sc 'del(.can_admins_bypass)' <<<"$actual")"
+  if [[ "$expected_without_bypass" == "$actual_without_bypass" &&
+        "$(jq -r .can_admins_bypass <<<"$expected")" == false &&
+        "$(jq -r .can_admins_bypass <<<"$actual")" == true ]]; then
+    echo 'disable "Allow administrators to bypass configured protection rules" for environment credential-migration in Settings -> Environments, then re-run' >&2
+    exit 1
+  fi
   echo "credential-migration environment differs from reviewed policy" >&2
   echo "expected: $expected" >&2
   echo "actual:   $actual" >&2
   exit 1
 fi
-echo "Credential migration environment OK: Nik-only approval, self-review blocked, main only"
+echo "Credential migration environment OK: Nik-only approval, self-review blocked, protected branches only"

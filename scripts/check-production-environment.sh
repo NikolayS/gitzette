@@ -9,7 +9,10 @@ else
 fi
 case "${1:-default}" in
   default) policy="$root/config/production-environment.json" ;;
-  migration) policy="$root/config/production-environment-migration.json" ;;
+  migration)
+    policy="$root/config/production-environment-migration.json"
+    bash "$root/scripts/check-credential-migration-tag-ruleset.sh"
+    ;;
   *) echo "usage: $0 [default|migration]" >&2; exit 2 ;;
 esac
 expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
@@ -35,6 +38,14 @@ actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$poli
 }')"
 
 if [[ "$actual" != "$expected" ]]; then
+  expected_without_bypass="$(jq -Sc 'del(.can_admins_bypass)' <<<"$expected")"
+  actual_without_bypass="$(jq -Sc 'del(.can_admins_bypass)' <<<"$actual")"
+  if [[ "$expected_without_bypass" == "$actual_without_bypass" &&
+        "$(jq -r .can_admins_bypass <<<"$expected")" == false &&
+        "$(jq -r .can_admins_bypass <<<"$actual")" == true ]]; then
+    echo 'disable "Allow administrators to bypass configured protection rules" for environment production in Settings -> Environments, then re-run' >&2
+    exit 1
+  fi
   echo "production environment differs from $(basename "$policy")" >&2
   echo "expected: $expected" >&2
   echo "actual:   $actual" >&2

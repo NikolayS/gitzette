@@ -11,6 +11,7 @@ describe("one-shot credential migration boundary", () => {
       can_admins_bypass: boolean;
       prevent_self_review: boolean;
       reviewers: Array<{ id: number }>;
+      deployment_branch_policy: Record<string, boolean>;
       branch_policies: Array<{ name: string; type: string }>;
     };
     const parsed = Bun.YAML.parse(workflow) as {
@@ -60,14 +61,6 @@ describe("one-shot credential migration boundary", () => {
     expect(parsed.jobs["authorize-export"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(workflow).toContain("only the earliest credential export run may continue");
     expect(workflow).toContain("display_title == \"credential migration: export\"");
-    expect(workflow).toContain("  remove-verification-tag:");
-    expect(workflow).toContain("always() && inputs.operation == 'verify'");
-    expect(workflow).toContain("git/refs/tags/credential-migration-verify");
-    expect(parsed.jobs["remove-verification-tag"].needs).toEqual([
-      "authorize-export", "verify-production-credentials",
-    ]);
-    expect(parsed.jobs["remove-verification-tag"].if).toContain("always()");
-    expect(parsed.jobs["remove-verification-tag"].permissions).toEqual({ contents: "write" });
     for (const name of ["export-encrypted-credentials", "verify-production-credentials"]) {
       const jobRun = parsed.jobs[name].steps.map(({ run }) => run ?? "").join("\n");
       expect(jobRun).toContain('triggering_actor_id="$(curl');
@@ -78,7 +71,8 @@ describe("one-shot credential migration boundary", () => {
     expect(policy.can_admins_bypass).toBe(false);
     expect(policy.prevent_self_review).toBe(true);
     expect(policy.reviewers.map(({ id }) => id)).toEqual([1345402]);
-    expect(policy.branch_policies).toEqual([{ name: "main", type: "branch" }]);
+    expect(policy.branch_policies).toEqual([]);
+    expect(policy.deployment_branch_policy).toEqual({ protected_branches: true, custom_branch_policies: false });
     const productionPolicy = JSON.parse(await Bun.file("config/production-environment.json").text()) as {
       can_admins_bypass: boolean;
       branch_policies: Array<{ name: string; type: string }>;
@@ -99,6 +93,7 @@ describe("one-shot credential migration boundary", () => {
     expect(applyProduction).not.toContain("{wait_timer,can_admins_bypass");
     expect(applyProduction).toContain('check-production-environment.sh" "$mode"');
     expect(checkProduction).toContain("can_admins_bypass: $environment.can_admins_bypass");
+    expect(checkProduction).toContain("check-credential-migration-tag-ruleset.sh");
     expect(checkProduction).toContain("admitted refs: $policy_names");
 
     const encoded = workflow.match(/^\s*RSA_PUBLIC_KEY_PEM_B64:\s*(\S+)$/m)?.[1];
@@ -144,7 +139,17 @@ describe("one-shot credential migration boundary", () => {
     );
     expect(migrationDoc).toContain("trap cleanup_verification_policy EXIT");
     expect(migrationDoc).toContain("trap - EXIT");
-    expect(migrationDoc).toContain("first\n   recovery action");
+    expect(migrationDoc).toContain("first recovery action");
+    expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
+      migrationDoc.indexOf("drop table credential_migration_transfer"),
+    );
+    expect(migrationDoc).toContain("check-credential-migration-tag-ruleset.sh");
+    expect(migrationDoc).toContain("expected to be red during the legitimate production approval wait");
+    for (const teardownItem of [
+      "credential-migration-policy-guard.yml", "credential-migration-environment.json",
+      "credential-migration-tag-ruleset.json", "production-environment-migration.json",
+      "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
+    ]) expect(migrationDoc).toContain(teardownItem);
 
     const policyGuard = await Bun.file(".github/workflows/credential-migration-policy-guard.yml").text();
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as { on: { schedule: Array<{ cron: string }> } };
@@ -316,6 +321,7 @@ fi
     const d1Request = JSON.parse(await Bun.file(join(throwawayRoot, "gitzette-credential-migration", "d1-request.json")).text());
     expect(d1Request.batch).toHaveLength(2);
     expect(d1Request.batch[0].sql).toContain("create table credential_migration_transfer");
+    expect(d1Request.batch[0].sql).not.toContain("if not exists");
     expect(d1Request.batch[1].sql).toContain("insert into credential_migration_transfer");
     expect(d1Request.batch[1].params[0]).toBe("77");
     expect(d1Request.batch[1].params[1]).toBe(Buffer.from(await Bun.file(encryptedPath).arrayBuffer()).toString("base64"));
@@ -341,7 +347,8 @@ case "$endpoint" in
       auth) echo "fake production API failure" >&2; exit 1 ;;
       missing) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
     esac
-    printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+    bypass=false; [[ "\${FAKE_API_ERROR:-none}" != bypass ]] || bypass=true
+    jq -nc --argjson bypass "$bypass" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}},{type:"User",reviewer:{id:280144521,login:"samo-agent"}}]}],deployment_branch_policy:{protected_branches:false,custom_branch_policies:true}}'
     ;;
   *deployment-branch-policies*)
     if [[ "\${FAKE_LIVE_POLICY:-default}" == migration ]]; then
@@ -352,6 +359,8 @@ case "$endpoint" in
       printf '%s\\n' '[{"branch_policies":[{"name":"v*","type":"tag"}]}]'
     fi
     ;;
+  *rulesets/55) jq -c '. + {id:55}' config/credential-migration-tag-ruleset.json ;;
+  *rulesets*) printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag"}]]' ;;
   *) exit 91 ;;
 esac
 `);
@@ -387,6 +396,10 @@ esac
     expect(missing.code).toBe(1);
     expect(missing.stderr).toContain("production environment is missing; run scripts/apply-production-environment.sh default");
     expect(missing.stderr).toContain("HTTP 404");
+    const bypass = await run("default", "default", "bypass");
+    expect(bypass.code).toBe(1);
+    expect(bypass.stderr).toContain('disable "Allow administrators to bypass configured protection rules"');
+    expect(bypass.stderr).toContain("environment production");
   });
 
   test("applies migration widening and then actually removes it in default mode", async () => {
@@ -410,6 +423,8 @@ case "$method:$endpoint" in
   GET:repos/example/gitzette/environments/production)
     printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
     ;;
+  GET:repos/example/gitzette/rulesets/55) jq -c '. + {id:55}' config/credential-migration-tag-ruleset.json ;;
+  GET:repos/example/gitzette/rulesets*) printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag"}]]' ;;
   GET:*deployment-branch-policies*) jq -c '[{branch_policies:.}]' "$FAKE_STATE" ;;
   POST:*deployment-branch-policies*)
     next_id="$(jq '[.[].id] | max + 1' "$FAKE_STATE")"
@@ -455,28 +470,26 @@ case "$endpoint" in
       auth) echo "fake API failure" >&2; exit 1 ;;
       missing) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
     esac
-    reviewer_id=1345402; reviewer_login=NikolayS; prevent=true; admin_bypass=false; wait_timer=0; protected=false
+    reviewer_id=1345402; reviewer_login=NikolayS; prevent=true; admin_bypass=false; wait_timer=0; protected=true; custom=false
     [[ "\${FAKE_MODE:-ok}" != reviewer ]] || { reviewer_id=280144521; reviewer_login=samo-agent; }
     [[ "\${FAKE_MODE:-ok}" != self-review ]] || prevent=false
     [[ "\${FAKE_MODE:-ok}" != admin-bypass ]] || admin_bypass=true
     [[ "\${FAKE_MODE:-ok}" != wait-timer ]] || wait_timer=5
-    [[ "\${FAKE_MODE:-ok}" != protected-branches ]] || protected=true
+    [[ "\${FAKE_MODE:-ok}" != custom-branch-policy ]] || { protected=false; custom=true; }
     extra='[]'
     [[ "\${FAKE_MODE:-ok}" != extra-reviewer ]] || extra='[{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
     jq -n --argjson id "$reviewer_id" --arg login "$reviewer_login" --argjson prevent "$prevent" \
-      --argjson bypass "$admin_bypass" --argjson wait "$wait_timer" --argjson protected "$protected" --argjson extra "$extra" '{
+      --argjson bypass "$admin_bypass" --argjson wait "$wait_timer" --argjson protected "$protected" --argjson custom "$custom" --argjson extra "$extra" '{
       can_admins_bypass:$bypass,
       protection_rules:([{type:"required_reviewers",prevent_self_review:$prevent,reviewers:([{type:"User",reviewer:{id:$id,login:$login}}] + $extra)}] + (if $wait == 0 then [] else [{type:"wait_timer",wait_timer:$wait}] end)),
-      deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:true}
+      deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}
     }'
     ;;
   *deployment-branch-policies*)
-    if [[ "\${FAKE_MODE:-ok}" == no-policy ]]; then
-      printf '%s\\n' '[{"branch_policies":[]}]'
-    elif [[ "\${FAKE_MODE:-ok}" == extra-policy ]]; then
-      printf '%s\\n' '[{"branch_policies":[{"name":"main","type":"branch"},{"name":"other","type":"branch"}]}]'
+    if [[ "\${FAKE_MODE:-ok}" == extra-policy ]]; then
+      printf '%s\\n' '[{"branch_policies":[{"name":"other","type":"branch"}]}]'
     else
-      printf '%s\\n' '[{"branch_policies":[{"name":"main","type":"branch"}]}]'
+      printf '%s\\n' '[{"branch_policies":[]}]'
     fi
     ;;
   *credential-migration/variables*)
@@ -500,16 +513,25 @@ esac
     expect(await run("ok")).toBe(0);
     expect(await run("reviewer")).toBe(1);
     expect(await run("self-review")).toBe(1);
-    expect(await run("extra-policy")).toBe(1);
+    expect(await run("extra-policy")).toBe(0);
     expect(await run("extra-reviewer")).toBe(1);
-    expect(await run("no-policy")).toBe(1);
+    expect(await run("no-policy")).toBe(0);
     expect(await run("wait-timer")).toBe(1);
-    expect(await run("protected-branches")).toBe(1);
+    expect(await run("custom-branch-policy")).toBe(1);
     expect(await run("admin-bypass")).toBe(1);
     expect(await run("environment-variable")).toBe(1);
     expect(await run("environment-secret")).toBe(1);
     expect(await run("missing")).toBe(1);
     expect(await run("auth")).toBe(1);
+    const bypassFailure = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "admin-bypass" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const bypassStderr = await new Response(bypassFailure.stderr).text();
+    expect(await bypassFailure.exited).toBe(1);
+    expect(bypassStderr).toContain('disable "Allow administrators to bypass configured protection rules"');
+    expect(bypassStderr).toContain("credential-migration");
     const authFailure = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "auth" },
@@ -535,6 +557,70 @@ esac
     expect(apply).not.toContain("{wait_timer,can_admins_bypass");
   });
 
+  test("applies and verifies the Nik-only migration tag ruleset", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gitzette-migration-ruleset-"));
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    const gh = join(bin, "gh");
+    await Bun.write(gh, `#!/usr/bin/env bash
+set -euo pipefail
+method=GET; endpoint=""; input=""
+for argument in "$@"; do
+  [[ "$argument" != POST && "$argument" != PUT ]] || method="$argument"
+  [[ "$argument" != repos/* ]] || endpoint="$argument"
+  [[ "$argument" != *.json ]] || input="$argument"
+done
+installed=false; [[ ! -f "$FAKE_RECORD/installed" ]] || installed=true
+case "$method:$endpoint" in
+  GET:*rulesets/55)
+    if [[ "\${FAKE_MODE:-correct}" == drift ]]; then
+      jq -c '.enforcement="disabled" | . + {id:55}' config/credential-migration-tag-ruleset.json
+    else
+      jq -c '. + {id:55}' config/credential-migration-tag-ruleset.json
+    fi
+    ;;
+  GET:*rulesets*)
+    if [[ "\${FAKE_MODE:-correct}" == duplicate ]]; then
+      printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag"},{"id":56,"name":"credential-migration-verify-tag"}]]'
+    elif [[ "$installed" == true || "\${FAKE_MODE:-correct}" == correct ]]; then
+      printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag"}]]'
+    else
+      printf '%s\\n' '[[]]'
+    fi
+    ;;
+  POST:*rulesets)
+    cp "$input" "$FAKE_RECORD/post.json"
+    : >"$FAKE_RECORD/installed"
+    ;;
+  PUT:*rulesets/55) cp "$input" "$FAKE_RECORD/put.json" ;;
+  *) exit 91 ;;
+esac
+`);
+    await Bun.spawn(["chmod", "+x", gh]).exited;
+    const run = async (script: string, mode: string, record: string): Promise<number> => {
+      await mkdir(record);
+      return Bun.spawn(["bash", script], {
+        cwd: process.cwd(),
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode, FAKE_RECORD: record },
+        stdout: "pipe", stderr: "pipe",
+      }).exited;
+    };
+    const correct = join(root, "correct");
+    expect(await run("scripts/check-credential-migration-tag-ruleset.sh", "correct", correct)).toBe(0);
+    const drift = join(root, "drift");
+    expect(await run("scripts/check-credential-migration-tag-ruleset.sh", "drift", drift)).toBe(1);
+    const duplicate = join(root, "duplicate");
+    expect(await run("scripts/check-credential-migration-tag-ruleset.sh", "duplicate", duplicate)).toBe(1);
+    const create = join(root, "create");
+    expect(await run("scripts/apply-credential-migration-tag-ruleset.sh", "missing", create)).toBe(0);
+    expect(JSON.parse(await Bun.file(join(create, "post.json")).text()).bypass_actors).toEqual([
+      { actor_id: 1345402, actor_type: "User", bypass_mode: "always" },
+    ]);
+    const update = join(root, "update");
+    expect(await run("scripts/apply-credential-migration-tag-ruleset.sh", "correct", update)).toBe(0);
+    expect(await Bun.file(join(update, "put.json")).exists()).toBe(true);
+  });
+
   test("applies the reviewed policy and reconciles branch-policy drift", async () => {
     const root = await mkdtemp(join(tmpdir(), "gitzette-migration-apply-"));
     const bin = join(root, "bin");
@@ -547,23 +633,28 @@ for argument in "$@"; do
   [[ "$argument" != PUT && "$argument" != POST && "$argument" != DELETE ]] || method="$argument"
   [[ "$argument" != repos/* ]] || endpoint="$argument"
 done
-if [[ "$method" == PUT ]]; then cat >"$FAKE_RECORD/put.json"; exit 0; fi
+if [[ "$method" == PUT ]]; then cat >"$FAKE_RECORD/put.json"; : >"$FAKE_RECORD/installed"; exit 0; fi
 if [[ "$method" == DELETE ]]; then printf '%s\\n' "$endpoint" >>"$FAKE_RECORD/delete.log"; exit 0; fi
 if [[ "$method" == POST ]]; then printf '%s\\n' "$*" >>"$FAKE_RECORD/post.log"; exit 0; fi
 case "$endpoint" in
   repos/example/gitzette/environments/credential-migration)
-    printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+    if [[ "\${FAKE_MODE:-correct}" == missing && ! -f "$FAKE_RECORD/installed" ]]; then
+      echo 'gh: Not Found (HTTP 404)' >&2
+      exit 1
+    fi
+    bypass=false; [[ "\${FAKE_MODE:-correct}" != missing ]] || bypass=true
+    jq -nc --argjson bypass "$bypass" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}}]}],deployment_branch_policy:{protected_branches:true,custom_branch_policies:false}}'
     ;;
   *deployment-branch-policies*)
     count_file="$FAKE_RECORD/policy-count"; count=0; [[ ! -f "$count_file" ]] || count="$(<"$count_file")"; count=$((count + 1)); printf '%s' "$count" >"$count_file"
-    if [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 2 ]]; then
+    if [[ "$count" -ge 2 ]]; then
       printf '%s\\n' '[{"branch_policies":[]}]'
     elif [[ "\${FAKE_MODE:-correct}" == duplicate && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[{"id":10,"name":"main","type":"branch"},{"id":11,"name":"main","type":"branch"}]}]'
     elif [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[{"id":9,"name":"other","type":"branch"}]}]'
     else
-      printf '%s\\n' '[{"branch_policies":[{"id":10,"name":"main","type":"branch"}]}]'
+      printf '%s\\n' '[{"branch_policies":[]}]'
     fi
     ;;
   *credential-migration/variables*) printf '%s\\n' '[{"variables":[]}]' ;;
@@ -585,8 +676,7 @@ esac
     expect(await run("stale", stale)).toBe(0);
     expect(JSON.parse(await Bun.file(join(stale, "put.json")).text()).can_admins_bypass).toBeUndefined();
     expect(await Bun.file(join(stale, "delete.log")).text()).toContain("deployment-branch-policies/9");
-    expect(await Bun.file(join(stale, "post.log")).text()).toContain("name=main");
-    expect(await Bun.file(join(stale, "post.log")).text()).toContain("type=branch");
+    expect(await Bun.file(join(stale, "post.log")).exists()).toBe(false);
 
     const correct = join(root, "correct");
     expect(await run("correct", correct)).toBe(0);
@@ -595,7 +685,20 @@ esac
 
     const duplicate = join(root, "duplicate");
     expect(await run("duplicate", duplicate)).toBe(0);
+    expect(await Bun.file(join(duplicate, "delete.log")).text()).toContain("deployment-branch-policies/10");
     expect(await Bun.file(join(duplicate, "delete.log")).text()).toContain("deployment-branch-policies/11");
     expect(await Bun.file(join(duplicate, "post.log")).exists()).toBe(false);
+
+    const missing = join(root, "missing");
+    await mkdir(missing);
+    const firstApply = Bun.spawn(["bash", "scripts/apply-credential-migration-environment.sh"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "missing", FAKE_RECORD: missing },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const firstApplyStderr = await new Response(firstApply.stderr).text();
+    expect(await firstApply.exited).toBe(1);
+    expect(await Bun.file(join(missing, "put.json")).exists()).toBe(true);
+    expect(firstApplyStderr).toContain('disable "Allow administrators to bypass configured protection rules"');
   });
 });

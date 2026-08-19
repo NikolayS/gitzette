@@ -59,15 +59,18 @@ session after service restoration.
 
 1. From a clean checkout of protected `main`, first verify that production
    still has its default `v*`-only policy. Investigate any diff before changing
-   it; do not erase a tamper signal by applying over it. Then apply the dedicated
+   it; do not erase a tamper signal by applying over it. Then install the
+   Nik-only ruleset for the fixed verification tag and apply the dedicated
    migration environment. GitHub's environment API cannot set
    `can_admins_bypass`; if the migration check reports that field as `true`,
    disable **Allow administrators to bypass configured protection rules** in
-   the GitHub environment UI and rerun the apply command. Do not widen
-   production yet.
+   Settings -> Environments -> `credential-migration`, then rerun the apply
+   command. This UI-only action is expected after first creating the
+   environment and is required before export. Do not widen production yet.
 
    ```bash
    bash scripts/check-production-environment.sh default
+   bash scripts/apply-credential-migration-tag-ruleset.sh
    bash scripts/apply-credential-migration-environment.sh
    ```
 
@@ -101,8 +104,9 @@ session after service restoration.
 4. Immediately after the single export succeeds, close the switch before a
    queued duplicate can start, then retrieve the exact run's ciphertext through the
    D1-only token. Decrypt locally without printing plaintext. Only after valid
-   JSON is in memory, drop the entire transient table and delete the workflow
-   logs. Keep repository secrets as rollback copies.
+   JSON is in memory, delete the workflow logs but retain the entire transfer
+   table as a durable consumed-once marker. A second export cannot recreate
+   that table. Keep repository secrets as rollback copies.
 
    ```bash
    set -euo pipefail
@@ -135,13 +139,6 @@ session after service restoration.
      (.CLOUDFLARE_ACCOUNT_ID | type == "string" and length > 0) and
      (.CLOUDFLARE_API_TOKEN | type == "string" and length > 0)' \
      <<<"$plaintext" >/dev/null
-   jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
-   curl --fail --silent --show-error --retry 2 --retry-all-errors \
-     --connect-timeout 10 --max-time 30 --config - \
-     -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
-     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
-     <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -e '.success == true and .result[0].success == true' >/dev/null
    gh api --method DELETE repos/NikolayS/gitzette/actions/runs/RUN_ID/logs
    ```
 
@@ -172,6 +169,13 @@ session after service restoration.
    remaining_repository_cloudflare_secrets="$(gh secret list --json name --jq \
      '[.[].name | select(startswith("CLOUDFLARE_"))] | length')"
    [[ "$remaining_repository_cloudflare_secrets" == 0 ]]
+   jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
+   curl --fail --silent --show-error --retry 2 --retry-all-errors \
+     --connect-timeout 10 --max-time 30 --config - \
+     -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
+     jq -e '.success == true and .result[0].success == true' >/dev/null
    ```
 
    Enumerate every `secrets.CLOUDFLARE_*` reference under `.github/workflows`.
@@ -190,13 +194,16 @@ session after service restoration.
    tag name and re-resolves protected `main` both before and after Nik's
    production approval. It fails if `main` moved. This tag does not match the
    release workflow's `v*` trigger. The tag itself is not trusted as an
-   identity boundary: the verifier's two protected-`main` comparisons are.
+   identity boundary by itself: the active tag ruleset permits only immutable
+   Nik user ID `1345402` to create, update, or delete it, and the verifier's two
+   protected-`main` comparisons provide an independent content check.
    `deploy.yml` is the only other production consumer and cannot start from
    this fixed tag.
 
    ```bash
    git fetch origin main
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
+   bash scripts/check-credential-migration-tag-ruleset.sh
    git tag credential-migration-verify "$(git rev-parse main)"
    git push origin refs/tags/credential-migration-verify
    cleanup_verification_policy() {
@@ -223,9 +230,16 @@ session after service restoration.
    [[ "$verify_status" == 0 ]]
    ```
 
-   The verification workflow independently deletes the remote migration tag in
-   an `always()` cleanup job. If the operator shell is interrupted, the first
-   recovery action is still:
+   Before Nik approves the production deployment, independently verify outside
+   the workflow logs that the protected tag still equals protected `main`:
+
+   ```bash
+   test "$(git ls-remote origin refs/tags/credential-migration-verify | cut -f1)" = \
+     "$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
+   bash scripts/check-credential-migration-tag-ruleset.sh
+   ```
+
+   If the operator shell is interrupted, the first recovery action is:
 
    ```bash
    bash scripts/apply-production-environment.sh default
@@ -233,7 +247,9 @@ session after service restoration.
 
    A five-minute scheduled guard also runs
    `scripts/check-production-environment.sh default` from protected `main` and
-   fails visibly while any widening lingers.
+   is expected to be red during the legitimate production approval wait. After
+   cleanup, explicitly dispatch that guard and require it to turn green; a red
+   result after the verify run is no longer waiting is lingering widening.
 
    On verification failure, restore repository rollback scope before debugging:
 
@@ -255,6 +271,13 @@ session after service restoration.
    unset plaintext ciphertext account_id api_token d1_token
    ```
 
-8. Through the exact-head review gate, delete this workflow, its temporary
-   environment config/scripts, the extra production tag policy, and the live
-   `credential-migration` environment before normal development resumes.
+8. Through the exact-head review gate, delete
+   `.github/workflows/migrate-production-credentials.yml`,
+   `.github/workflows/credential-migration-policy-guard.yml`,
+   `config/credential-migration-environment.json`,
+   `config/credential-migration-tag-ruleset.json`,
+   `config/production-environment-migration.json`, all corresponding
+   apply/check scripts, and the live `credential-migration` environment. Delete
+   the live `credential-migration-verify-tag` ruleset and both repository
+   variables `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Require the
+   default production-policy guard to pass before normal development resumes.
