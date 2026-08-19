@@ -1,6 +1,7 @@
 import {
   explicitWorkflowWritePermissions,
   workflowAt,
+  workflowEnvironmentJobs,
   workflowTriggers,
 } from "./check-pr-workflow-permissions";
 
@@ -61,6 +62,14 @@ export function auditRepositoryWorkflowRefs(
     for (const path of workflowPaths(cwd, ref.sha)) {
       const source = workflowAt(cwd, ref.sha, path);
       if (source === null) throw new Error(`could not read ${path} from ${ref.name}`);
+      const environments = [...workflowEnvironmentJobs(source).entries()];
+      if (environments.length > 0) {
+        const trustedEnvironmentWorkflow = path === ".github/workflows/deploy.yml" ||
+          path === ".github/workflows/migrate-production-credentials.yml";
+        if (!trustedEnvironmentWorkflow || environments.some(([, name]) => name !== "production")) {
+          throw new Error(`remote branch ${ref.name} has untrusted environment authority in ${path}`);
+        }
+      }
       const writes = [...explicitWorkflowWritePermissions(source)].sort();
       if (writes.length === 0) continue;
       const triggers = [...workflowTriggers(source)].sort();
@@ -94,8 +103,8 @@ function remoteHeads(cwd: string): { snapshot: string; refs: RepositoryRef[] } {
   return { snapshot, refs };
 }
 
-export function checkRepositoryWorkflowPermissions(cwd: string): void {
-  checkActionsWorkflowDefaults(cwd);
+export function checkRepositoryWorkflowPermissions(cwd: string, checkActionsDefaults = true): void {
+  if (checkActionsDefaults) checkActionsWorkflowDefaults(cwd);
   const before = remoteHeads(cwd);
   const main = before.refs.find(({ name }) => name === "main");
   if (!main) throw new Error("remote main branch is missing");
@@ -115,8 +124,13 @@ export function checkRepositoryWorkflowPermissions(cwd: string): void {
 }
 
 if (import.meta.main) {
+  const args = process.argv.slice(2);
+  if (args.some((arg) => arg !== "--git-only") || args.length > 1) {
+    console.error("usage: bun scripts/check-repository-workflow-permissions.ts [--git-only]");
+    process.exit(2);
+  }
   try {
-    checkRepositoryWorkflowPermissions(process.cwd());
+    checkRepositoryWorkflowPermissions(process.cwd(), args[0] !== "--git-only");
     console.log("Repository workflow permissions OK");
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

@@ -6,7 +6,7 @@ describe("deploy review revalidation", () => {
     const reviewScript = await Bun.file("scripts/check-release-review.sh").text();
     const reviewEvaluator = await Bun.file("scripts/check-release-review.ts").text();
     expect(workflow).toContain("run: bash scripts/check-release-review.sh");
-    expect(workflow).toContain("run: bun scripts/check-repository-workflow-permissions.ts");
+    expect(workflow).toContain("run: bun scripts/check-repository-workflow-permissions.ts --git-only");
     expect(workflow).not.toContain("check_runs=");
     expect(reviewScript).toContain('commits/$reviewed_sha/statuses?per_page=100');
     expect(reviewScript).toContain('actions/runs?head_sha=$reviewed_sha');
@@ -39,6 +39,7 @@ describe("deploy review revalidation", () => {
     const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
     const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
     expect(reviewGate).toContain("checks: read");
+    expect(reviewGate).toContain("actions: read");
     expect(reviewGate).toContain("RELEASE_SENDER_ID: ${{ github.event.sender.id }}");
     expect(reviewGate).not.toContain("if: github.event.sender.id");
     expect(reviewScript).toContain('[[ "$RELEASE_SENDER_ID" != 280144521 ]]');

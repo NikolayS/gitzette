@@ -48,6 +48,17 @@ That runtime audit also reads the live Actions workflow-permission setting and
 fails unless the repository default is read-only and Actions cannot approve
 pull requests. Missing workflow permission blocks therefore cannot silently
 gain write authority through repository-setting drift.
+This full form requires repository-administration access. GitHub's ephemeral
+Actions token cannot read that admin endpoint, so the protected PR and deploy
+jobs run the same branch snapshot as `--git-only`; the mandatory operator-run
+readiness command above performs the live setting check immediately before
+merge and release.
+
+Both audits also reject any workflow other than `deploy.yml` and the temporary
+`migrate-production-credentials.yml` declaring an environment, and require
+those declarations to name exact `production`. A new workflow therefore cannot
+silently join the protected credential approval surface during the bootstrap
+window.
 
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution

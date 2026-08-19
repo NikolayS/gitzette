@@ -97,5 +97,13 @@ describe("repository-wide workflow permission audit", () => {
     const pushPublisher = await commit(cwd, "push-capable publisher");
     expect(() => auditRepositoryWorkflowRefs(cwd, [{ name: "push", sha: pushPublisher }], main))
       .toThrow("untrusted workflow write authority in .github/workflows/samorev-gate.yml");
+
+    await Bun.write(
+      join(cwd, ".github/workflows/evil-environment.yml"),
+      "on: push\npermissions: {contents: read}\njobs:\n  deploy:\n    environment: {name: production}\n    runs-on: ubuntu-latest\n    steps: []\n",
+    );
+    const environment = await commit(cwd, "untrusted environment workflow");
+    expect(() => auditRepositoryWorkflowRefs(cwd, [{ name: "environment", sha: environment }], main))
+      .toThrow("untrusted environment authority");
   });
 });

@@ -66,6 +66,24 @@ export function workflowTriggers(source: string): Set<string> {
   throw new Error("workflow on trigger must be a string, array, or mapping");
 }
 
+export function workflowEnvironmentJobs(source: string): Map<string, string> {
+  const parsed = parseWorkflow(source);
+  const result = new Map<string, string>();
+  if (parsed.jobs === undefined) return result;
+  if (!isRecord(parsed.jobs)) throw new Error("workflow jobs must be a mapping");
+  for (const [jobName, jobValue] of Object.entries(parsed.jobs)) {
+    if (!isRecord(jobValue)) throw new Error("workflow job must be a mapping");
+    if (jobValue.environment === undefined || jobValue.environment === null) continue;
+    const environment = typeof jobValue.environment === "string" ? jobValue.environment :
+      isRecord(jobValue.environment) ? jobValue.environment.name : undefined;
+    if (typeof environment !== "string" || environment.length === 0) {
+      throw new Error(`workflow environment for job ${jobName} must have a literal name`);
+    }
+    result.set(jobName, environment);
+  }
+  return result;
+}
+
 function workflowPrivileges(source: string, conservativeMissing: boolean): Map<string, number> {
   const parsed = parseWorkflow(source);
   const result = new Map<string, number>();
@@ -120,6 +138,17 @@ function auditHeadPublishers(cwd: string, headSha: string): void {
       throw new Error(`untrusted workflow has protected write authority in ${path}: ${writes.join(", ")}`);
     }
   }
+  for (const path of output.split("\0").filter((name) => /\.ya?ml$/.test(name))) {
+    const source = workflowAt(cwd, headSha, path);
+    if (source === null) throw new Error(`could not read workflow ${path}`);
+    const environments = [...workflowEnvironmentJobs(source).entries()];
+    if (environments.length === 0) continue;
+    const trustedEnvironmentWorkflow = path === ".github/workflows/deploy.yml" ||
+      path === ".github/workflows/migrate-production-credentials.yml";
+    if (!trustedEnvironmentWorkflow || environments.some(([, name]) => name !== "production")) {
+      throw new Error(`untrusted workflow declares an environment in ${path}`);
+    }
+  }
 }
 
 function privilegeIsCovered(
@@ -152,7 +181,11 @@ export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: stri
     if (broadened.length > 0) {
       throw new Error(`PR broadens privileged workflow permissions in ${path}: ${broadened.join(", ")}`);
     }
-    if (baseSource !== null && explicitWorkflowWritePermissions(headSource).size > 0 && baseSource !== headSource) {
+    const privilegedContent = baseSource !== null && (
+      explicitWorkflowWritePermissions(baseSource).size > 0 ||
+      explicitWorkflowWritePermissions(headSource).size > 0
+    );
+    if (privilegedContent && baseSource !== headSource) {
       throw new Error(`PR changes the content of privileged workflow ${path}`);
     }
   }

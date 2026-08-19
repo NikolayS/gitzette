@@ -11,6 +11,12 @@ function expectEnvField(body: string, name: string): void {
   expect(body).toMatch(new RegExp(`(^|\\s)${name}\\??:`));
 }
 
+function reviewedSecretNames(wrangler: string): string[] {
+  const block = wrangler.match(/^# secrets[^\n]*\n([\s\S]*?)^# The checked-in production allowlist/m);
+  if (!block) throw new Error("missing bounded Wrangler secrets block");
+  return [...block[1].matchAll(/^# ([A-Z][A-Z0-9_]*)(?:\s|$)/gm)].map((match) => match[1]);
+}
+
 describe("Worker environment provenance", () => {
   test("keeps generated bindings and reviewed secrets aligned with Wrangler", async () => {
     const [wrangler, generated, source] = await Promise.all([
@@ -35,5 +41,6 @@ describe("Worker environment provenance", () => {
       expectEnvField(runtimeEnv, name);
       expect(wrangler).toMatch(new RegExp(`^# ${name}(?:\\s|$)`, "m"));
     }
+    expect(new Set(reviewedSecretNames(wrangler))).toEqual(new Set(expectedProductionSecrets));
   });
 });

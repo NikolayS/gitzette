@@ -16,6 +16,7 @@ describe("base-controlled samorev publisher wiring", () => {
     expect(workflow).toContain('test "$(git rev-parse refs/gitzette/pr-head)" = "$HEAD_SHA"');
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain('bun scripts/check-pr-workflow-permissions.ts "$BASE_SHA" "$HEAD_SHA"');
+    expect(workflow).toContain("bun scripts/check-repository-workflow-permissions.ts --git-only");
     const permissionCheck = workflow.indexOf("bun scripts/check-pr-workflow-permissions.ts");
     const verdictPoll = workflow.indexOf("bash scripts/poll-samorev-gate.sh");
     expect(permissionCheck).toBeGreaterThanOrEqual(0);

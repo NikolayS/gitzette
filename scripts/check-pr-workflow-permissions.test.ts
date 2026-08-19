@@ -105,6 +105,14 @@ describe("base-controlled workflow permission boundary", () => {
 
     await Bun.write(
       join(cwd, ".github/workflows/large.yml"),
+      "on: pull_request_target\npermissions: {contents: read}\njobs: {}\n# writes removed while behavior changed\n",
+    );
+    const removedPrivilege = await commit(cwd, "remove privileged permission and change content");
+    expect(() => checkWorkflowChanges(cwd, unchangedPermissions, removedPrivilege))
+      .toThrow("changes the content of privileged workflow");
+
+    await Bun.write(
+      join(cwd, ".github/workflows/large.yml"),
       large.replace("  pull_request_target:\n", "  pull_request_target:\n  push:\n"),
     );
     const broadenedTrigger = await commit(cwd, "broaden trigger");
@@ -163,5 +171,23 @@ describe("base-controlled workflow permission boundary", () => {
     );
     const yamlWriteAll = await commit(cwd, "yaml write all");
     expect(() => checkWorkflowChanges(cwd, yamlWrite, yamlWriteAll)).toThrow("write-all");
+
+  });
+
+  test("rejects a new workflow on the protected environment approval surface", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "gitzette-workflow-environment-"));
+    directories.push(cwd);
+    git(cwd, "init", "-q");
+    git(cwd, "config", "user.email", "test@example.com");
+    git(cwd, "config", "user.name", "test");
+    await Bun.write(join(cwd, "README.md"), "base\n");
+    const base = await commit(cwd, "base");
+    await mkdir(join(cwd, ".github/workflows"), { recursive: true });
+    await Bun.write(
+      join(cwd, ".github/workflows/environment.yml"),
+      "on: push\npermissions: {contents: read}\njobs:\n  deploy:\n    environment: production\n    runs-on: ubuntu-latest\n    steps: []\n",
+    );
+    const environment = await commit(cwd, "untrusted production environment");
+    expect(() => checkWorkflowChanges(cwd, base, environment)).toThrow("declares an environment");
   });
 });

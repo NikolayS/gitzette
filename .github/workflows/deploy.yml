@@ -11,6 +11,7 @@ on:
 jobs:
   review-gate:
     permissions:
+      actions: read
       checks: read
       contents: read
       pull-requests: read
@@ -23,9 +24,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Reject write-capable workflows on every remote branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bun scripts/check-repository-workflow-permissions.ts
+        run: bun scripts/check-repository-workflow-permissions.ts --git-only
       - name: Require the reviewed current main merge
         env:
           GH_TOKEN: ${{ github.token }}
