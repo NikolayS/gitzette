@@ -21,7 +21,7 @@ describe("one-shot credential migration boundary", () => {
       jobs: Record<string, {
         needs?: string | string[];
         if?: string;
-        environment?: string;
+        environment?: string | { name?: unknown };
         permissions?: Record<string, string>;
         steps: Array<{ name?: string; run?: string }>;
       }>;
@@ -85,6 +85,15 @@ describe("one-shot credential migration boundary", () => {
     ]);
     const applyProduction = await Bun.file("scripts/apply-production-environment.sh").text();
     const checkProduction = await Bun.file("scripts/check-production-environment.sh").text();
+    for (const [name, source] of [
+      ["apply-production-environment.sh", applyProduction],
+      ["check-production-environment.sh", checkProduction],
+    ]) {
+      expect(source).toContain(`${name} must be executed by path, not sourced or piped to Bash`);
+      expect(await Bun.spawn(["bash", "-c", `source scripts/${name}`], {
+        cwd: process.cwd(), stdout: "pipe", stderr: "pipe",
+      }).exited).toBe(1);
+    }
     expect(applyProduction).not.toContain("{wait_timer,can_admins_bypass");
     expect(applyProduction).toContain('check-production-environment.sh"');
     expect(applyProduction).toContain("post_apply_environment");
@@ -167,6 +176,9 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("repository Actions variables must be empty and repository Actions secrets\n   may contain only the reviewed `CLAUDE_CODE_OAUTH_TOKEN` after migration");
     expect(migrationDoc).toContain("production-policy` job is expected red");
     expect(migrationDoc).toContain("environment_credentials_ready=true");
+    expect(migrationDoc).toContain('environment_secrets_before="$(gh api');
+    expect(migrationDoc).not.toContain("secret_write_started");
+    expect(migrationDoc).toContain('map(select(.name == $current.name))');
 
     const policyGuard = await Bun.file(".github/workflows/credential-migration-policy-guard.yml").text();
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {
@@ -246,9 +258,23 @@ exit "\${FAKE_CHECKER_STATUS:-0}"
     const productionConsumers: string[] = [];
     for await (const name of new Bun.Glob("*.{yml,yaml}").scan(".github/workflows")) {
       const path = `.github/workflows/${name}`;
-      if ((await Bun.file(path).text()).includes("environment: production")) productionConsumers.push(path);
+      const parsedWorkflow = Bun.YAML.parse(await Bun.file(path).text()) as {
+        jobs?: Record<string, { environment?: unknown }>;
+      };
+      for (const [jobName, job] of Object.entries(parsedWorkflow.jobs ?? {})) {
+        if (job.environment === undefined) continue;
+        const environment = typeof job.environment === "string"
+          ? job.environment
+          : typeof job.environment === "object" && job.environment !== null &&
+              typeof (job.environment as { name?: unknown }).name === "string"
+            ? (job.environment as { name: string }).name
+            : undefined;
+        expect(environment, `${path} job ${jobName} must use a literal environment name`).toBeDefined();
+        expect(environment).not.toContain("${{");
+        if (environment === "production") productionConsumers.push(path);
+      }
     }
-    expect(productionConsumers.sort()).toEqual([
+    expect([...new Set(productionConsumers)].sort()).toEqual([
       ".github/workflows/deploy.yml",
       ".github/workflows/migrate-production-credentials.yml",
     ]);
@@ -402,27 +428,26 @@ fi
     expect(exportRun).not.toContain('--arg account_id "$CLOUDFLARE_ACCOUNT_ID"');
     expect(exportRun).not.toContain("--retry");
     const d1Request = JSON.parse(await Bun.file(join(throwawayRoot, "gitzette-credential-migration", "d1-request.json")).text());
-    expect(Object.keys(d1Request)).toEqual(["batch"]);
-    expect(d1Request.batch).toHaveLength(2);
-    expect(d1Request.batch[0].sql).toContain("create table credential_migration_transfer");
-    expect(d1Request.batch[0].sql).not.toContain("if not exists");
-    expect(d1Request.batch[1].sql).toContain("insert into credential_migration_transfer");
-    expect(d1Request.batch[1].sql).toContain("datetime('now')");
-    expect(d1Request.batch[1].params[0]).toBe("77");
-    expect(d1Request.batch[1].params[1]).toBe(Buffer.from(await Bun.file(encryptedPath).arrayBuffer()).toString("base64"));
+    expect(Object.keys(d1Request).sort()).toEqual(["params", "sql"]);
+    const d1Statements = d1Request.sql.split(";").map((sql: string) => sql.trim()).filter(Boolean);
+    expect(d1Statements).toHaveLength(2);
+    expect(d1Statements[0]).toContain("create table credential_migration_transfer");
+    expect(d1Statements[0]).not.toContain("if not exists");
+    expect(d1Statements[1]).toContain("insert into credential_migration_transfer");
+    expect(d1Statements[1]).toContain("datetime('now')");
+    expect(d1Request.params[0]).toBe("77");
+    expect(d1Request.params[1]).toBe(Buffer.from(await Bun.file(encryptedPath).arrayBuffer()).toString("base64"));
     const transferDb = new Database(":memory:");
-    for (const statement of d1Request.batch) {
-      transferDb.prepare(statement.sql).run(...(statement.params ?? []));
-    }
+    transferDb.exec(d1Statements[0]);
+    transferDb.prepare(d1Statements[1]).run(...d1Request.params);
     expect(transferDb.query("select run_id, ciphertext, created_at from credential_migration_transfer").get()).toEqual({
       run_id: "77",
-      ciphertext: d1Request.batch[1].params[1],
+      ciphertext: d1Request.params[1],
       created_at: expect.any(String),
     });
     expect(() => {
-      for (const statement of d1Request.batch) {
-        transferDb.prepare(statement.sql).run(...(statement.params ?? []));
-      }
+      transferDb.exec(d1Statements[0]);
+      transferDb.prepare(d1Statements[1]).run(...d1Request.params);
     }).toThrow();
     transferDb.close();
     expect(await Bun.spawn(["bash", "-c", executableExport], {
@@ -431,6 +456,81 @@ fi
     expect(await Bun.spawn(["bash", "-c", exportRun ?? "exit 99"], {
       env: exportEnv, stdout: "pipe", stderr: "pipe",
     }).exited).toBe(1);
+  });
+
+  test("executes the required policy API readability gate fail closed", async () => {
+    const ci = Bun.YAML.parse(await Bun.file(".github/workflows/ci.yml").text()) as {
+      jobs: Record<string, {
+        "timeout-minutes"?: number;
+        steps: Array<{ name?: string; run?: string }>;
+      }>;
+    };
+    const jobName = "policy-api-readability";
+    const job = ci.jobs[jobName];
+    expect(job).toBeDefined();
+    expect(job["timeout-minutes"]).toBe(2);
+    const runBlock = job.steps.find(({ name }) => name === "Prove policy guard API readability")?.run;
+    expect(runBlock).toBeDefined();
+    const protection = JSON.parse(await Bun.file("config/main-branch-protection.json").text()) as {
+      required_status_checks: { checks: Array<{ context: string }> };
+    };
+    expect(protection.required_status_checks.checks.filter(({ context }) => context === jobName)).toHaveLength(1);
+
+    const root = await mkdtemp(join(tmpdir(), "gitzette-policy-api-readability-"));
+    const gh = join(root, "gh");
+    await Bun.write(gh, `#!/usr/bin/env bash
+set -euo pipefail
+endpoint=""
+for argument in "$@"; do
+  [[ "$argument" != repos/* ]] || endpoint="$argument"
+done
+case "$endpoint" in
+  repos/example/gitzette/environments/production)
+    [[ "\${FAKE_MODE:-ok}" != production-error ]] || { echo forbidden >&2; exit 1; }
+    if [[ "\${FAKE_MODE:-ok}" == production-field-missing ]]; then printf 'false\n'; else printf 'true\n'; fi
+    ;;
+  repos/example/gitzette/environments/production/deployment-branch-policies*)
+    [[ "\${FAKE_MODE:-ok}" != production-policies-error ]] || { echo forbidden >&2; exit 1; }
+    printf '{"branch_policies":[]}\n'
+    ;;
+  repos/example/gitzette/environments?per_page=100)
+    [[ "\${FAKE_MODE:-ok}" != inventory-error ]] || { echo forbidden >&2; exit 1; }
+    if [[ "\${FAKE_MODE:-ok}" == ok-no-migration ]]; then
+      printf '[{"environments":[]}]\n'
+    else
+      printf '[{"environments":[{"name":"credential-migration"}]}]\n'
+    fi
+    ;;
+  repos/example/gitzette/environments/credential-migration)
+    [[ "\${FAKE_MODE:-ok}" != migration-error ]] || { echo forbidden >&2; exit 1; }
+    custom=false
+    [[ "\${FAKE_MODE:-ok}" != ok-custom-true && "\${FAKE_MODE:-ok}" != migration-policies-error ]] || custom=true
+    if [[ "\${FAKE_MODE:-ok}" == migration-field-missing ]]; then
+      jq -nc --argjson custom "$custom" '{deployment_branch_policy:{custom_branch_policies:$custom}}'
+    else
+      jq -nc --argjson custom "$custom" '{can_admins_bypass:false,deployment_branch_policy:{custom_branch_policies:$custom}}'
+    fi
+    ;;
+  repos/example/gitzette/environments/credential-migration/deployment-branch-policies*)
+    [[ "\${FAKE_MODE:-ok}" != migration-policies-error ]] || { echo forbidden >&2; exit 1; }
+    printf '{"branch_policies":[]}\n'
+    ;;
+  *) echo "unexpected endpoint: $endpoint" >&2; exit 91 ;;
+esac
+`);
+    await Bun.spawn(["chmod", "+x", gh]).exited;
+    const execute = (mode: string): Promise<number> => Bun.spawn(["bash", "-c", runBlock ?? "exit 99"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await execute("ok-no-migration")).toBe(0);
+    expect(await execute("ok-custom-false")).toBe(0);
+    expect(await execute("ok-custom-true")).toBe(0);
+    for (const mode of [
+      "production-error", "production-field-missing", "production-policies-error",
+      "inventory-error", "migration-error", "migration-field-missing", "migration-policies-error",
+    ]) expect(await execute(mode)).not.toBe(0);
   });
 
   test("keeps one fixed production ref policy and fails drift loud", async () => {

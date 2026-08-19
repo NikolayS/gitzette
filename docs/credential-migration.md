@@ -229,7 +229,9 @@ text matching is not the authorization proof.
    ```bash
    set -euo pipefail
    environment_credentials_ready=false
-   secret_write_started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+   environment_secrets_before="$(gh api --paginate --slurp \
+     'repos/NikolayS/gitzette/environments/production/secrets?per_page=100' |
+     jq -c 'map(.secrets) | add // []')"
    exported_account_id="$(jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
    api_token="$(jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
    [[ "$exported_account_id" == "$account_id" ]] || {
@@ -241,9 +243,11 @@ text matching is not the authorization proof.
    environment_secrets="$(gh api --paginate --slurp \
      'repos/NikolayS/gitzette/environments/production/secrets?per_page=100' |
      jq -c 'map(.secrets) | add // []')"
-   jq -e --arg since "$secret_write_started" '
+   jq -e --argjson before "$environment_secrets_before" '
      ([.[].name] | sort) == ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
-     all(.[]; .updated_at >= $since)' <<<"$environment_secrets" >/dev/null
+     all(.[] as $current;
+       ($before | map(select(.name == $current.name)) | .[0].updated_at // "") <
+       $current.updated_at)' <<<"$environment_secrets" >/dev/null
    curl --fail --silent --show-error --connect-timeout 10 --max-time 20 --config - \
      "https://api.cloudflare.com/client/v4/accounts/$exported_account_id/workers/services/gitzette" \
      <<<"header = \"Authorization: Bearer $api_token\"" |
