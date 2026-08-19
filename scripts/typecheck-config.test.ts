@@ -19,6 +19,8 @@ describe("TypeScript project coverage", () => {
     expect(workflow).toContain("for attempt in 1 2");
     expect(workflow.match(/timeout --foreground --kill-after=10s 300s apt-get/g)?.length).toBe(2);
     expect(workflow).toContain("s|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g");
+    expect(workflow).toContain("-name 'apt-mirrors.txt'");
+    expect(workflow).toContain("grep -R -Fq 'azure.archive.ubuntu.com' /etc/apt");
     expect(workflow).toContain("failed to replace the unavailable Azure Ubuntu mirror");
     expect(workflow).toContain('if [[ "$attempt" -eq 2 ]]');
     expect(workflow).toContain("timeout --foreground --kill-after=10s 60s dpkg --configure -a");

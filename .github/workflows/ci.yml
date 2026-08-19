@@ -21,8 +21,8 @@ jobs:
             sudo sed -i \
               's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
               "$apt_source"
-          done < <(find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print)
-          if grep -R -Fq 'azure.archive.ubuntu.com' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+          done < <(find /etc/apt -type f \( -name '*.list' -o -name '*.sources' -o -name 'apt-mirrors.txt' \) -print)
+          if grep -R -Fq 'azure.archive.ubuntu.com' /etc/apt 2>/dev/null; then
             echo "failed to replace the unavailable Azure Ubuntu mirror" >&2
             exit 1
           fi
