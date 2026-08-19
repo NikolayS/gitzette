@@ -25,7 +25,7 @@ if [[ "$(jq '.repository_rulesets | length' "$policy")" -ne 1 ]]; then
   exit 1
 fi
 ruleset_name="$(jq -r .name <<<"$ruleset_payload")"
-ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?per_page=100" | jq -c 'add')"
+ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=false&per_page=100" | jq -c 'add')"
 matching_ids="$(jq -r --arg name "$ruleset_name" '.[] | select(.name == $name) | .id' <<<"$ruleset_summaries")"
 if [[ "$(wc -w <<<"$matching_ids")" -gt 1 ]]; then
   echo "multiple repository rulesets are named $ruleset_name" >&2

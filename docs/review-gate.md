@@ -113,14 +113,16 @@ The exporter writes only RSA-encrypted ciphertext to a transient table in the
 private D1 database; no public Actions artifact is created. Stored-value
 verification uses a workflow-dispatch run pinned to the exact protected `main`
 tip. GitHub records that immutable run SHA before the production approval wait,
-and the workflow re-resolves `main` before and after approval. Immediately
-Production permanently admits only reviewed `main` and `v*` refs, so
+and the workflow re-resolves `main` before and after approval. During the
+bootstrap, production admits only reviewed `main` and `v*` refs, so
 verification never widens policy and cancellation cannot strand broader access.
 The independent scheduled guard always checks that same fixed policy. The
 switch-residue job remains red while either switch is open, and the runbook
 requires a green manual guard dispatch after each switch closes because GitHub
 schedules are best-effort. A green cleanup run is not evidence that the bootstrap workflow or
-environment has been removed; #67 verifies that separate teardown. The D1
+environment has been removed; #67 verifies that separate teardown, removes the
+temporary `main` branch policy, and restores the `v*`-only production baseline.
+The D1
 transfer table remains as a durable consumed-once marker until repository
 credential copies are gone.
 

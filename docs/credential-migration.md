@@ -315,11 +315,12 @@ text matching is not the authorization proof.
    `.github/workflows/credential-migration-policy-guard.yml`,
    `config/credential-migration-environment.json`,
    all corresponding apply/check scripts, `scripts/get-github-environment.sh`, and
-   `scripts/credential-migration-gate.test.ts`. Remove
-   the `migration` case from both shared production-environment scripts so no
-   code path points at the deleted config, then delete the live
+   `scripts/credential-migration-gate.test.ts`. Delete the live
    `credential-migration` environment and both repository variables
-   `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Run and record the
-   final green guard before deleting its workflow; after merge, prove the two
+   `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Remove the temporary
+   `main` branch entry from
+   `config/production-environment.json`, apply the restored `v*`-only policy,
+   and audit it before any later release. Run and record the final green guard
+   before deleting its workflow; after merge, prove the two
    workflow files and temporary configs/scripts are absent from `main` and the
    live environment plus both variables return not found.

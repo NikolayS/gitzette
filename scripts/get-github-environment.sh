@@ -28,13 +28,11 @@ include_status=$?
 set -e
 status_code="$(awk '/^HTTP\// { status=$2 } END { print status }' "$response_file")"
 if [[ "$include_status" -eq 0 && "$status_code" =~ ^2[0-9][0-9]$ ]]; then
-  awk '
-    /^HTTP\// { body=0; content=""; next }
-    !body && /^\r?$/ { body=1; next }
-    body { content=content $0 ORS }
-    END { printf "%s", content }
-  ' "$response_file"
-  exit 0
+  if gh api "repos/$repository/environments/$environment"; then
+    exit 0
+  fi
+  echo "environment lookup succeeded transiently but the body re-fetch failed" >&2
+  exit 3
 fi
 if [[ "$status_code" != 404 ]]; then
   echo "environment lookup failed with HTTP status ${status_code:-unknown}:" >&2

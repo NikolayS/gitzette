@@ -129,6 +129,11 @@ esac
 set -euo pipefail
 endpoint="\${*: -1}"
 case "$endpoint" in
+  *collaborators*)
+    id=1345402; login=NikolayS
+    [[ "\${FAKE_MODE:-ok}" != admin ]] || { id=280144521; login=samo-agent; }
+    jq -nc --argjson id "$id" --arg login "$login" '[[{id:$id,login:$login,permissions:{admin:true}}]]'
+    ;;
   *actions/secrets*)
     name=CLOUDFLARE_API_TOKEN; [[ "\${FAKE_MODE:-ok}" != repository ]] || name=SAMO_AGENT_TOKEN
     jq -nc --arg name "$name" '[{secrets:[{name:$name}]}]'
@@ -172,6 +177,7 @@ esac
     expect(await run("variable-value")).toBe(1);
     expect(await run("dependabot")).toBe(1);
     expect(await run("environment-variable")).toBe(1);
+    expect(await run("admin")).toBe(1);
     expect(await Bun.file("scripts/check-branch-protection.sh").text()).toContain("check-reviewer-credential-isolation.sh");
   });
 });

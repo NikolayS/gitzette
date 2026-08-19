@@ -10,6 +10,12 @@ root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && 
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 allowed_cloudflare='["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
 
+collaborators="$(gh api --paginate --slurp "repos/$repository/collaborators?affiliation=all&per_page=100" | jq -c 'add')"
+if ! jq -e '[.[] | select(.permissions.admin == true) | .id] == [1345402]' <<<"$collaborators" >/dev/null; then
+  echo "repository administrator set must be exactly NikolayS (immutable ID 1345402); automation must not be an administrator" >&2
+  exit 1
+fi
+
 repository_secrets="$(gh api --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
 if ! jq -e --argjson allowed "$allowed_cloudflare" 'all(.[]; .name as $name | $allowed | index($name))' <<<"$repository_secrets" >/dev/null; then
   echo "repository contains a secret outside the reviewed Cloudflare migration allowlist" >&2
@@ -20,7 +26,7 @@ repository_variables="$(gh api --paginate --slurp "repos/$repository/actions/var
 if ! jq -e 'all(.[];
   (.name == "CREDENTIAL_EXPORT_OPEN" or .name == "CREDENTIAL_VERIFY_OPEN") and
   .value == "true")' <<<"$repository_variables" >/dev/null; then
-  echo "repository contains an unexpected Actions variable name or value" >&2
+  echo "repository Actions variables may only be CREDENTIAL_EXPORT_OPEN/CREDENTIAL_VERIFY_OPEN with value true; delete a variable to close a switch (false is residue)" >&2
   exit 1
 fi
 

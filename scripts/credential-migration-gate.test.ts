@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash, createPublicKey, generateKeyPairSync } from "node:crypto";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -458,7 +458,12 @@ done
 case "$method:$endpoint" in
   PUT:repos/example/gitzette/environments/production) printf x >>"$FAKE_STATE.put-count"; cat >"$FAKE_STATE.put" ;;
   GET:repos/example/gitzette/environments/production)
+    if [[ "\${FAKE_CREATE:-false}" == true && ! -f "$FAKE_STATE.put" ]]; then
+      if [[ "$*" == *--include* ]]; then printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Not Found"}\n'; fi
+      exit 1
+    fi
     bypass=false; [[ "\${FAKE_ADMIN_BYPASS:-false}" != true ]] || bypass=true
+    [[ "\${FAKE_CREATE:-false}" != true ]] || bypass=true
     policy='{"protected_branches":false,"custom_branch_policies":true}'
     reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
     [[ ! -f "$FAKE_STATE.put" ]] || policy="$(jq -c .deployment_branch_policy "$FAKE_STATE.put")"
@@ -467,6 +472,7 @@ case "$method:$endpoint" in
     fi
     jq -nc --argjson bypass "$bypass" --argjson policy "$policy" --argjson reviewers "$reviewers" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:$reviewers}],deployment_branch_policy:$policy}'
     ;;
+  GET:*environments?per_page=100) printf '[{"environments":[]}]\n' ;;
   GET:*deployment-branch-policies*) jq -c '[{branch_policies:.}]' "$FAKE_STATE" ;;
   POST:*deployment-branch-policies*)
     next_id="$(jq '[.[].id] | max + 1' "$FAKE_STATE")"
@@ -482,11 +488,11 @@ case "$method:$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (adminBypass = false): Promise<number> => Bun.spawn([
+    const run = async (adminBypass = false, create = false): Promise<number> => Bun.spawn([
       "bash", "scripts/apply-production-environment.sh",
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state, FAKE_ADMIN_BYPASS: String(adminBypass) },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state, FAKE_ADMIN_BYPASS: String(adminBypass), FAKE_CREATE: String(create) },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await run()).toBe(0);
@@ -494,6 +500,10 @@ esac
     expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name).sort()).toEqual(["main", "v*"]);
     expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
     expect(await run(true)).toBe(1);
+    expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
+    await rm(`${state}.put`, { force: true });
+    await rm(`${state}.put-count`, { force: true });
+    expect(await run(false, true)).toBe(1);
     expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
   });
 
@@ -711,8 +721,12 @@ endpoint="\${*: -1}"
 case "$endpoint" in
   repos/example/gitzette/environments/production)
     if [[ "\${FAKE_MODE:-ok}" == ok ]]; then printf '{"name":"production"}\n'; exit 0; fi
+    if [[ "\${FAKE_MODE:-ok}" == transient && "$*" != *--include* && -f "$FAKE_STATE.transient" ]]; then
+      printf '{"name":"production"}\n'; exit 0
+    fi
     if [[ "$*" == *--include* ]]; then
       if [[ "\${FAKE_MODE:-ok}" == transient ]]; then
+        : >"$FAKE_STATE.transient"
         printf 'HTTP/1.1 301 Redirect\r\n\r\nHTTP/2.0 200 OK\r\n\r\n{"name":"production"}\n'
         exit 0
       fi
@@ -737,7 +751,7 @@ esac
       "bash", "scripts/get-github-environment.sh", "example/gitzette", "production",
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, FAKE_MODE: mode },
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, FAKE_MODE: mode, FAKE_STATE: join(root, "state") },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await run("ok")).toBe(0);

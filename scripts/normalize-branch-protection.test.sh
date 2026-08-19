@@ -35,5 +35,8 @@ assert_drift dismissal "$(jq -c '.required_pull_request_reviews.dismissal_restri
 assert_drift restrictions "$(jq -c '.restrictions={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 assert_drift missing-ruleset "$protection" '[]'
 assert_drift actions-bypass "$protection" '[{"name":"main-admin-only-updates","target":"branch","enforcement":"active","bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"},{"actor_id":15368,"actor_type":"Integration","bypass_mode":"always"}],"conditions":{"ref_name":{"exclude":[],"include":["refs/heads/main"]}},"rules":[{"type":"update","parameters":{"update_allows_fetch_and_merge":false}}]}]'
+assert_drift ruleset-disabled "$protection" "$(jq -c '.[0].enforcement="disabled"' <<<"$rulesets")"
+assert_drift update-rule-removed "$protection" "$(jq -c '.[0].rules=[]' <<<"$rulesets")"
+assert_drift ref-widened "$protection" "$(jq -c '.[0].conditions.ref_name.include=["~ALL"]' <<<"$rulesets")"
 
 echo "branch-protection normalization and security-field tests passed"
