@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 readonly gitzette_invocation_directory="$PWD"
-gitzette_scripts_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+gitzette_scripts_directory="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 readonly gitzette_scripts_directory
-gitzette_repo_root="$(cd -- "$gitzette_scripts_directory/.." && pwd -P)"
+gitzette_repo_root="$(CDPATH='' cd -P -- "$gitzette_scripts_directory/.." >/dev/null && pwd)"
 wrangler_expected_bin="$gitzette_repo_root/node_modules/.bin/wrangler"
 if [[ -n "${wrangler_bin+set}" && "$wrangler_bin" != "$wrangler_expected_bin" ]]; then
   echo "wrangler_bin is already set to an unexpected path" >&2

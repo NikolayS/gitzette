@@ -46,9 +46,10 @@ the committed fixture and migration chain; they do not inspect or mutate live
 D1. All production schema checks are read-only. Only Wrangler's migration apply
 step mutates production.
 
-Run these checked-in shell entry points from the repository root. They reject
-sourcing, copied wrappers, stdin execution, and missing checked-in helpers; use
-the documented `bun run` commands or `bash scripts/<name>.sh` exactly.
+Execute these shell entry points as files; do not source or pipe them. Each must
+live beside `require-wrangler.sh` and its declared TypeScript entrypoints, so
+out-of-tree wrappers and missing siblings fail closed. Invocation is
+cwd-independent, though the documented `bun run` commands remain preferred.
 
 ## Captured baseline provenance
 

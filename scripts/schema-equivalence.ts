@@ -1,6 +1,6 @@
 type SchemaRow = { type: string; name: string; sql: string | null };
 
-function collapseSqlWhitespace(sql: string): string {
+function collapseSqlWhitespace(sql: string, stripComments = true): string {
   let result = "";
   let quote = "";
   let pendingSpace = false;
@@ -14,13 +14,13 @@ function collapseSqlWhitespace(sql: string): string {
       }
       continue;
     }
-    if (char === "-" && sql[index + 1] === "-") {
+    if (stripComments && char === "-" && sql[index + 1] === "-") {
       index += 2;
       while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") index += 1;
       pendingSpace = true;
       continue;
     }
-    if (char === "/" && sql[index + 1] === "*") {
+    if (stripComments && char === "/" && sql[index + 1] === "*") {
       index += 2;
       while (index < sql.length && !(sql[index] === "*" && sql[index + 1] === "/")) index += 1;
       if (index < sql.length) index += 1;
@@ -60,7 +60,7 @@ export function canonicalSchema(document: unknown): SchemaRow[] {
 
 function strictSql(sql: string | null): string | null {
   if (sql === null) return null;
-  return sql.replace(/\s+/g, " ").replace(/\s*([(),])\s*/g, "$1").trim();
+  return collapseSqlWhitespace(sql, false);
 }
 
 export function strictSchema(document: unknown): SchemaRow[] {

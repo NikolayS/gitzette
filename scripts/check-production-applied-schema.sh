@@ -2,7 +2,9 @@
 set -euo pipefail
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
-gitzette_require_checked_in_caller "check-production-applied-schema.sh" "${BASH_SOURCE[0]:-}" "$0"
+gitzette_require_checked_in_caller \
+  "check-production-applied-schema.sh" "${BASH_SOURCE[0]:-}" "$0" \
+  "applied-migrations.ts" "schema-equivalence.ts"
 
 # Before applying any pending migration, prove that live D1 still matches a
 # clean replay of the migrations already recorded in its ledger.
@@ -32,7 +34,7 @@ fi
 
 "$wrangler_bin" d1 execute gitzette-db --remote --command \
   "SELECT name FROM d1_migrations ORDER BY id" --json >"$ledger_json"
-applied_json="$(bun scripts/applied-migrations.ts migrations "$ledger_json")"
+applied_json="$(bun "$gitzette_scripts_directory/applied-migrations.ts" migrations "$ledger_json")"
 while IFS= read -r migration_name; do
   local_wrangler d1 execute gitzette-db --local --persist-to "$migration_state" \
     --file "migrations/$migration_name" >/dev/null
@@ -41,6 +43,8 @@ done < <(jq -r '.[]' <<<"$applied_json")
 query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY type,name"
 local_wrangler d1 execute gitzette-db --local --persist-to "$migration_state" --command "$query" --json >"$migration_state/schema.json"
 "$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
-bun scripts/schema-equivalence.ts "$migration_state/schema.json" "$remote_json"
+bun "$gitzette_scripts_directory/schema-equivalence.ts" \
+  "$migration_state/schema.json" "$remote_json" \
+  "production schema differs from the applied migration prefix"
 
 echo "Applied-schema gate OK: live D1 matches its reviewed migration-ledger prefix"

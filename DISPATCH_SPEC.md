@@ -161,10 +161,10 @@ bun test
 bash scripts/e2e.sh
 ```
 
-All referenced shell gates must run from the repository root by their checked-in
-paths. Sourcing, wrappers, stdin execution, and missing sibling validators fail
-closed; this is the same invocation contract documented in
-`docs/production-migrations.md`.
+All referenced shell gates must be executed as files, not sourced or piped.
+They must live beside `require-wrangler.sh` and their declared TypeScript
+entrypoints; out-of-tree wrappers and missing siblings fail closed. Invocation
+is cwd-independent, as documented in `docs/production-migrations.md`.
 
 The E2E launches a real local Worker with isolated D1/R2 state and crosses HTTP boundaries from website request through runner auth, claim/lease, ordered stages, artifact upload, validation, immutable publication, and public read. It covers authentication/authorization, quota, deduplication, hostile markup escaping, active and quiet editions, image/hash failures, atomic regeneration rollback, and retry/reclaim.
 

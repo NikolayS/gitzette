@@ -9,12 +9,21 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain('commits/$reviewed_sha/status\")');
     expect(workflow).toContain('.context == "samorev" and .state == "success" and .creator.login == "samo-agent"');
     expect(workflow).toContain('.context == "samorev-gate" and .state == "success"');
-    const secretStepStart = workflow.indexOf("      - name: Verify required Worker secrets");
-    expect(secretStepStart).toBeGreaterThanOrEqual(0);
-    const secretStepEnd = workflow.indexOf("\n      - ", secretStepStart + 1);
-    const secretStep = workflow.slice(secretStepStart, secretStepEnd < 0 ? undefined : secretStepEnd);
-    expect(secretStep).toContain("run: bash scripts/check-production-secrets.sh");
-    expect(secretStep).not.toContain("working-directory:");
+    const gates = [
+      ["Verify required Worker secrets", "bash scripts/check-production-secrets.sh"],
+      ["Verify weekly profile activation prerequisites", "bash scripts/check-weekly-profiles.sh"],
+      ["Verify production drift and apply migrations", "bun run db:migrate"],
+      ["Re-assert the live schema before deploying the Worker", "bash scripts/check-production-schema.sh"],
+    ];
+    for (const [name, command] of gates) {
+      const stepStart = workflow.indexOf(`      - name: ${name}`);
+      expect(stepStart).toBeGreaterThanOrEqual(0);
+      const stepEnd = workflow.indexOf("\n      - ", stepStart + 1);
+      const step = workflow.slice(stepStart, stepEnd < 0 ? undefined : stepEnd);
+      expect(step.split("\n").map(line => line.trim()).filter(line => line.startsWith("run:")))
+        .toEqual([`run: ${command}`]);
+      expect(step).not.toContain("working-directory:");
+    }
     const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
     const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
     expect(reviewGate).toContain("checks: read");

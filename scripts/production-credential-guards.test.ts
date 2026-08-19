@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
@@ -85,6 +88,11 @@ describe("production migration credential guards", () => {
       expect(script).toMatch(new RegExp(
         `gitzette_require_checked_in_caller[\\s\\\\]*"${escapedName}"`,
       ));
+      const invokedTypeScript = [...script.matchAll(/(?:scripts\/|gitzette_scripts_directory\/)([\w-]+\.ts)/g)]
+        .map((match) => match[1]);
+      for (const sibling of invokedTypeScript) {
+        expect(script, `${name} must declare sibling ${sibling}`).toContain(`"${sibling}"`);
+      }
     }
   });
 
@@ -112,6 +120,32 @@ describe("production migration credential guards", () => {
 
     for (const script of ["check-production-baseline.sh", "check-schema.sh", "e2e.sh"]) {
       expect(await Bun.file(`${repoRoot}/scripts/${script}`).text()).toContain("gitzette_require_local");
+    }
+  });
+
+  test("relative callers ignore a hostile CDPATH before the helper changes cwd", async () => {
+    const root = await mkdtemp(join(process.env.RUNNER_TEMP || tmpdir(), "wrangler-cdpath-"));
+    try {
+      await mkdir(join(root, "scripts"));
+      const env: Record<string, string | undefined> = { ...process.env, CDPATH: root };
+      delete env.CLOUDFLARE_API_TOKEN;
+      const child = Bun.spawn(["bash", "scripts/check-production-applied-schema.sh"], {
+        cwd: repoRoot,
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(exitCode).toBe(1);
+      expect(stdout).toBe("");
+      expect(stderr).toContain("CLOUDFLARE_API_TOKEN is required");
+      expect(stderr).not.toContain(root);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });
