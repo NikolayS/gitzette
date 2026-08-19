@@ -11,7 +11,10 @@ describe("deploy review revalidation", () => {
     const documentation = await Bun.file("docs/review-gate.md").text();
     const branchPolicy = JSON.parse(await Bun.file("config/main-branch-protection.json").text());
     const applyBranchPolicy = await Bun.file("scripts/apply-branch-protection.sh").text();
+    const reviewerWrapper = await Bun.file("scripts/run-samorev-review.sh").text();
     expect(workflow).toContain('bash scripts/check-release-review-evidence.sh "$reviewed_sha"');
+    expect(workflow).toContain("TAG_PUSHER_ID: ${{ github.actor_id }}");
+    expect(workflow).toContain('[ "$TAG_PUSHER_ID" != "280144521" ]');
     expect(workflow).not.toContain('/reviews\")');
     expect(workflow).not.toContain('.state == "APPROVED"');
     expect(gate).toContain('actions/workflows/ci.yml/runs?event=pull_request&head_sha=$reviewed_sha');
@@ -31,6 +34,15 @@ describe("deploy review revalidation", () => {
       conditions: { ref_name: { exclude: [], include: ["refs/heads/main"] } },
       rules: [{ type: "update", parameters: { update_allows_fetch_and_merge: false } }],
     }]);
+    expect(branchPolicy.allow_auto_merge).toBe(false);
+    expect(applyBranchPolicy).toContain("{allow_auto_merge}");
+    expect(documentation).toContain("Repository auto-merge is disabled and audited");
+    expect(documentation).toContain("scripts/run-samorev-review.sh");
+    expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_RUN_IDS");
+    expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_NAME");
+    expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_APP_ID=15368");
+    expect(reviewerWrapper).toContain('-f target_url="$publisher_url"');
+    expect(reviewerWrapper).toContain("publish error");
     expect(applyBranchPolicy.indexOf("ruleset_payload=")).toBeLessThan(
       applyBranchPolicy.indexOf("actions/permissions/workflow"),
     );

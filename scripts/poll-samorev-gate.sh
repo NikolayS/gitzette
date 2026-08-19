@@ -5,6 +5,7 @@ set -euo pipefail
 : "${REPOSITORY:?REPOSITORY is required}"
 : "${SAMOREV_NOT_BEFORE:?SAMOREV_NOT_BEFORE is required}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+samorev_target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 max_attempts="${SAMOREV_MAX_ATTEMPTS:-60}"
 sleep_seconds="${SAMOREV_SLEEP_SECONDS:-30}"
 
@@ -70,7 +71,8 @@ for attempt in $(seq 1 "$max_attempts"); do
 
   api_failures=0
   verdict_rc=0
-  SAMOREV_NOT_BEFORE="$SAMOREV_NOT_BEFORE" bash "$root/scripts/evaluate-samorev-status.sh" <<<"$statuses" || verdict_rc=$?
+  SAMOREV_NOT_BEFORE="$SAMOREV_NOT_BEFORE" SAMOREV_TARGET_URL="$samorev_target_url" \
+    bash "$root/scripts/evaluate-samorev-status.sh" <<<"$statuses" || verdict_rc=$?
   case "$verdict_rc" in
     0)
       publish_terminal success "CODEOWNER-published samorev verdict passed"

@@ -9,6 +9,9 @@ export REPOSITORY=NikolayS/gitzette
 export SAMOREV_NOT_BEFORE=2026-08-16T00:00:00Z
 export SAMOREV_SLEEP_SECONDS=0
 export SAMOREV_PUBLISH_LOG="$test_dir/published"
+export GITHUB_SERVER_URL=https://github.com
+export GITHUB_REPOSITORY=NikolayS/gitzette
+export GITHUB_RUN_ID=7
 
 run_case() {
   name="$1"
@@ -25,8 +28,8 @@ run_case() {
   [[ "$(tail -1 "$SAMOREV_PUBLISH_LOG")" == "$expected_terminal" ]] || { echo "$name published the wrong terminal status" >&2; exit 1; }
 }
 
-pending='[[{"context":"samorev","state":"pending","created_at":"2026-08-16T00:01:00Z","creator":{"id":280144521,"login":"samo-agent"}}]]'
-success='[[{"context":"samorev","state":"success","created_at":"2026-08-16T00:01:00Z","creator":{"id":280144521,"login":"samo-agent"}}]]'
+pending='[[{"context":"samorev","state":"pending","created_at":"2026-08-16T00:01:00Z","target_url":"https://github.com/NikolayS/gitzette/actions/runs/7","creator":{"id":280144521,"login":"samo-agent"}}]]'
+success='[[{"context":"samorev","state":"success","created_at":"2026-08-16T00:01:00Z","target_url":"https://github.com/NikolayS/gitzette/actions/runs/7","creator":{"id":280144521,"login":"samo-agent"}}]]'
 run_case transport 1 'error|GitHub status API failed three consecutive times' __FAIL__ __FAIL__ __FAIL__
 run_case malformed 1 'error|samorev status response was malformed three times' not-json not-json not-json
 run_case interleaved 0 'success|CODEOWNER-published samorev verdict passed' __FAIL__ "$pending" __FAIL__ "$success"

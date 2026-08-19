@@ -89,6 +89,11 @@ text matching is not the authorization proof.
    environment and hard-fails if the API reports bypass enabled. Nik must disable
    it in the UI, rerun the apply command, and pass the checker before opening a switch.
 
+   The export creates the temporary `credential_migration_transfer` table as a
+   durable consumed-once marker. Production schema gates exclude only that exact
+   table during this bootstrap; #67 removes the exclusion after dropping the
+   table and proves the ordinary exact-schema gate again.
+
    ```bash
    bash scripts/check-production-environment.sh
    bash scripts/apply-credential-migration-environment.sh
@@ -322,7 +327,9 @@ text matching is not the authorization proof.
    `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Remove the temporary
    `main` branch entry from
    `config/production-environment.json`, apply the restored `v*`-only policy,
-   and audit it before any later release. Run and record the final green guard
+   remove the `credential_migration_transfer` exclusions from all three
+   production schema gates, and audit the ordinary exact-schema policy before
+   any later release. Run and record the final green guard
    before deleting its workflow; after merge, prove the two
    workflow files and temporary configs/scripts are absent from `main` and the
    live environment plus both variables return not found.

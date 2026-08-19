@@ -61,7 +61,8 @@ approval count is zero. The active `main-admin-only-updates` ruleset permits
 only RepositoryRole 5 (repository administrator) to update `main`, so a
 same-repository Actions token cannot turn forged contexts into a merge. The
 administrator remains subject to classic technical gates and resolved
-conversations. GitHub's repository-rules API defines actor ID 5 as the
+conversations. Repository auto-merge is disabled and audited; only Nik's
+explicit merge can use the administrator bypass. GitHub's repository-rules API defines actor ID 5 as the
 repository-admin role; the pre-apply inventory requires the only admin to be
 NikolayS (`1345402`), and the post-apply response must report that applying
 identity's `current_user_can_bypass` as `always`. Merge does not authorize a release:
@@ -71,6 +72,14 @@ in the non-bypassable `production` environment. Repository Actions cannot mint
 that environment approval. This is why a PR approval is redundant for the
 release identity boundary without pretending that status names are equivalent
 to approvals.
+
+The repository Actions token cannot read the administration-scoped ruleset and
+collaborator inventories needed by `scripts/check-branch-protection.sh`; putting
+an administrator token in Actions would destroy the boundary it audits. The
+external readiness operator therefore runs that live audit after every policy
+or repository-settings change, immediately before publishing terminal samorev
+success, immediately before merge, and immediately before creating a release
+tag. Any unreadable or drifting audit blocks the operation.
 
 The live GitHub API shape was checked while PR #68 was open at head
 `b55b9da15c142ed35ba9541a3b6652f0f3e631ec`: run `32266543608` reported event
@@ -110,7 +119,9 @@ the live `credential-migration` environment, and `CREDENTIAL_EXPORT_OPEN` plus
 `CREDENTIAL_VERIFY_OPEN` in the same recovery cycle. After its stored-value verification
 and repository-copy deletion, deployment credentials are available only to the
 protected `production` environment; tag-triggered deploys require that
-environment's approval.
+environment's approval. Release tags must be pushed by immutable `samo-agent`
+ID `280144521`, leaving Nik as the distinct sole production approver; a tag
+pushed by Nik or repository Actions fails before deployment.
 
 The exporter writes only RSA-encrypted ciphertext to a transient table in the
 private D1 database; no public Actions artifact is created. Stored-value
@@ -156,19 +167,25 @@ cannot activate its OAuth credential.
 
 ## Requesting and approving a verdict
 
-After every push or PR edit, wait until `samorev-gate` is pending, then run from
-a clean checkout of the PR head:
+After every push or PR edit, wait until exact-head CI is green and
+`samorev-gate` is pending. Resolve the current publisher run and job database
+IDs, then run from a clean checkout of the PR head:
 
 ```bash
 SAMOREV_HOME=/path/to/samorev
 SAMO_TOKEN="$(gh auth token --user samo-agent)"
 GH_TOKEN="$SAMO_TOKEN" GITHUB_REPOSITORY=NikolayS/gitzette \
   bash scripts/check-reviewer-credential-isolation.sh
-GH_TOKEN="$SAMO_TOKEN" \
-  bun "$SAMOREV_HOME/src/cli.ts" review \
-  https://github.com/NikolayS/gitzette/pull/NUMBER --blocking --fetch
+GH_TOKEN="$SAMO_TOKEN" SAMOREV_HOME="$SAMOREV_HOME" \
+  bash scripts/run-samorev-review.sh NUMBER PUBLISHER_RUN_ID PUBLISHER_CHECK_RUN_ID
 unset SAMO_TOKEN
 ```
+
+The wrapper pins samorev commit `1397e976`, resolves the exact PR head, verifies
+the protected-base publisher job, excludes only that exact pending self-check,
+and publishes `samorev` pending plus a terminal success/failure/error under
+immutable user ID `280144521`. Every status targets the exact publisher run;
+the PR-time evaluator and release gate both reject another target URL.
 
 Only after that exact-head review exits zero, CI is green, conversations are
 resolved, and the readiness review confirms the same head SHA may the PR merge.

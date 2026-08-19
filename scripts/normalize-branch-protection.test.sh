@@ -15,7 +15,7 @@ protection='{
 }'
 
 actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
-expected="$(jq -Sc 'del(.audit_command) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
+expected="$(jq -Sc 'del(.audit_command,.allow_auto_merge) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
 [[ "$actual" == "$expected" ]] || { echo "compliant protection fixture did not normalize to policy" >&2; exit 1; }
 
 mutated="$(jq -c '.enforce_admins.enabled=false' <<<"$protection")"

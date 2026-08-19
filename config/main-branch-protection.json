@@ -1,5 +1,6 @@
 {
   "audit_command": "bash scripts/check-branch-protection.sh",
+  "allow_auto_merge": false,
   "actions_workflow_permissions": {
     "default_workflow_permissions": "read",
     "can_approve_pull_request_reviews": false

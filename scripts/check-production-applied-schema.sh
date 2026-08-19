@@ -37,7 +37,7 @@ while IFS= read -r migration_name; do
     --file "migrations/$migration_name" >/dev/null
 done < <(jq -r '.[]' <<<"$applied_json")
 
-query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY type,name"
+query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ('d1_migrations','credential_migration_transfer') ORDER BY type,name"
 local_wrangler d1 execute gitzette-db --local --persist-to "$migration_state" --command "$query" --json >"$migration_state/schema.json"
 "$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
 bun scripts/schema-equivalence.ts "$migration_state/schema.json" "$remote_json"

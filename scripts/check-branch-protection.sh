@@ -3,7 +3,13 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
-expected="$(jq -Sc 'del(.audit_command) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
+expected="$(jq -Sc 'del(.audit_command,.allow_auto_merge) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
+expected_auto_merge="$(jq -r .allow_auto_merge "$root/config/main-branch-protection.json")"
+actual_auto_merge="$(gh api "repos/$repository" --jq .allow_auto_merge)"
+if [[ "$actual_auto_merge" != "$expected_auto_merge" ]]; then
+  echo "repository allow_auto_merge differs from config/main-branch-protection.json" >&2
+  exit 1
+fi
 protection="$(gh api "repos/$repository/branches/main/protection")"
 workflow_permissions="$(gh api "repos/$repository/actions/permissions/workflow")"
 ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=true&per_page=100" | jq -c 'add')"

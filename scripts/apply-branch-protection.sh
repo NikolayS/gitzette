@@ -6,6 +6,8 @@ repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url
 policy="$root/config/main-branch-protection.json"
 owner_type="$(gh api "repos/$repository" --jq .owner.type)"
 
+jq '{allow_auto_merge}' "$policy" | gh api --method PATCH "repos/$repository" --input - --silent
+
 audit_partial_apply() {
   rc=$?
   if [[ "$rc" -ne 0 ]]; then

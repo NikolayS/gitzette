@@ -23,6 +23,21 @@ if [[ "$environment_status" -eq 0 ]]; then
     echo 'disable "Allow administrators to bypass configured protection rules" for environment credential-migration in Settings -> Environments before applying' >&2
     exit 1
   fi
+  if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies <<<"$live_environment")" == true ]]; then
+    live="$(gh api --paginate --slurp "repos/$repository/environments/$environment/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+    expected_policies="$(jq -c '.branch_policies' "$policy")"
+    stale_policy_ids="$(jq -r --argjson expected "$expected_policies" '
+      group_by([.name,.type])[] as $group |
+      if any($expected[]; .name == $group[0].name and .type == $group[0].type)
+      then $group[1:][]?.id
+      else $group[].id
+      end
+    ' <<<"$live")"
+    while IFS= read -r policy_id; do
+      [[ -n "$policy_id" ]] || continue
+      gh api --method DELETE "repos/$repository/environments/$environment/deployment-branch-policies/$policy_id" --silent
+    done <<<"$stale_policy_ids"
+  fi
 elif [[ "$environment_status" -eq 4 ]]; then
   created_environment=true
 else
@@ -48,20 +63,6 @@ if [[ "$(jq -r .can_admins_bypass <<<"$post_apply_environment")" != false ]]; th
   fi
   exit 1
 fi
-
-live="$(gh api --paginate --slurp "repos/$repository/environments/$environment/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
-expected_policies="$(jq -c '.branch_policies' "$policy")"
-stale_policy_ids="$(jq -r --argjson expected "$expected_policies" '
-  group_by([.name,.type])[] as $group |
-  if any($expected[]; .name == $group[0].name and .type == $group[0].type)
-  then $group[1:][]?.id
-  else $group[].id
-  end
-' <<<"$live")"
-while IFS= read -r policy_id; do
-  [[ -n "$policy_id" ]] || continue
-  gh api --method DELETE "repos/$repository/environments/$environment/deployment-branch-policies/$policy_id" --silent
-done <<<"$stale_policy_ids"
 
 if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies "$policy")" == true ]]; then
   live="$(gh api --paginate --slurp "repos/$repository/environments/$environment/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"

@@ -2,8 +2,8 @@
 
 Before merging, follow [`docs/review-gate.md`](docs/review-gate.md). The former
 automatic PR workflow `claude-code-review.yml` was removed; the mention-driven
-`claude.yml` workflow remains. The canonical check and CODEOWNER requirements
-live only in `docs/review-gate.md`.
+`claude.yml` workflow remains. The canonical checks and merge-boundary
+requirements live only in `docs/review-gate.md`.
 
 Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or illustration rules.
 

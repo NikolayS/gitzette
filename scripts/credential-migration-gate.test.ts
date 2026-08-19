@@ -137,6 +137,14 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("GitHub pins the workflow\n   run to the immutable `main` SHA at dispatch");
     expect(migrationDoc).toContain("Production is temporarily widened");
     expect(migrationDoc).toContain("#67 restores the `v*`-only policy");
+    expect(migrationDoc).toContain("#67 removes the exclusion after dropping the");
+    for (const schemaGate of [
+      "scripts/check-production-applied-schema.sh",
+      "scripts/check-production-drift.sh",
+      "scripts/check-production-schema.sh",
+    ]) {
+      expect(await Bun.file(schemaGate).text()).toContain("credential_migration_transfer");
+    }
     expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
       migrationDoc.indexOf("drop table credential_migration_transfer"),
