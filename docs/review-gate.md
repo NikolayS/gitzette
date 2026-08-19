@@ -23,8 +23,11 @@ workflow queries GitHub's workflow-run records by exact path, event, and PR
 head SHA, requires the latest `.github/workflows/ci.yml` and protected-base
 `.github/workflows/samorev-gate.yml` runs to have succeeded, and separately
 requires the latest `samorev` status to come from immutable user ID `280144521`.
-Same-repository workflows can imitate names but cannot create a run record for
-either exact workflow path or publish as that external user. The final deploy
+The `pull_request` CI workflow is head-controlled evidence, not an identity
+boundary; a PR can rewrite its own `ci.yml`. The unforgeable legs are the
+protected-base `pull_request_target` run record and the external user's status.
+Before publishing success, the external reviewer must inspect every
+`.github/workflows/**` change in the full base-to-head delta. The final deploy
 job also requires Nik's approval in the non-bypassable `production`
 environment.
 
@@ -71,8 +74,11 @@ default `v*`-only policy, and `scripts/check-production-environment.sh default`
 fails loud if that widening lingers. A protected-main scheduled workflow runs
 that check approximately every five minutes on GitHub's best-effort scheduler
 during the bootstrap window. It is expected red
-only while the production verification run is waiting; the runbook requires an
-explicit green dispatch after cleanup, which is the authoritative signal. The D1 transfer table remains as a
+only while a migration switch is open or the production verification run is
+waiting; the runbook requires an explicit green dispatch after closing both
+switches and restoring production, which is the authoritative window-cleanup
+signal. It is not evidence that the bootstrap workflow or environment has been
+removed; #67 verifies that separate teardown. The D1 transfer table remains as a
 durable consumed-once marker until repository credential copies are gone.
 
 ## Artifact cleanup recovery

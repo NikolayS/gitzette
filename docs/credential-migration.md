@@ -79,11 +79,15 @@ session after service restoration.
    ```
 
    This preflight dispatch must be green before the scheduled guard is relied
-   on; API-read failures exit separately from policy drift.
+   on; API-read failures exit separately from policy drift. Green proves the
+   default production policy and that both migration switches are absent. It
+   does not claim that the intentionally installed bootstrap workflow or
+   migration environment has already been removed.
 
    The default production policy remains `v*` only. Running
    `bash scripts/check-production-environment.sh` without `migration` later
-   fails while the temporary tag is admitted and makes stale widening loud.
+   fails while protected `main` is temporarily admitted and makes stale
+   widening loud.
 
 2. Open the independently removable switch and dispatch exactly one export as
    immutable runner ID `280144521` (`samo-agent`). Workflow concurrency only
@@ -260,12 +264,15 @@ session after service restoration.
    ```
 
    A best-effort scheduled guard also runs approximately every five minutes on
-   GitHub's scheduler. It runs
-   `scripts/check-production-environment.sh default` from protected `main` and
-   is expected to be red during the legitimate production approval wait. After
-   cleanup, explicitly dispatch that guard and require it to turn green; a red
-   result after the verify run is no longer waiting is lingering widening. The
-   explicit post-cleanup dispatch, not schedule timing, is authoritative.
+   GitHub's scheduler. It checks the default production policy and absence of
+   both migration-switch variables from protected `main`, and is expected to be
+   red during an open export switch or the legitimate production approval wait.
+   After cleanup, explicitly dispatch that guard and require it to turn green;
+   a red result after the verify run is no longer waiting is lingering
+   widening. The explicit post-cleanup dispatch, not schedule timing, is
+   authoritative for closing this operational window. It does not prove final
+   deletion of the bootstrap workflow or environment; the #67 teardown diff
+   and live deletion checks prove that separately.
    Record its run ID next to the pre-widening run ID and reconcile every red
    scheduled run between them to this single verification window.
 
@@ -298,5 +305,7 @@ session after service restoration.
    the `migration` case from both shared production-environment scripts so no
    code path points at the deleted config, then delete the live
    `credential-migration` environment and both repository variables
-   `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Require the
-   default production-policy guard to pass before normal development resumes.
+   `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Run and record the
+   final green guard before deleting its workflow; after merge, prove the two
+   workflow files and temporary configs/scripts are absent from `main` and the
+   live environment plus both variables return not found.

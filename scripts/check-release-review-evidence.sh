@@ -37,8 +37,7 @@ statuses="$(gh api "repos/$repository/commits/$reviewed_sha/statuses?per_page=10
 if ! jq -e '
   [.[] | select(.context == "samorev")] |
   sort_by(.created_at, .id) | last |
-  .state == "success" and .creator.id == 280144521 and
-  .creator.login == "samo-agent"
+  .state == "success" and .creator.id == 280144521
 ' <<<"$statuses" >/dev/null; then
   echo "reviewed head lacks the latest immutable-reviewer samorev verdict" >&2
   exit 1

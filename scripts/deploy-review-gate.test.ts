@@ -16,6 +16,7 @@ describe("deploy review revalidation", () => {
     expect(gate).toContain('.path == ".github/workflows/samorev-gate.yml"');
     expect(gate).toContain("sort_by(.created_at, .id) | last");
     expect(gate).toContain('.creator.id == 280144521');
+    expect(gate).not.toContain('.creator.login == "samo-agent"');
     const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
     const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
     expect(reviewGate).toContain("actions: read");
@@ -63,6 +64,7 @@ case "$endpoint" in
     latest_state=success; latest_id=280144521; latest_login=samo-agent
     if [[ "$mode" == latest-review-failure ]]; then latest_state=failure; fi
     if [[ "$mode" == forged-reviewer ]]; then latest_id=1; latest_login=attacker; fi
+    if [[ "$mode" == renamed-reviewer ]]; then latest_login=renamed-samo; fi
     jq -nc --arg state "$latest_state" --argjson actor "$latest_id" --arg login "$latest_login" '[
       {id:1,context:"samorev",state:"success",created_at:"2026-01-01T00:00:00Z",creator:{id:280144521,login:"samo-agent"}},
       {id:2,context:"samorev",state:$state,created_at:"2026-01-02T00:00:00Z",creator:{id:$actor,login:$login}}]'
@@ -80,6 +82,7 @@ esac
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await run("success")).toBe(0);
+    expect(await run("renamed-reviewer")).toBe(0);
     for (const mode of [
       "latest-ci-failure", "no-ci-path", "latest-gate-failure", "no-gate-path",
       "latest-review-failure", "forged-reviewer", "api-error",

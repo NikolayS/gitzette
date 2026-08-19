@@ -138,7 +138,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
       migrationDoc.indexOf("drop table credential_migration_transfer"),
     );
-    expect(migrationDoc).toContain("expected to be red during the legitimate production approval wait");
+    expect(migrationDoc).toContain("red during an open export switch or the legitimate production approval wait");
     for (const teardownItem of [
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
       "production-environment-migration.json", "credential-migration-gate.test.ts",
@@ -152,7 +152,10 @@ describe("one-shot credential migration boundary", () => {
     };
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
     expect(policyGuard).toContain("bash scripts/check-production-environment.sh default");
-    expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" && "$IS_FORK" == "false" ]]');
+    expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" ]]');
+    expect(policyGuard).not.toContain("github.event.repository.fork");
+    expect(policyGuard).toContain("actions/variables?per_page=100");
+    expect(policyGuard).toContain('a credential migration switch remains open');
     expect(policyGuard).not.toContain("if: ${{ github.repository == 'NikolayS/gitzette' }}");
     expect(parsedPolicyGuard.permissions).toEqual({ actions: "read", contents: "read", deployments: "read" });
 
