@@ -308,12 +308,17 @@ set -euo pipefail
 endpoint="\${*: -1}"
 case "$endpoint" in
   repos/example/gitzette/environments/production)
-    [[ "\${FAKE_API_ERROR:-false}" != true ]] || { echo "fake production API failure" >&2; exit 1; }
+    case "\${FAKE_API_ERROR:-none}" in
+      auth) echo "fake production API failure" >&2; exit 1 ;;
+      missing) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+    esac
     printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
     ;;
   *deployment-branch-policies*)
     if [[ "\${FAKE_LIVE_POLICY:-default}" == migration ]]; then
       printf '%s\\n' '[{"branch_policies":[{"name":"v*","type":"tag"},{"name":"credential-migration-verify","type":"tag"}]}]'
+    elif [[ "\${FAKE_LIVE_POLICY:-default}" == empty ]]; then
+      printf '%s\\n' '[{"branch_policies":[]}]'
     else
       printf '%s\\n' '[{"branch_policies":[{"name":"v*","type":"tag"}]}]'
     fi
@@ -322,10 +327,10 @@ case "$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (mode: string, live: string, apiError = false): Promise<{ code: number; stdout: string; stderr: string }> => {
+    const run = async (mode: string, live: string, apiError = "none"): Promise<{ code: number; stdout: string; stderr: string }> => {
       const child = Bun.spawn(["bash", "scripts/check-production-environment.sh", mode], {
         cwd: process.cwd(),
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_LIVE_POLICY: live, FAKE_API_ERROR: String(apiError) },
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_LIVE_POLICY: live, FAKE_API_ERROR: apiError },
         stdout: "pipe", stderr: "pipe",
       });
       const [code, stdout, stderr] = await Promise.all([
@@ -342,10 +347,17 @@ esac
     expect(migration.stdout).toContain("admitted refs: v*, credential-migration-verify");
     expect((await run("migration", "default")).code).toBe(1);
     expect((await run("attacker", "default")).code).toBe(2);
-    const apiFailure = await run("default", "default", true);
+    const empty = await run("default", "empty");
+    expect(empty.code).toBe(1);
+    expect(empty.stderr).toContain('"branch_policies":[]');
+    const apiFailure = await run("default", "default", "auth");
     expect(apiFailure.code).toBe(1);
     expect(apiFailure.stderr).toContain("unable to read production environment");
     expect(apiFailure.stderr).toContain("fake production API failure");
+    const missing = await run("default", "default", "missing");
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("production environment is missing; run scripts/apply-production-environment.sh default");
+    expect(missing.stderr).toContain("HTTP 404");
   });
 
   test("applies migration widening and then actually removes it in default mode", async () => {
@@ -353,7 +365,7 @@ esac
     const bin = join(root, "bin");
     await mkdir(bin);
     const state = join(root, "policies.json");
-    await Bun.write(state, '[{"id":10,"name":"v*","type":"tag"}]');
+    await Bun.write(state, '[{"id":10,"name":"v*","type":"tag"},{"id":11,"name":"v*","type":"tag"}]');
     const gh = join(bin, "gh");
     await Bun.write(gh, `#!/usr/bin/env bash
 set -euo pipefail

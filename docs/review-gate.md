@@ -52,8 +52,11 @@ The exporter writes only RSA-encrypted ciphertext to a transient table in the
 private D1 database; no public Actions artifact is created. Stored-value
 verification uses the exact non-release tag `credential-migration-verify`,
 which is included in the reviewed temporary production policy and must resolve
-to the current protected `main` tip. No out-of-band production-policy widening
-or trap-based restoration is required.
+to the current protected `main` tip. Immediately before verification,
+production is temporarily widened to
+`config/production-environment-migration.json`; an exit trap restores the
+default `v*`-only policy, and `scripts/check-production-environment.sh default`
+fails loud if that widening lingers.
 
 ## Artifact cleanup recovery
 

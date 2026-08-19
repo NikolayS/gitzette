@@ -16,11 +16,15 @@ expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.na
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
 if ! environment="$(gh api "repos/$repository/environments/production" 2>"$error_file")"; then
-  echo "unable to read production environment; apply only after resolving this API error:" >&2
+  if grep -Eq 'HTTP 404([^0-9]|$)' "$error_file"; then
+    echo "production environment is missing; run scripts/apply-production-environment.sh default" >&2
+  else
+    echo "unable to read production environment; apply only after resolving this API error:" >&2
+  fi
   sed 's/^/  /' "$error_file" >&2
   exit 1
 fi
-policies="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add')"
+policies="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
 actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$policies" '{
   wait_timer: ([ $environment.protection_rules[] | select(.type == "wait_timer") | .wait_timer ][0] // 0),
   can_admins_bypass: $environment.can_admins_bypass,

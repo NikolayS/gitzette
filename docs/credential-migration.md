@@ -58,6 +58,7 @@ session after service restoration.
 
    ```bash
    bash scripts/apply-credential-migration-environment.sh
+   bash scripts/apply-production-environment.sh default
    bash scripts/check-production-environment.sh default
    ```
 

@@ -17,11 +17,17 @@ esac
 jq '{wait_timer,can_admins_bypass,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' "$policy" |
   gh api --method PUT "repos/$repository/environments/production" --input - --silent
 
-live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add')"
+live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
 expected_policies="$(jq -c '.branch_policies' "$policy")"
 while IFS= read -r policy_id; do
   gh api --method DELETE "repos/$repository/environments/production/deployment-branch-policies/$policy_id" --silent
-done < <(jq -r --argjson expected "$expected_policies" '.[] | select(. as $live | any($expected[]; .name == $live.name and .type == $live.type) | not) | .id' <<<"$live")
+done < <(jq -r --argjson expected "$expected_policies" '
+  group_by([.name,.type])[] as $group |
+  if any($expected[]; .name == $group[0].name and .type == $group[0].type)
+  then $group[1:][]?.id
+  else $group[].id
+  end
+' <<<"$live")
 
 live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
 
