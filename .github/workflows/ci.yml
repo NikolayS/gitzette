@@ -22,8 +22,8 @@ jobs:
             --jq 'has("can_admins_bypass")' | grep -qx true
           gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=1" >/dev/null
           environments="$(gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/environments?per_page=100" \
-            --jq 'map(.environments) | add // []')"
+            "repos/$GITHUB_REPOSITORY/environments?per_page=100" |
+            jq -c 'map(.environments) | add // []')"
           if jq -e 'any(.[]; .name == "credential-migration")' <<<"$environments" >/dev/null; then
             migration_environment="$(gh api \
               "repos/$GITHUB_REPOSITORY/environments/credential-migration")"
