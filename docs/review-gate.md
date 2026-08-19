@@ -297,13 +297,16 @@ gh api 'repos/NikolayS/gitzette/contents/.github/workflows/samorev-gate.yml?ref=
 
 ## Policy audit and bootstrap
 
-`config/main-branch-protection.json` records the reviewed classic-branch policy
-plus the sole active `main-admin-only-updates` ruleset.
+`config/main-branch-protection.json` records the reviewed classic-branch policy,
+the active `main-admin-only-updates` ruleset, and the active
+`release-tags-samo-only` tag ruleset.
 `scripts/check-branch-protection.sh` exact-matches it against live
 classic branch protection, Actions workflow permissions, and full repository or
 inherited ruleset details. Its approval count is zero and must not be restored
 or awaited. The ruleset's only bypass actor is RepositoryRole 5; no Integration
-or GitHub Actions actor may update `main`. The apply script does not delete rulesets; unexpected
+or GitHub Actions actor may update `main`. The tag ruleset's only bypass actor
+is immutable user ID `280144521`; no Integration or GitHub Actions actor may
+create, update, or delete `v*`. The apply script does not delete rulesets; unexpected
 rulesets must be reconciled deliberately.
 
 For the bootstrap PR, require its own exact-head CI, a clean samorev verdict,
