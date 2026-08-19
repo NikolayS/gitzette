@@ -10,20 +10,34 @@ root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && 
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 allowed_cloudflare='["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
 allowed_repository='["CLAUDE_CODE_OAUTH_TOKEN","CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
+error_file="$(mktemp)"
+trap 'rm -f "$error_file"' EXIT
 
-collaborators="$(gh api --paginate --slurp "repos/$repository/collaborators?affiliation=all&per_page=100" | jq -c 'add // []')"
+read_api() {
+  local label="$1"
+  shift
+  local response
+  if ! response="$(gh api "$@" 2>"$error_file")"; then
+    echo "unable to read $label:" >&2
+    sed 's/^/  /' "$error_file" >&2
+    exit 3
+  fi
+  printf '%s\n' "$response"
+}
+
+collaborators="$(read_api "repository collaborators" --paginate --slurp "repos/$repository/collaborators?affiliation=all&per_page=100" | jq -c 'add // []')"
 if ! jq -e '[.[] | select(.permissions.admin == true) | .id] == [1345402]' <<<"$collaborators" >/dev/null; then
   echo "repository administrator set must be exactly NikolayS (immutable ID 1345402); automation must not be an administrator" >&2
   exit 1
 fi
 
-repository_secrets="$(gh api --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
+repository_secrets="$(read_api "repository Actions secrets" --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
 if ! jq -e --argjson allowed "$allowed_repository" 'all(.[]; .name as $name | $allowed | index($name))' <<<"$repository_secrets" >/dev/null; then
   echo "repository contains a secret outside the reviewed Claude/migration allowlist" >&2
   exit 1
 fi
 
-repository_variables="$(gh api --paginate --slurp "repos/$repository/actions/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
+repository_variables="$(read_api "repository Actions variables" --paginate --slurp "repos/$repository/actions/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
 if ! jq -e 'all(.[];
   (.name == "CREDENTIAL_EXPORT_OPEN" or .name == "CREDENTIAL_VERIFY_OPEN") and
   .value == "true")' <<<"$repository_variables" >/dev/null; then
@@ -31,16 +45,16 @@ if ! jq -e 'all(.[];
   exit 1
 fi
 
-dependabot_secrets="$(gh api --paginate --slurp "repos/$repository/dependabot/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
+dependabot_secrets="$(read_api "Dependabot secrets" --paginate --slurp "repos/$repository/dependabot/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
 if [[ "$(jq length <<<"$dependabot_secrets")" -ne 0 ]]; then
   echo "repository contains an unexpected Dependabot secret" >&2
   exit 1
 fi
 
-environments="$(gh api --paginate --slurp "repos/$repository/environments?per_page=100" | jq -c 'map(.environments) | add // []')"
+environments="$(read_api "environment inventory" --paginate --slurp "repos/$repository/environments?per_page=100" | jq -c 'map(.environments) | add // []')"
 while IFS= read -r environment; do
-  secrets="$(gh api --paginate --slurp "repos/$repository/environments/$environment/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
-  variables="$(gh api --paginate --slurp "repos/$repository/environments/$environment/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
+  secrets="$(read_api "$environment environment secrets" --paginate --slurp "repos/$repository/environments/$environment/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
+  variables="$(read_api "$environment environment variables" --paginate --slurp "repos/$repository/environments/$environment/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
   if [[ "$(jq length <<<"$variables")" -ne 0 ]]; then
     echo "$environment contains an unexpected environment variable" >&2
     exit 1

@@ -152,7 +152,7 @@ run_failure multiple
 run_failure admin-bypass
 run_failure mismatch
 run_failure nonadmin-main-denied
-assert_file_contains "$test_dir/nonadmin-main-denied.err" 'unexpected bypass'
+assert_file_contains "$test_dir/nonadmin-main-denied.err" 'lacks the required always-bypass'
 
 run_nonadmin_failure() {
   mode="$1"
@@ -169,6 +169,8 @@ for mode in nonadmin-admin nonadmin-wrong-id nonadmin-wrong-token nonadmin-zero 
   run_nonadmin_failure "$mode"
 done
 assert_file_contains "$test_dir/nonadmin-wrong-token.err" 'GH_TOKEN is not the samo-agent identity'
+assert_file_contains "$test_dir/nonadmin-main-denied.err" 'lacks the required always-bypass'
+assert_file_contains "$test_dir/nonadmin-tag-denied.err" 'lacks the required always-bypass'
 
 one_record="$test_dir/one"
 GITHUB_REPOSITORY=example/gitzette FAKE_MODE=one FAKE_RECORD="$one_record" \

@@ -29,7 +29,7 @@ while IFS= read -r ruleset_name; do
   fi
   live="$(gh api "repos/$repository/rulesets/$ruleset_ids")"
   if [[ "$(jq -r .current_user_can_bypass <<<"$live")" != always ]]; then
-    echo "samo-agent has an unexpected bypass for $ruleset_name" >&2
+    echo "samo-agent lacks the required always-bypass for $ruleset_name" >&2
     exit 1
   fi
 done < <(jq -r '.repository_rulesets[].name' "$root/config/main-branch-protection.json")

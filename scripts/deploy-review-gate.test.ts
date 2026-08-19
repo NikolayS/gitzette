@@ -243,6 +243,7 @@ esac
     await Bun.write(gh, `#!/usr/bin/env bash
 set -euo pipefail
 endpoint="\${*: -1}"
+if [[ "\${FAKE_MODE:-ok}" == api-error ]]; then echo 'fake isolation API failure' >&2; exit 1; fi
 case "$endpoint" in
   *collaborators*)
     if [[ "\${FAKE_MODE:-ok}" == empty-admin ]]; then printf '[[]]\n'; exit 0; fi
@@ -297,6 +298,15 @@ esac
     expect(await run("dependabot")).toBe(1);
     expect(await run("environment-variable")).toBe(1);
     expect(await run("admin")).toBe(1);
+    const apiError = Bun.spawn(["bash", "scripts/check-reviewer-credential-isolation.sh"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "api-error" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const apiErrorStderr = await new Response(apiError.stderr).text();
+    expect(await apiError.exited).toBe(3);
+    expect(apiErrorStderr).toContain("unable to read repository collaborators");
+    expect(apiErrorStderr).toContain("fake isolation API failure");
     const emptyAdmin = Bun.spawn(["bash", "scripts/check-reviewer-credential-isolation.sh"], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "empty-admin" },

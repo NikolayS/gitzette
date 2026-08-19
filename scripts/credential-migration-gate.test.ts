@@ -160,8 +160,14 @@ describe("one-shot credential migration boundary", () => {
     }
     expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("[[ \"$verify_status\" == 0 ]]")).toBeLessThan(
-      migrationDoc.indexOf("drop table credential_migration_transfer"),
+      migrationDoc.lastIndexOf("drop table credential_migration_transfer"),
     );
+    expect(migrationDoc).toContain(': "${POLICY_GUARD_RUN_ID:?set the exact preflight guard run ID}"');
+    expect(migrationDoc).toContain(': "${RUN_ID:?set the exact export run ID}"');
+    expect(migrationDoc).toContain(': "${VERIFY_RUN_ID:?set the exact verification run ID}"');
+    expect(migrationDoc).toContain("created an empty transfer table");
+    expect(migrationDoc).toContain("empty-table recovery dispatched once");
+    expect(migrationDoc).toContain("sqlite_schema where type = \\u0027table\\u0027");
     expect(migrationDoc).toContain("switch-residue job is expected red during an open export switch");
     expect(migrationDoc).toContain("dedicated child Bash process");
     expect(migrationDoc).toContain("unset HISTFILE; set +o history");
@@ -428,26 +434,28 @@ fi
     expect(exportRun).not.toContain('--arg account_id "$CLOUDFLARE_ACCOUNT_ID"');
     expect(exportRun).not.toContain("--retry");
     const d1Request = JSON.parse(await Bun.file(join(throwawayRoot, "gitzette-credential-migration", "d1-request.json")).text());
-    expect(Object.keys(d1Request).sort()).toEqual(["params", "sql"]);
-    const d1Statements = d1Request.sql.split(";").map((sql: string) => sql.trim()).filter(Boolean);
-    expect(d1Statements).toHaveLength(2);
-    expect(d1Statements[0]).toContain("create table credential_migration_transfer");
-    expect(d1Statements[0]).not.toContain("if not exists");
-    expect(d1Statements[1]).toContain("insert into credential_migration_transfer");
-    expect(d1Statements[1]).toContain("datetime('now')");
-    expect(d1Request.params[0]).toBe("77");
-    expect(d1Request.params[1]).toBe(Buffer.from(await Bun.file(encryptedPath).arrayBuffer()).toString("base64"));
+    expect(Object.keys(d1Request)).toEqual(["batch"]);
+    expect(d1Request.batch).toHaveLength(2);
+    expect(d1Request.batch[0].sql).toContain("create table credential_migration_transfer");
+    expect(d1Request.batch[0].sql).not.toContain("if not exists");
+    expect(d1Request.batch[0].params).toBeUndefined();
+    expect(d1Request.batch[1].sql).toContain("insert into credential_migration_transfer");
+    expect(d1Request.batch[1].sql).toContain("datetime('now')");
+    expect(d1Request.batch[1].params[0]).toBe("77");
+    expect(d1Request.batch[1].params[1]).toBe(Buffer.from(await Bun.file(encryptedPath).arrayBuffer()).toString("base64"));
     const transferDb = new Database(":memory:");
-    transferDb.exec(d1Statements[0]);
-    transferDb.prepare(d1Statements[1]).run(...d1Request.params);
+    for (const statement of d1Request.batch) {
+      transferDb.prepare(statement.sql).run(...(statement.params ?? []));
+    }
     expect(transferDb.query("select run_id, ciphertext, created_at from credential_migration_transfer").get()).toEqual({
       run_id: "77",
-      ciphertext: d1Request.params[1],
+      ciphertext: d1Request.batch[1].params[1],
       created_at: expect.any(String),
     });
     expect(() => {
-      transferDb.exec(d1Statements[0]);
-      transferDb.prepare(d1Statements[1]).run(...d1Request.params);
+      for (const statement of d1Request.batch) {
+        transferDb.prepare(statement.sql).run(...(statement.params ?? []));
+      }
     }).toThrow();
     transferDb.close();
     expect(await Bun.spawn(["bash", "-c", executableExport], {

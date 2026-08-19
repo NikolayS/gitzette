@@ -100,12 +100,13 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
+   : "${POLICY_GUARD_RUN_ID:?set the exact preflight guard run ID}"
    bash scripts/apply-production-environment.sh
    bash scripts/check-production-environment.sh
    bash scripts/apply-credential-migration-environment.sh
    bash scripts/check-credential-migration-inventory.sh
    gh workflow run credential-migration-policy-guard.yml --ref main
-   gh run watch POLICY_GUARD_RUN_ID --exit-status
+   gh run watch "$POLICY_GUARD_RUN_ID" --exit-status
    ```
 
    This preflight dispatch must be green before the scheduled guard is relied
@@ -178,14 +179,18 @@ text matching is not the authorization proof.
    Keep repository secrets as rollback copies.
 
    The export POST is deliberately never retried. If its job is red because the
-   response was lost, do not dispatch another export. Close the switch, run the
-   read-only query below for that exact `RUN_ID`, and continue this step when
-   the row exists and decrypts correctly. If the table or exact row is absent,
-   stop with repository rollback copies intact and investigate; never replay
-   the one-shot batch.
+   response was lost, do not rerun that workflow run. Close the switch and query
+   the exact `RUN_ID`. When a row exists, decrypt it and never replay the export.
+   A table containing zero rows means the multi-query request stopped between
+   table creation and insert. The block below records that incident, drops only
+   the verified empty transfer table with the D1-only token, proves it absent,
+   reopens the switch, and dispatches exactly one new run for a fresh Nik
+   approval. Any absent table, unexpected row, or nonzero count other than one
+   remains a hard stop with repository rollback copies intact.
 
    ```bash
    set -euo pipefail
+   : "${RUN_ID:?set the exact export run ID}"
    gh variable delete CREDENTIAL_EXPORT_OPEN
    operator_token_file="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
    token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$operator_token_file" || true)"
@@ -194,9 +199,40 @@ text matching is not the authorization proof.
    [[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
    account_id="a3265e0d0db71fdece29365819452f00"
    database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
-   migration_dir="$MIGRATION_KEY_DIR/run-RUN_ID-1"
+   migration_dir="$MIGRATION_KEY_DIR/run-$RUN_ID-1"
    install -d -m 0700 "$migration_dir"
-   jq -n --arg run_id RUN_ID '{
+   jq -n '{sql:"select count(*) as total_rows from credential_migration_transfer"}' \
+     >"$migration_dir/count.json"
+   transfer_rows="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
+     --connect-timeout 10 --max-time 30 --config - \
+     -H 'Content-Type: application/json' --data-binary "@$migration_dir/count.json" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
+     jq -er '.result[0].results[0].total_rows')"
+   if [[ "$transfer_rows" == 0 ]]; then
+     printf '%s export run %s created an empty transfer table\n' \
+       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" >>"$migration_dir/incident.log"
+     jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
+     curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
+       -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
+       "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+       <<<"header = \"Authorization: Bearer $d1_token\"" |
+       jq -e '.success == true and (.result | length == 1) and .result[0].success == true' >/dev/null
+     jq -n '{sql:"select count(*) as remaining from sqlite_schema where type = \u0027table\u0027 and name = \u0027credential_migration_transfer\u0027"}' \
+       >"$migration_dir/prove-drop.json"
+     curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
+       -H 'Content-Type: application/json' --data-binary "@$migration_dir/prove-drop.json" \
+       "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+       <<<"header = \"Authorization: Bearer $d1_token\"" |
+       jq -e '.success == true and .result[0].results[0].remaining == 0' >/dev/null
+     gh variable set CREDENTIAL_EXPORT_OPEN --body true
+     GH_TOKEN="$(gh auth token --user samo-agent)" \
+       gh workflow run migrate-production-credentials.yml --ref main -f operation=export
+     echo "empty-table recovery dispatched once; stop and obtain the new exact run ID" >&2
+     exit 1
+   fi
+   [[ "$transfer_rows" == 1 ]]
+   jq -n --arg run_id "$RUN_ID" '{
      sql:"select ciphertext, (select count(*) from credential_migration_transfer) as total_rows, (select count(*) from credential_migration_transfer where run_id = ?1) as expected_rows, (select count(*) from credential_migration_transfer where run_id <> ?1) as other_rows from credential_migration_transfer where run_id = ?1",
      params:[$run_id]
    }' >"$migration_dir/select.json"
@@ -217,7 +253,7 @@ text matching is not the authorization proof.
      (.CLOUDFLARE_ACCOUNT_ID | type == "string" and length > 0) and
      (.CLOUDFLARE_API_TOKEN | type == "string" and length > 0)' \
      <<<"$plaintext" >/dev/null
-   gh api --method DELETE repos/NikolayS/gitzette/actions/runs/RUN_ID/logs
+   gh api --method DELETE "repos/NikolayS/gitzette/actions/runs/$RUN_ID/logs"
    ```
 
 5. Without printing values or writing plaintext, install both fields in the
@@ -228,6 +264,7 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
+   : "${VERIFY_RUN_ID:?set the exact verification run ID}"
    environment_credentials_ready=false
    environment_secrets_before="$(gh api --paginate --slurp \
      'repos/NikolayS/gitzette/environments/production/secrets?per_page=100' |
@@ -292,7 +329,7 @@ text matching is not the authorization proof.
      gh workflow run migrate-production-credentials.yml \
        --ref main -f operation=verify
    set +e
-   gh run watch VERIFY_RUN_ID --exit-status
+   gh run watch "$VERIFY_RUN_ID" --exit-status
    verify_status=$?
    set -e
    gh variable delete CREDENTIAL_VERIFY_OPEN
@@ -307,7 +344,8 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
-   test "$(gh run view VERIFY_RUN_ID --json headSha --jq .headSha)" = \
+   : "${VERIFY_RUN_ID:?set the exact verification run ID}"
+   test "$(gh run view "$VERIFY_RUN_ID" --json headSha --jq .headSha)" = \
      "$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
    bash scripts/check-credential-migration-environment.sh
    bash scripts/check-credential-migration-inventory.sh
