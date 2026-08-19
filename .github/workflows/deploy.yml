@@ -55,10 +55,7 @@ jobs:
             echo "reviewed head lacks the latest identity-checked samorev verdict" >&2
             exit 1
           fi
-          if ! jq -e '
-            map(select(.context == "samorev-gate")) |
-            sort_by(.created_at // "", .id // 0) | last | .state == "success"
-          ' <<<"$statuses" >/dev/null; then
+          if ! printf '%s' "$statuses" | bash scripts/evaluate-samorev-gate-status.sh >/dev/null; then
             echo "reviewed head lacks the latest base-controlled gate" >&2
             exit 1
           fi

@@ -73,7 +73,7 @@ for attempt in $(seq 1 "$max_attempts"); do
   SAMOREV_NOT_BEFORE="$SAMOREV_NOT_BEFORE" bash "$root/scripts/evaluate-samorev-status.sh" <<<"$statuses" || verdict_rc=$?
   case "$verdict_rc" in
     0)
-      publish_terminal success "CODEOWNER-published samorev verdict passed"
+      publish_terminal success "Identity-checked samorev verdict passed"
       exit 0
       ;;
     1|3)

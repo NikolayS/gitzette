@@ -1,5 +1,7 @@
 -- Convenience schema for a fresh local database. Production changes are
 -- applied from migrations/; keep this file equivalent to all migrations.
+-- scripts/check-schema.sh compares comments and identifier quoting inside
+-- CREATE bodies verbatim; keep annotations like this above each statement.
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,

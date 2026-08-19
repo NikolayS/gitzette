@@ -27,6 +27,9 @@ jobs:
               break
             fi
             echo "ImageMagick installation attempt $attempt failed" >&2
+            if [[ "$attempt" -eq 2 ]]; then
+              break
+            fi
             sudo timeout --foreground --kill-after=10s 60s dpkg --configure -a || true
             sleep 5
           done
@@ -60,6 +63,8 @@ jobs:
         run: bun run check:worker-types
       - run: bun run test:all
       - run: bash scripts/evaluate-samorev-status.test.sh
+      - run: bash scripts/evaluate-samorev-gate-status.test.sh
+      - run: bash scripts/check-pr-workflow-permissions.test.sh
       - run: bash scripts/normalize-branch-protection.test.sh
       - run: bash scripts/poll-samorev-gate.test.sh
       - run: shellcheck scripts/*.sh

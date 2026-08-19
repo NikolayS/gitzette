@@ -26,7 +26,12 @@ jobs:
         with:
           ref: main
           persist-credentials: false
-      - name: Require the CODEOWNER-published exact-head verdict
+      - name: Reject PR-controlled status publishers
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check-pr-workflow-permissions.sh
+      - name: Require the identity-checked exact-head verdict
         id: verdict
         env:
           GH_TOKEN: ${{ github.token }}

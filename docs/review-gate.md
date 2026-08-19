@@ -11,9 +11,12 @@ remains meaningful. Classic branch protection cannot bind a status to its
 creator: any repository workflow with `statuses: write` runs as the shared
 Actions app. The protected-main publisher itself validates the external
 `samo-agent` status's immutable user ID and freshness before publishing its
-result, and deployment revalidates the latest statuses. This gate trusts
-repository write/admin credentials and is not a defense against a malicious
-write-access actor adding a self-publishing workflow.
+result, and deployment revalidates the latest statuses. Before polling, the
+base-controlled publisher rejects any PR that changes a workflow whose head
+version requests `statuses: write` or `checks: write`; the regression gate is
+`scripts/check-pr-workflow-permissions.test.sh`. This blocks a PR-head workflow
+from laundering self-published verdicts through the shared Actions app. The
+gate still trusts repository administrator credentials and installed Apps.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
