@@ -59,20 +59,20 @@ session after service restoration.
 
 1. From a clean checkout of protected `main`, first verify that production
    still has its default `v*`-only policy. Investigate any diff before changing
-   it; do not erase a tamper signal by applying over it. Then install the
-   Nik-only ruleset for the fixed verification tag and apply the dedicated
-   migration environment. GitHub's environment API cannot set
+   it; do not erase a tamper signal by applying over it. Then apply the
+   dedicated migration environment. GitHub's environment API cannot set
    `can_admins_bypass`; if the migration check reports that field as `true`,
    disable **Allow administrators to bypass configured protection rules** in
    Settings -> Environments -> `credential-migration`, then rerun the apply
    command. This UI-only action is expected after first creating the
    environment and is required before export. Do not widen production yet.
    Both apply scripts refuse to mutate an existing environment while that
-   bypass is enabled.
+   bypass is enabled. On first creation the apply command intentionally ends
+   non-zero through its trailing checker until Nik disables bypass and reruns
+   it; never treat the initial PUT as a ready environment.
 
    ```bash
    bash scripts/check-production-environment.sh default
-   bash scripts/apply-credential-migration-tag-ruleset.sh
    bash scripts/apply-credential-migration-environment.sh
    gh workflow run credential-migration-policy-guard.yml --ref main
    gh run watch POLICY_GUARD_RUN_ID --exit-status
@@ -91,6 +91,7 @@ session after service restoration.
    one run exists before approval.
 
    ```bash
+   bash scripts/check-credential-migration-environment.sh
    gh variable set CREDENTIAL_EXPORT_OPEN --body true
    GH_TOKEN="$(gh auth token --user samo-agent)" \
      gh workflow run migrate-production-credentials.yml --ref main -f operation=export
@@ -107,6 +108,11 @@ session after service restoration.
      -pubout -outform DER | sha256sum
    bash scripts/check-credential-migration-environment.sh
    ```
+
+   Record the exact pre-approval guard and export run IDs in the incident log.
+   Run `bash scripts/check-credential-migration-environment.sh` again
+   immediately before approval; do not approve if either the run identity or
+   the environment check differs from the recorded evidence.
 
 4. Immediately after the single export succeeds, close the switch before a
    queued duplicate can start, then retrieve the exact run's ciphertext through the
@@ -195,28 +201,21 @@ session after service restoration.
    from `$plaintext` immediately after restoring the default policy. Delete the
    repository copies again before any verification retry.
 
-6. Create the exact reviewed non-release tag at current `main`, push it, apply
-   migration policy immediately before dispatch, and run stored-value
-   verification as `samo-agent`. The workflow checks the
-   tag name and re-resolves protected `main` both before and after Nik's
-   production approval. It fails if `main` moved. This tag does not match the
-   release workflow's `v*` trigger. The tag itself is not trusted as an
-   identity boundary by itself: the active tag ruleset permits only immutable
-   Nik user ID `1345402` to create, update, or delete it, and the verifier's two
-   protected-`main` comparisons provide an independent content check.
-   `deploy.yml` is the only other production consumer and cannot start from
-   this fixed tag.
+6. From a clean checkout exactly synchronized to protected `main`, apply the
+   temporary protected-branch production policy immediately before dispatch,
+   and run stored-value verification as `samo-agent`. GitHub pins the workflow
+   run to the immutable `main` SHA at dispatch; the workflow re-resolves
+   protected `main` both before and after Nik's production approval and fails
+   if it moved. The dispatcher and triggering actor must both be immutable
+   `samo-agent` ID `280144521`, and the non-bypassable production environment
+   requires Nik ID `1345402` to approve that exact run. Same-repository Actions
+   workflows possess neither identity.
 
    ```bash
    git fetch origin main
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
-   bash scripts/check-credential-migration-tag-ruleset.sh
-   git tag credential-migration-verify "$(git rev-parse main)"
-   git push origin refs/tags/credential-migration-verify
    cleanup_verification_policy() {
      local cleanup_status=0
-     git push origin :refs/tags/credential-migration-verify || true
-     git tag -d credential-migration-verify || true
      gh variable delete CREDENTIAL_VERIFY_OPEN || true
      bash scripts/apply-production-environment.sh default || cleanup_status=1
      bash scripts/check-production-environment.sh default || cleanup_status=1
@@ -224,10 +223,12 @@ session after service restoration.
    }
    trap cleanup_verification_policy EXIT
    bash scripts/apply-production-environment.sh migration
+   bash scripts/check-credential-migration-environment.sh
+   bash scripts/check-production-environment.sh migration
    gh variable set CREDENTIAL_VERIFY_OPEN --body true
    GH_TOKEN="$(gh auth token --user samo-agent)" \
      gh workflow run migrate-production-credentials.yml \
-       --ref credential-migration-verify -f operation=verify
+       --ref main -f operation=verify
    set +e
    gh run watch VERIFY_RUN_ID --exit-status
    verify_status=$?
@@ -238,12 +239,15 @@ session after service restoration.
    ```
 
    Before Nik approves the production deployment, independently verify outside
-   the workflow logs that the protected tag still equals protected `main`:
+   the workflow logs that the run is still pinned to current protected `main`,
+   rerun both live environment checks, and record the guard/verification run
+   IDs that bound the expected-red window:
 
    ```bash
-   test "$(git ls-remote origin refs/tags/credential-migration-verify | cut -f1)" = \
+   test "$(gh run view VERIFY_RUN_ID --json headSha --jq .headSha)" = \
      "$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
-   bash scripts/check-credential-migration-tag-ruleset.sh
+   bash scripts/check-credential-migration-environment.sh
+   bash scripts/check-production-environment.sh migration
    ```
 
    The exit trap is installed before production is widened, and repeated
@@ -262,6 +266,8 @@ session after service restoration.
    cleanup, explicitly dispatch that guard and require it to turn green; a red
    result after the verify run is no longer waiting is lingering widening. The
    explicit post-cleanup dispatch, not schedule timing, is authoritative.
+   Record its run ID next to the pre-widening run ID and reconcile every red
+   scheduled run between them to this single verification window.
 
    On verification failure, restore repository rollback scope before debugging:
 
@@ -287,9 +293,10 @@ session after service restoration.
    `.github/workflows/migrate-production-credentials.yml`,
    `.github/workflows/credential-migration-policy-guard.yml`,
    `config/credential-migration-environment.json`,
-   `config/credential-migration-tag-ruleset.json`,
    `config/production-environment-migration.json`, all corresponding
-   apply/check scripts, and the live `credential-migration` environment. Delete
-   the live `credential-migration-verify-tag` ruleset and both repository
-   variables `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Require the
+   apply/check scripts, and `scripts/credential-migration-gate.test.ts`. Remove
+   the `migration` case from both shared production-environment scripts so no
+   code path points at the deleted config, then delete the live
+   `credential-migration` environment and both repository variables
+   `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Require the
    default production-policy guard to pass before normal development resumes.

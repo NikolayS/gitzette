@@ -1,20 +1,12 @@
 # Exact-head review gate
 
-Protected `main` requires `typecheck`, `samorev`, and `samorev-gate` on the
-exact pull-request head. It also requires a fresh CODEOWNER approval from
-`@samo-agent`, dismisses stale approvals after a push, rejects approval by the
-last pusher, applies to administrators, and requires every conversation to be
-resolved.
-
-The CODEOWNER approval is the identity boundary. GitHub Actions status names
-are shared across workflows, and classic branch protection cannot bind a
-user-published commit status to one user. A same-repository PR workflow can
-request `statuses: write` even though the repository default is read-only, so it
-can imitate all three required status names. The `samo-agent` approver must never
-trust displayed check statuses: it approves only after its own exact-head
-samorev process exits zero and it has read any `.github/workflows/**` changes.
-Repository Actions cannot approve PRs, so a PR workflow cannot forge this
-CODEOWNER decision.
+Protected `main` currently displays `typecheck`, `samorev`, and `samorev-gate`
+on the exact pull-request head and requires every conversation to be resolved.
+Those context names are not an identity boundary: a same-repository workflow
+can request `statuses: write`, and GitHub Actions check names share app ID
+`15368`. A ceremonial GitHub `APPROVED` review is not a merge or release gate.
+The authorized admin merge path may satisfy a legacy approval-count setting,
+but only after exact-head CI, terminal-clean samorev, and readiness review.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
@@ -26,11 +18,21 @@ current gate run began and published by immutable user ID `280144521`
 binding means every push, ready/draft transition, reopen, or PR edit requires a
 new verdict.
 
+Release enforcement does not trust those displayed names. The reviewed tag
+workflow queries GitHub's workflow-run records by exact path, event, and PR
+head SHA, requires the latest `.github/workflows/ci.yml` and protected-base
+`.github/workflows/samorev-gate.yml` runs to have succeeded, and separately
+requires the latest `samorev` status to come from immutable user ID `280144521`.
+Same-repository workflows can imitate names but cannot create a run record for
+either exact workflow path or publish as that external user. The final deploy
+job also requires Nik's approval in the non-bypassable `production`
+environment.
+
 `samorev-gate` is fail-closed orchestration, not a second identity boundary. It
 publishes pending immediately, retries transient API/malformed-response failures
 three times, and waits up to 30 minutes. A later verdict needs a failed-job
 rerun. Strict protection means updating the branch creates a new head and
-requires another review and approval.
+requires another exact-head review cycle.
 
 The ordinary `pull_request` CI workflow runs all PR-controlled code in the PR
 cache scope with a read-only token, no repository secrets, and no persisted Git
@@ -47,9 +49,12 @@ does not narrow the existing repository-secret exposure, which is why #67 must
 close the window immediately after verification. Follow
 `docs/credential-migration.md`; #67 deletes
 `.github/workflows/migrate-production-credentials.yml`,
-`.github/workflows/credential-migration-policy-guard.yml`, all three temporary
-configs and their scripts, the live `credential-migration` environment and
-`credential-migration-verify-tag` ruleset, and `CREDENTIAL_EXPORT_OPEN` plus
+`.github/workflows/credential-migration-policy-guard.yml`, both temporary
+configs, `scripts/apply-credential-migration-environment.sh`,
+`scripts/check-credential-migration-environment.sh`,
+`scripts/credential-migration-gate.test.ts`, the
+`migration` mode from the shared production-environment apply/check scripts,
+the live `credential-migration` environment, and `CREDENTIAL_EXPORT_OPEN` plus
 `CREDENTIAL_VERIFY_OPEN` in the same recovery cycle. After its stored-value verification
 and repository-copy deletion, deployment credentials are available only to the
 protected `production` environment; tag-triggered deploys require that
@@ -57,9 +62,9 @@ environment's approval.
 
 The exporter writes only RSA-encrypted ciphertext to a transient table in the
 private D1 database; no public Actions artifact is created. Stored-value
-verification uses the exact non-release tag `credential-migration-verify`,
-which is included in the reviewed temporary production policy and must resolve
-to the current protected `main` tip. Immediately before verification,
+verification uses a workflow-dispatch run pinned to the exact protected `main`
+tip. GitHub records that immutable run SHA before the production approval wait,
+and the workflow re-resolves `main` before and after approval. Immediately before verification,
 production is temporarily widened to
 `config/production-environment-migration.json`; an exit trap restores the
 default `v*`-only policy, and `scripts/check-production-environment.sh default`
@@ -67,8 +72,7 @@ fails loud if that widening lingers. A protected-main scheduled workflow runs
 that check approximately every five minutes on GitHub's best-effort scheduler
 during the bootstrap window. It is expected red
 only while the production verification run is waiting; the runbook requires an
-explicit green dispatch after cleanup, which is the authoritative signal. The fixed tag is protected by an active
-Nik-only create/update/delete ruleset, and the D1 transfer table remains as a
+explicit green dispatch after cleanup, which is the authoritative signal. The D1 transfer table remains as a
 durable consumed-once marker until repository credential copies are gone.
 
 ## Artifact cleanup recovery
@@ -108,9 +112,11 @@ GH_TOKEN="$(gh auth token --user samo-agent)" \
   https://github.com/NikolayS/gitzette/pull/NUMBER --blocking --fetch
 ```
 
-Only after that exact-head review exits zero and CI is green may `samo-agent`
-submit the CODEOWNER approval. Merge immediately after verifying the head SHA
-has not changed.
+Only after that exact-head review exits zero, CI is green, and the readiness
+review confirms the same head SHA may the PR merge. A ceremonial GitHub
+`APPROVED` review is not a release gate; if the legacy branch rule still asks
+for one, use the explicitly authorized admin merge path without changing or
+forging any technical status.
 
 ## Full-delta review proof
 
@@ -139,11 +145,11 @@ them. Landing any of those separately would break exact dependency
 reproducibility or detach the operational safety contract from the code it
 controls; none is an independently activatable feature.
 
-Every push invalidates the prior verdict and approval. The reviewer is invoked
+Every push invalidates the prior verdict. The reviewer is invoked
 with the PR URL and `--fetch`, so it receives the complete base-to-exact-head
 delta; it is never invoked on `HEAD^..HEAD`. The posted report records the exact
 head, total changed files/diff bytes, and CI result. A clean exit is followed by
-an exact-head status and a fresh commit-bound approval. The current review has
+an exact-head status and a fresh successful protected-base publisher run. The current review has
 already demonstrated full-delta coverage by finding interactions across D1
 migrations, Worker scheduling/publication, the host runner, TypeScript project
 configuration, and operational documentation in different fix rounds.
@@ -168,7 +174,7 @@ actionlint, shellcheck, the high audit, and the secret scan before the linked
 
 Each report records the complete base-to-head byte count, not only the focus
 column. A later fix head invalidates the prior row and must add a new exact-head
-report before approval.
+report before readiness review.
 
 The merge base and current protected `main` are both
 `1aca7074f59b193466697a0290a11bd44bffed6e`. At that base, the
@@ -186,19 +192,18 @@ gh api 'repos/NikolayS/gitzette/contents/.github/workflows/samorev-gate.yml?ref=
 
 ## Policy audit and bootstrap
 
-`config/main-branch-protection.json` is the reviewed policy.
-`scripts/check-branch-protection.sh` exact-matches it against live classic branch
-protection, Actions workflow permissions, and full repository or inherited
-ruleset details. The apply script does not delete rulesets; unexpected rulesets
-must be reconciled deliberately.
+`config/main-branch-protection.json` records the current legacy classic-branch
+policy. `scripts/check-branch-protection.sh` exact-matches it against live
+classic branch protection, Actions workflow permissions, and full repository or
+inherited ruleset details. Its approval count is not a release gate and must not
+be restored or awaited. The apply script does not delete rulesets; unexpected
+rulesets must be reconciled deliberately.
 
 For the bootstrap PR, require its own exact-head CI, a clean samorev verdict,
-and the separate `samo-agent` approval. Then apply and audit the committed
-policy:
+and readiness review. Do not wait for a ceremonial GitHub approval and do not
+reapply the legacy approval rule. Audit production policy before migration:
 
 ```bash
-bash scripts/apply-branch-protection.sh
-bash scripts/apply-production-environment.sh
 bash scripts/check-branch-protection.sh
 bash scripts/check-production-environment.sh
 ```

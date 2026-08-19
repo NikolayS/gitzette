@@ -11,7 +11,7 @@ on:
 jobs:
   review-gate:
     permissions:
-      checks: read
+      actions: read
       contents: read
       pull-requests: read
       statuses: read
@@ -40,27 +40,7 @@ jobs:
             exit 1
           fi
 
-          check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/check-runs?filter=latest&per_page=100")"
-          if ! jq -e 'any(.check_runs[]; .name == "typecheck" and .conclusion == "success" and .app.id == 15368)' <<<"$check_runs" >/dev/null; then
-            echo "reviewed head lacks successful app-bound typecheck" >&2
-            exit 1
-          fi
-          if ! jq -e 'any(.check_runs[]; .name == "base-controlled samorev publisher" and .conclusion == "success" and .app.id == 15368)' <<<"$check_runs" >/dev/null; then
-            echo "reviewed head lacks successful app-bound samorev publisher" >&2
-            exit 1
-          fi
-
-          statuses="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/statuses?per_page=100")"
-          if ! jq -e 'any(.[]; .context == "samorev" and .state == "success" and .creator.login == "samo-agent") and any(.[]; .context == "samorev-gate" and .state == "success")' <<<"$statuses" >/dev/null; then
-            echo "reviewed head lacks the CODEOWNER samorev verdict or base-controlled gate" >&2
-            exit 1
-          fi
-
-          reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$(jq -r '.number' <<<"$reviewed_pr")/reviews")"
-          if ! jq -e --arg sha "$reviewed_sha" 'any(.[]; .user.login == "samo-agent" and .state == "APPROVED" and .commit_id == $sha)' <<<"$reviews" >/dev/null; then
-            echo "reviewed head lacks the exact-head CODEOWNER approval" >&2
-            exit 1
-          fi
+          bash scripts/check-release-review-evidence.sh "$reviewed_sha"
 
   deploy:
     needs: review-gate

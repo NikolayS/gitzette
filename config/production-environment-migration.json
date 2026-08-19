@@ -7,11 +7,8 @@
     { "type": "User", "id": 280144521, "login": "samo-agent" }
   ],
   "deployment_branch_policy": {
-    "protected_branches": false,
-    "custom_branch_policies": true
+    "protected_branches": true,
+    "custom_branch_policies": false
   },
-  "branch_policies": [
-    { "name": "v*", "type": "tag" },
-    { "name": "credential-migration-verify", "type": "tag" }
-  ]
+  "branch_policies": []
 }

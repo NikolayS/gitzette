@@ -9,10 +9,7 @@ else
 fi
 case "${1:-default}" in
   default) policy="$root/config/production-environment.json" ;;
-  migration)
-    policy="$root/config/production-environment-migration.json"
-    bash "$root/scripts/check-credential-migration-tag-ruleset.sh"
-    ;;
+  migration) policy="$root/config/production-environment-migration.json" ;;
   *) echo "usage: $0 [default|migration]" >&2; exit 2 ;;
 esac
 expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
@@ -27,10 +24,14 @@ if ! environment="$(gh api "repos/$repository/environments/production" 2>"$error
   sed 's/^/  /' "$error_file" >&2
   exit 3
 fi
-if ! policies="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" 2>"$error_file" | jq -c 'map(.branch_policies) | add // []')"; then
-  echo "unable to read production deployment branch policies:" >&2
-  sed 's/^/  /' "$error_file" >&2
-  exit 3
+if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies <<<"$environment")" == true ]]; then
+  if ! policies="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" 2>"$error_file" | jq -c 'map(.branch_policies) | add // []')"; then
+    echo "unable to read production deployment branch policies:" >&2
+    sed 's/^/  /' "$error_file" >&2
+    exit 3
+  fi
+else
+  policies='[]'
 fi
 actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$policies" '{
   wait_timer: ([ $environment.protection_rules[] | select(.type == "wait_timer") | .wait_timer ][0] // 0),
@@ -56,5 +57,5 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-policy_names="$(jq -r '.branch_policies | map(.name) | join(", ")' "$policy")"
+policy_names="$(jq -r 'if .deployment_branch_policy.protected_branches then "protected branches" else .branch_policies | map(.name) | join(", ") end' "$policy")"
 echo "Production environment OK: two-person approval; admitted refs: $policy_names"
