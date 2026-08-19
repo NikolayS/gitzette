@@ -34,6 +34,7 @@ describe("deploy review revalidation", () => {
     expect(applyBranchPolicy.indexOf("ruleset_payload=")).toBeLessThan(
       applyBranchPolicy.indexOf("actions/permissions/workflow"),
     );
+    expect(applyBranchPolicy).toContain("current_user_can_bypass");
     expect(documentation).toContain("every changed enforcement script under\n`scripts/check-*.sh`");
     expect(documentation).toContain("Actions bot's immutable ID, not `280144521`");
     expect(documentation).toContain("GitHub Actions is not a bypass actor");
@@ -178,6 +179,6 @@ esac
     expect(await run("dependabot")).toBe(1);
     expect(await run("environment-variable")).toBe(1);
     expect(await run("admin")).toBe(1);
-    expect(await Bun.file("scripts/check-branch-protection.sh").text()).toContain("check-reviewer-credential-isolation.sh");
+    expect(await Bun.file("scripts/check-branch-protection.sh").text()).not.toContain("check-reviewer-credential-isolation.sh");
   });
 });

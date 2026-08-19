@@ -40,6 +40,10 @@ else
 fi
 live_ruleset="$(jq '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload" |
   gh api --method "$ruleset_method" "$ruleset_endpoint" --input -)"
+if [[ "$(jq -r .current_user_can_bypass <<<"$live_ruleset")" != always ]]; then
+  echo "the applying repository administrator does not have the expected ruleset bypass" >&2
+  exit 1
+fi
 normalized_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$live_ruleset")"
 expected_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload")"
 if [[ "$normalized_ruleset" != "$expected_ruleset" ]]; then

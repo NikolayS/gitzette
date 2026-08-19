@@ -61,7 +61,10 @@ approval count is zero. The active `main-admin-only-updates` ruleset permits
 only RepositoryRole 5 (repository administrator) to update `main`, so a
 same-repository Actions token cannot turn forged contexts into a merge. The
 administrator remains subject to classic technical gates and resolved
-conversations. Merge does not authorize a release:
+conversations. GitHub's repository-rules API defines actor ID 5 as the
+repository-admin role; the pre-apply inventory requires the only admin to be
+NikolayS (`1345402`), and the post-apply response must report that applying
+identity's `current_user_can_bypass` as `always`. Merge does not authorize a release:
 the tag workflow revalidates the external exact-head evidence, and its
 deployment cannot read production credentials without a new approval from Nik
 in the non-bypassable `production` environment. Repository Actions cannot mint

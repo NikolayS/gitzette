@@ -23,6 +23,10 @@ jobs:
           # GitHub's Azure mirror can stall indefinitely; prefer the HTTPS Ubuntu archive when this runner file exists.
           if [[ -f /etc/apt/apt-mirrors.txt ]]; then
             sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
+            if grep -q 'azure.archive.ubuntu.com' /etc/apt/apt-mirrors.txt; then
+              echo "Azure Ubuntu mirror rewrite did not take effect" >&2
+              exit 1
+            fi
           fi
           sudo apt-get update
           sudo apt-get install -y \
