@@ -43,6 +43,9 @@ describe("deploy review revalidation", () => {
     expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_RUN_IDS");
     expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_NAME");
     expect(reviewerWrapper).toContain("SAMOREV_IGNORED_GITHUB_CHECK_APP_ID=15368");
+    expect(reviewerWrapper).toContain('.path == ".github/workflows/samorev-gate.yml"');
+    expect(reviewerWrapper).toContain('.event == "pull_request_target"');
+    expect(reviewerWrapper).toContain('.head_repository.full_name == $repository');
     expect(reviewerWrapper).toContain('-f target_url="$publisher_url"');
     expect(reviewerWrapper).toContain("publish error");
     expect(reviewerWrapper).toContain('>"$log_file" 2>&1');
@@ -60,6 +63,8 @@ describe("deploy review revalidation", () => {
     expect(documentation).toContain("every changed enforcement script under\n`scripts/check-*.sh`");
     expect(documentation).toContain("Actions bot's immutable ID, not `280144521`");
     expect(documentation).toContain("GitHub Actions is not a bypass actor");
+    expect(documentation).toContain("Administrator policy authorization is explicit");
+    expect(documentation).toContain("intentionally removed formal GitHub pull-request\napproval as evidence");
     const runTagActorGate = (actor?: string): Promise<number> => Bun.spawn([
       "bash", tagActorGate, ...(actor === undefined ? [] : [actor]),
     ], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" }).exited;

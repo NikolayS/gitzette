@@ -76,6 +76,13 @@ that environment approval. This is why a PR approval is redundant for the
 release identity boundary without pretending that status names are equivalent
 to approvals.
 
+Administrator policy authorization is explicit: Nik chose this admin-only
+manual merge boundary and intentionally removed formal GitHub pull-request
+approval as evidence. That is not a reusable `APPROVED` review and does not
+waive any technical gate. The readiness record must name the exact head, prove
+the live sole-admin and non-admin ruleset views, record terminal-clean samorev
+and exact-head CI, and then Nik performs the one permitted `main` update.
+
 The repository Actions token cannot read the administration-scoped ruleset and
 collaborator inventories needed by `scripts/check-branch-protection.sh`; putting
 an administrator token in Actions would destroy the boundary it audits. The

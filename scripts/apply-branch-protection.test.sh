@@ -24,12 +24,18 @@ case "$endpoint" in
       # double exits before reading, the producer can receive SIGPIPE and make
       # the apply script fail nondeterministically under `set -o pipefail`.
       cat >/dev/null
+    elif [[ "$*" == *'--jq .allow_auto_merge'* ]]; then
+      printf 'false\n'
     else
       printf 'User\n'
     fi
     ;;
   *rulesets\?includes_parents=false*)
-    if [[ "${GH_TOKEN:-}" == fake-samo-token ]]; then
+    if [[ "$mode" == nonadmin-zero ]]; then
+      printf '[[]]\n'
+    elif [[ "$mode" == nonadmin-multiple ]]; then
+      printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":43,"name":"main-admin-only-updates"}]]\n'
+    elif [[ "${GH_TOKEN:-}" == fake-samo-token ]]; then
       printf '[[{"id":42,"name":"main-admin-only-updates"}]]\n'
     elif [[ "$mode" == multiple ]]; then
       printf '[[{"id":42,"name":"main-admin-only-updates"},{"id":43,"name":"main-admin-only-updates"}]]\n'
@@ -55,8 +61,51 @@ case "$endpoint" in
         if [[ "$mode" == mismatch && "${GH_TOKEN:-}" != fake-samo-token ]]; then jq -c '.name="wrong"'; else cat; fi
     fi
     ;;
+  *rulesets\?includes_parents=true*)
+    printf '[[{"id":42,"name":"main-admin-only-updates","_links":{"self":{"href":"repos/example/gitzette/rulesets/42"}}}]]\n'
+    ;;
   *collaborators/samo-agent/permission)
-    printf '{"user":{"id":280144521},"permission":"push"}\n'
+    actor_id=280144521
+    permission=push
+    [[ "$mode" != nonadmin-wrong-id ]] || actor_id=1
+    [[ "$mode" != nonadmin-admin ]] || permission=admin
+    jq -nc --argjson actor_id "$actor_id" --arg permission "$permission" \
+      '{user:{id:$actor_id},permission:$permission}'
+    ;;
+  repos/example/gitzette/actions/permissions/workflow)
+    if [[ "$*" == *'--method PUT'* ]]; then
+      printf '%s\n' "$*" >>"$record.classic"
+      cat >/dev/null
+    else
+      jq -c '.actions_workflow_permissions' "$FAKE_POLICY"
+    fi
+    ;;
+  repos/example/gitzette/branches/main/protection)
+    if [[ "$*" == *'--method PUT'* ]]; then
+      printf '%s\n' "$*" >>"$record.classic"
+      cat >/dev/null
+    else
+      jq -c '{
+        required_status_checks,
+        enforce_admins:{enabled:.enforce_admins},
+        required_pull_request_reviews,
+        required_conversation_resolution:{enabled:.required_conversation_resolution},
+        allow_force_pushes:{enabled:.allow_force_pushes},
+        allow_deletions:{enabled:.allow_deletions},
+        required_linear_history:{enabled:.required_linear_history},
+        required_signatures:{enabled:.required_signatures},
+        lock_branch:{enabled:.lock_branch},
+        block_creations:{enabled:.block_creations},
+        restrictions
+      }' "$FAKE_POLICY"
+    fi
+    ;;
+  repos/example/gitzette/branches/main/protection/required_status_checks)
+    printf '%s\n' "$*" >>"$record.classic"
+    cat >/dev/null
+    ;;
+  repos/example/gitzette/branches/main/protection/required_signatures)
+    printf '%s\n' "$*" >>"$record.classic"
     ;;
   *)
     printf '%s\n' "$*" >>"$record.classic"
@@ -100,4 +149,39 @@ run_failure mismatch
 run_failure nonadmin-bypass
 assert_file_contains "$test_dir/nonadmin-bypass.err" 'samo-agent can bypass'
 
-echo "branch-protection apply ordering and failure tests passed"
+run_nonadmin_failure() {
+  mode="$1"
+  record="$test_dir/$mode"
+  if GH_TOKEN=fake-samo-token GITHUB_REPOSITORY=example/gitzette FAKE_MODE="$mode" \
+    FAKE_RECORD="$record" FAKE_POLICY="$root/config/main-branch-protection.json" \
+    PATH="$test_dir:$PATH" bash "$root/scripts/check-branch-protection-nonadmin.sh" \
+    >"$record.out" 2>"$record.err"; then
+    echo "$mode unexpectedly passed the non-admin boundary" >&2
+    exit 1
+  fi
+}
+for mode in nonadmin-admin nonadmin-wrong-id nonadmin-zero nonadmin-multiple; do
+  run_nonadmin_failure "$mode"
+done
+
+success_record="$test_dir/success"
+GITHUB_REPOSITORY=example/gitzette FAKE_MODE=success FAKE_RECORD="$success_record" \
+  FAKE_POLICY="$root/config/main-branch-protection.json" PATH="$test_dir:$PATH" \
+  bash "$root/scripts/apply-branch-protection.sh" >"$success_record.out" 2>"$success_record.err"
+expected_classic=(
+  '--method PUT repos/example/gitzette/actions/permissions/workflow'
+  '--method PUT repos/example/gitzette/branches/main/protection'
+  '--method PATCH repos/example/gitzette/branches/main/protection/required_status_checks'
+  '--method DELETE repos/example/gitzette/branches/main/protection/required_signatures'
+)
+previous_line=0
+for pattern in "${expected_classic[@]}"; do
+  line="$(grep -n -- "$pattern" "$success_record.classic" | cut -d: -f1)"
+  [[ -n "$line" && "$line" -gt "$previous_line" ]] || {
+    echo "success path did not apply classic controls in order: $pattern" >&2
+    exit 1
+  }
+  previous_line="$line"
+done
+
+echo "branch-protection apply success, ordering, and failure tests passed"

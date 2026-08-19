@@ -20,13 +20,14 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install image validation runtime
         run: |
-          # GitHub's Azure mirror can stall indefinitely; prefer the HTTPS Ubuntu archive when this runner file exists.
-          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-            sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
-            if grep -q 'azure.archive.ubuntu.com' /etc/apt/apt-mirrors.txt; then
-              echo "Azure Ubuntu mirror rewrite did not take effect" >&2
-              exit 1
-            fi
+          # GitHub's Azure mirror can stall indefinitely; rewrite every apt source shape used by runner images.
+          mapfile -t apt_sources < <(find /etc/apt -type f \( -name 'apt-mirrors.txt' -o -name 'sources.list' -o -name '*.sources' -o -name '*.list' \) -print)
+          for apt_source in "${apt_sources[@]}"; do
+            sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$apt_source"
+          done
+          if [[ "${#apt_sources[@]}" -gt 0 ]] && sudo grep -HEq 'azure\.archive\.ubuntu\.com' "${apt_sources[@]}"; then
+            echo "Azure Ubuntu mirror rewrite did not take effect" >&2
+            exit 1
           fi
           sudo apt-get update
           sudo apt-get install -y \

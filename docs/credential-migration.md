@@ -338,7 +338,6 @@ text matching is not the authorization proof.
    `config/credential-migration-environment.json`,
    all corresponding apply/check scripts, including
    `scripts/check-credential-migration-inventory.sh`,
-   `scripts/get-github-environment.sh`, and
    `scripts/credential-migration-gate.test.ts`. Delete the live
    `credential-migration` environment and both repository variables
    `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Remove the temporary
@@ -351,3 +350,5 @@ text matching is not the authorization proof.
    before deleting its workflow; after merge, prove the two
    workflow files and temporary configs/scripts are absent from `main` and the
    live environment plus both variables return not found.
+   Retain `scripts/get-github-environment.sh`: it is a shared helper used by
+   the permanent production-environment audit and apply scripts.

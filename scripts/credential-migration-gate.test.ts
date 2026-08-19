@@ -157,9 +157,10 @@ describe("one-shot credential migration boundary", () => {
     for (const teardownItem of [
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
       "credential-migration-gate.test.ts",
-      "get-github-environment.sh", "check-credential-migration-inventory.sh",
+      "check-credential-migration-inventory.sh",
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);
+    expect(migrationDoc).toContain("Retain `scripts/get-github-environment.sh`");
 
     const policyGuard = await Bun.file(".github/workflows/credential-migration-policy-guard.yml").text();
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {

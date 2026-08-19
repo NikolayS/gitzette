@@ -26,12 +26,17 @@ fi
 pr="$(gh pr view "$pr_number" --repo "$repository" --json headRefOid,url)"
 head_sha="$(jq -er .headRefOid <<<"$pr")"
 pr_url="$(jq -er .url <<<"$pr")"
-publisher="$(gh run view "$publisher_run_id" --repo "$repository" --json headSha,jobs,url)"
-publisher_url="$(jq -er .url <<<"$publisher")"
-if [[ "$(jq -er .headSha <<<"$publisher")" != "$head_sha" ]]; then
-  echo "publisher run is not for the exact PR head" >&2
+publisher_run="$(gh api "repos/$repository/actions/runs/$publisher_run_id")"
+publisher_url="$(jq -er .html_url <<<"$publisher_run")"
+if ! jq -e --arg head_sha "$head_sha" --arg repository "$repository" --argjson pr "$pr_number" '
+  .head_sha == $head_sha and .path == ".github/workflows/samorev-gate.yml" and
+  .event == "pull_request_target" and .head_repository.full_name == $repository and
+  any(.pull_requests[]; .number == $pr and .base.ref == "main" and .head.sha == $head_sha)
+' <<<"$publisher_run" >/dev/null; then
+  echo "publisher run is not the protected-base exact-head samorev workflow" >&2
   exit 1
 fi
+publisher="$(gh run view "$publisher_run_id" --repo "$repository" --json jobs)"
 jq -e --argjson id "$publisher_check_run_id" '
   any(.jobs[]; .databaseId == $id and .name == "base-controlled samorev publisher")
 ' <<<"$publisher" >/dev/null || {

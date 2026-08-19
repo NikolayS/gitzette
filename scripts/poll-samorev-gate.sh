@@ -75,7 +75,7 @@ for attempt in $(seq 1 "$max_attempts"); do
     bash "$root/scripts/evaluate-samorev-status.sh" <<<"$statuses" || verdict_rc=$?
   case "$verdict_rc" in
     0)
-      publish_terminal success "CODEOWNER-published samorev verdict passed"
+      publish_terminal success "immutable-reviewer samorev verdict passed"
       exit 0
       ;;
     1|3)
