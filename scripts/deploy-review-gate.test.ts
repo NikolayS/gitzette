@@ -12,7 +12,8 @@ describe("deploy review revalidation", () => {
     expect(reviewScript).toContain('actions/runs?head_sha=$reviewed_sha');
     expect(reviewScript).toContain('evaluate-samorev-gate-status.sh');
     expect(reviewEvaluator).toContain('check.name === name && check.conclusion === "success" && app.id === actionsAppId');
-    expect(reviewEvaluator).toContain('run.path === path');
+    expect(reviewEvaluator).toContain('run.path === ".github/workflows/ci.yml"');
+    expect(reviewEvaluator).toContain('run.path !== ".github/workflows/samorev-gate.yml"');
     expect(reviewEvaluator).toContain("samorevCreator.id !== reviewerId");
     expect(reviewEvaluator).toContain("gateCreator.id !== actionsBotId");
     const gates = [

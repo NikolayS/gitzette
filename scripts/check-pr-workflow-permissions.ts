@@ -123,7 +123,16 @@ export function workflowAt(cwd: string, sha: string, path: string): string | nul
 
 function auditHeadPublishers(cwd: string, headSha: string): void {
   const output = runGit(cwd, ["ls-tree", "-r", "--name-only", "-z", headSha, "--", ".github/workflows"] ) ?? "";
-  for (const path of output.split("\0").filter((name) => /\.ya?ml$/.test(name))) {
+  const paths = output.split("\0").filter((name) => /\.ya?ml$/.test(name));
+  for (const required of [
+    ".github/workflows/ci.yml",
+    ".github/workflows/claude.yml",
+    ".github/workflows/deploy.yml",
+    ".github/workflows/samorev-gate.yml",
+  ]) {
+    if (!paths.includes(required)) throw new Error(`protected workflow is missing from PR head: ${required}`);
+  }
+  for (const path of paths) {
     const source = workflowAt(cwd, headSha, path);
     if (source === null) throw new Error(`could not read workflow ${path}`);
     const writes = [...explicitWorkflowWritePermissions(source)].sort();
@@ -138,7 +147,7 @@ function auditHeadPublishers(cwd: string, headSha: string): void {
       throw new Error(`untrusted workflow has protected write authority in ${path}: ${writes.join(", ")}`);
     }
   }
-  for (const path of output.split("\0").filter((name) => /\.ya?ml$/.test(name))) {
+  for (const path of paths) {
     const source = workflowAt(cwd, headSha, path);
     if (source === null) throw new Error(`could not read workflow ${path}`);
     const environments = [...workflowEnvironmentJobs(source).entries()];
@@ -183,7 +192,9 @@ export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: stri
     }
     const privilegedContent = baseSource !== null && (
       explicitWorkflowWritePermissions(baseSource).size > 0 ||
-      explicitWorkflowWritePermissions(headSource).size > 0
+      explicitWorkflowWritePermissions(headSource).size > 0 ||
+      workflowEnvironmentJobs(baseSource).size > 0 ||
+      workflowEnvironmentJobs(headSource).size > 0
     );
     if (privilegedContent && baseSource !== headSource) {
       throw new Error(`PR changes the content of privileged workflow ${path}`);

@@ -27,7 +27,7 @@ describe("TypeScript project coverage", () => {
     expect(workflow).toContain("failed to replace the unavailable Azure Ubuntu mirror");
     expect(workflow).toContain('if [[ "$attempt" -eq 2 ]]');
     expect(workflow).toContain("timeout --foreground --kill-after=10s 60s dpkg --configure -a");
-    expect(workflow).toContain("ImageMagick installation failed after two bounded attempts");
+    expect(workflow).toContain("pinned ImageMagick 6.9.12-98 installation failed after two bounded attempts");
     expect(workflow).toContain("imagemagick=8:6.9.12.98+dfsg1-5.2build2");
     expect(workflow).toContain("imagemagick-6.q16=8:6.9.12.98+dfsg1-5.2build2");
     expect(workflow).toContain('[[ ! -f .github/workflows/migrate-production-credentials.yml ]] || bootstrap=true');

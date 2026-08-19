@@ -44,7 +44,7 @@ jobs:
             sleep 5
           done
           if [[ "$installed" != true ]]; then
-            echo "ImageMagick installation failed after two bounded attempts" >&2
+            echo "pinned ImageMagick 6.9.12-98 installation failed after two bounded attempts" >&2
             exit 1
           fi
           sudo install -o root -g root -m 0644 runner/imagemagick/policy.xml /etc/ImageMagick-6/policy.xml

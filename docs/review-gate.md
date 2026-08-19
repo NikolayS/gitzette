@@ -59,6 +59,11 @@ Both audits also reject any workflow other than `deploy.yml` and the temporary
 those declarations to name exact `production`. A new workflow therefore cannot
 silently join the protected credential approval surface during the bootstrap
 window.
+The PR audit content-pins those two credential workflows exactly like the
+write-privileged publisher and Claude workflow: removing their environment or
+changing any step is still a privileged content mutation. Future changes use
+the documented three-PR recovery; the temporary migration workflow is deleted
+immediately after its one reviewed execution.
 
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
@@ -140,6 +145,10 @@ The release validator binds successful checks to Actions workflow runs whose
 paths are exactly `.github/workflows/ci.yml` and
 `.github/workflows/samorev-gate.yml`; a PR-head job that copies a trusted check
 name is not release evidence.
+For the `pull_request_target` publisher it requires both the run's exact
+`head_sha` and `pull_requests[].head.sha` to match the reviewed head. This is the
+shape returned by GitHub's live Actions run API for this repository, not an
+assumption about `GITHUB_SHA` inside the job.
 
 This environment review is a human owner release authorization, not a formal
 GitHub pull-request approval. Run it only after a

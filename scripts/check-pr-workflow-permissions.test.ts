@@ -80,6 +80,9 @@ describe("base-controlled workflow permission boundary", () => {
     await mkdir(join(cwd, ".github/workflows"), { recursive: true });
     await Bun.write(join(cwd, "README.md"), "base\n");
     await Bun.write(join(cwd, ".github/workflows/ci.yml"), "on: pull_request\npermissions: {contents: read}\njobs: {}\n");
+    await Bun.write(join(cwd, ".github/workflows/claude.yml"), "on: [issue_comment, pull_request_review_comment, pull_request_review, issues]\npermissions: {}\njobs:\n  claude:\n    permissions: {id-token: write}\n    runs-on: ubuntu-latest\n    steps: []\n");
+    await Bun.write(join(cwd, ".github/workflows/deploy.yml"), "on: push\npermissions: {contents: read}\njobs:\n  deploy:\n    environment: production\n    runs-on: ubuntu-latest\n    steps: []\n");
+    await Bun.write(join(cwd, ".github/workflows/samorev-gate.yml"), "on: pull_request_target\npermissions: {contents: read, statuses: write}\njobs: {}\n");
     const base = await commit(cwd, "base");
 
     await Bun.write(join(cwd, "README.md"), "no workflow change\n");
@@ -88,12 +91,14 @@ describe("base-controlled workflow permission boundary", () => {
 
     await rm(join(cwd, ".github/workflows/ci.yml"));
     const deleted = await commit(cwd, "deleted workflow");
-    expect(() => checkWorkflowChanges(cwd, noWorkflow, deleted)).not.toThrow();
+    expect(() => checkWorkflowChanges(cwd, noWorkflow, deleted)).toThrow("protected workflow is missing");
+    await Bun.write(join(cwd, ".github/workflows/ci.yml"), "on: pull_request\npermissions: {contents: read}\njobs: {}\n");
+    const restored = await commit(cwd, "restore protected workflow");
 
     const large = `on:\n  pull_request_target:\n    branches: [main]\n    types: [opened, synchronize]\npermissions: {statuses: write}\njobs: {}\n# ${"x".repeat(70_000)}\n`;
     await Bun.write(join(cwd, ".github/workflows/large.yml"), large);
     const privileged = await commit(cwd, "large privileged workflow");
-    expect(() => checkWorkflowChanges(cwd, deleted, privileged)).toThrow("statuses");
+    expect(() => checkWorkflowChanges(cwd, restored, privileged)).toThrow("statuses");
 
     await Bun.write(join(cwd, "README.md"), "privileged workflow unchanged\n");
     const privilegedUnchanged = await commit(cwd, "unrelated change with privileged workflow");
@@ -180,14 +185,36 @@ describe("base-controlled workflow permission boundary", () => {
     git(cwd, "init", "-q");
     git(cwd, "config", "user.email", "test@example.com");
     git(cwd, "config", "user.name", "test");
-    await Bun.write(join(cwd, "README.md"), "base\n");
-    const base = await commit(cwd, "base");
     await mkdir(join(cwd, ".github/workflows"), { recursive: true });
+    await Bun.write(join(cwd, "README.md"), "base\n");
+    await Bun.write(join(cwd, ".github/workflows/ci.yml"), "on: pull_request\npermissions: {contents: read}\njobs: {}\n");
+    await Bun.write(join(cwd, ".github/workflows/claude.yml"), "on: [issue_comment, pull_request_review_comment, pull_request_review, issues]\npermissions: {}\njobs:\n  claude:\n    permissions: {id-token: write}\n    runs-on: ubuntu-latest\n    steps: []\n");
+    await Bun.write(join(cwd, ".github/workflows/deploy.yml"), "on: push\npermissions: {contents: read}\njobs:\n  deploy:\n    environment: production\n    runs-on: ubuntu-latest\n    steps: []\n");
+    await Bun.write(join(cwd, ".github/workflows/samorev-gate.yml"), "on: pull_request_target\npermissions: {contents: read, statuses: write}\njobs: {}\n");
+    const base = await commit(cwd, "base");
     await Bun.write(
       join(cwd, ".github/workflows/environment.yml"),
       "on: push\npermissions: {contents: read}\njobs:\n  deploy:\n    environment: production\n    runs-on: ubuntu-latest\n    steps: []\n",
     );
     const environment = await commit(cwd, "untrusted production environment");
     expect(() => checkWorkflowChanges(cwd, base, environment)).toThrow("declares an environment");
+  });
+
+  test("content-pins workflows on the production environment", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "gitzette-workflow-production-pin-"));
+    directories.push(cwd);
+    git(cwd, "init", "-q");
+    git(cwd, "config", "user.email", "test@example.com");
+    git(cwd, "config", "user.name", "test");
+    await mkdir(join(cwd, ".github/workflows"), { recursive: true });
+    await Bun.write(join(cwd, ".github/workflows/ci.yml"), "on: pull_request\npermissions: {contents: read}\njobs: {}\n");
+    await Bun.write(join(cwd, ".github/workflows/claude.yml"), "on: [issue_comment, pull_request_review_comment, pull_request_review, issues]\npermissions: {}\njobs:\n  claude:\n    permissions: {id-token: write}\n    runs-on: ubuntu-latest\n    steps: []\n");
+    const deploy = "on: push\npermissions: {contents: read}\njobs:\n  deploy:\n    environment: production\n    runs-on: ubuntu-latest\n    steps: []\n";
+    await Bun.write(join(cwd, ".github/workflows/deploy.yml"), deploy);
+    await Bun.write(join(cwd, ".github/workflows/samorev-gate.yml"), "on: pull_request_target\npermissions: {contents: read, statuses: write}\njobs: {}\n");
+    const base = await commit(cwd, "base");
+    await Bun.write(join(cwd, ".github/workflows/deploy.yml"), deploy.replace("steps: []", "steps:\n      - run: echo changed"));
+    const changed = await commit(cwd, "change production workflow");
+    expect(() => checkWorkflowChanges(cwd, base, changed)).toThrow("changes the content of privileged workflow");
   });
 });

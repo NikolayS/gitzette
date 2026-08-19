@@ -2,6 +2,7 @@
 set -euo pipefail
 
 root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
+bootstrap_policy="$(jq -r 'any(.branch_policies[]; .name == "main" and .type == "branch")' "$root/config/production-environment.json")"
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
 mkdir -p "$test_root/bin"
@@ -22,7 +23,11 @@ case "$endpoint" in
     }'
     ;;
   *deployment-branch-policies*)
-    printf '%s\n' '[{"branch_policies":[{"name":"main","type":"branch"},{"name":"v*","type":"tag"}]}]'
+    if [[ "${FAKE_BOOTSTRAP_POLICY:-false}" == true ]]; then
+      printf '%s\n' '[{"branch_policies":[{"name":"main","type":"branch"},{"name":"v*","type":"tag"}]}]'
+    else
+      printf '%s\n' '[{"branch_policies":[{"name":"v*","type":"tag"}]}]'
+    fi
     ;;
   *environments/production/secrets*)
     case "${FAKE_SECRET_MODE:-ok}" in
@@ -57,6 +62,7 @@ run_case() {
   actual=0
   CDPATH="$test_root" PATH="$test_root/bin:$PATH" GITHUB_REPOSITORY=example/gitzette \
     FAKE_SECRET_MODE="$secret_mode" FAKE_POLICY_MODE="$policy_mode" \
+    FAKE_BOOTSTRAP_POLICY="$bootstrap_policy" \
     bash "$root/scripts/check-production-environment.sh" >/dev/null 2>&1 || actual=$?
   if [[ "$actual" -ne "$expected" ]]; then
     echo "expected exit $expected for secret=$secret_mode policy=$policy_mode, got $actual" >&2
@@ -73,12 +79,14 @@ run_case 1 ok wrong-reviewer
 actual=0
 CDPATH="$test_root" PATH="$test_root/bin:$PATH" GITHUB_REPOSITORY=example/gitzette \
   FAKE_SECRET_MODE=ok FAKE_POLICY_MODE=ok FAKE_MIGRATION_OPEN=true \
+  FAKE_BOOTSTRAP_POLICY="$bootstrap_policy" \
   bash "$root/scripts/check-production-environment.sh" >/dev/null 2>&1 || actual=$?
 [[ "$actual" -eq 1 ]] || { echo "open migration variable survived completed credential migration" >&2; exit 1; }
 
 actual=0
 CDPATH="$test_root" PATH="$test_root/bin:$PATH" GITHUB_REPOSITORY=example/gitzette \
   FAKE_SECRET_MODE=ok FAKE_POLICY_MODE=ok FAKE_BOOTSTRAP_ON_MAIN=true \
+  FAKE_BOOTSTRAP_POLICY="$bootstrap_policy" \
   bash "$root/scripts/check-production-environment.sh" >/dev/null 2>&1 || actual=$?
 [[ "$actual" -eq 1 ]] || { echo "completed migration did not require bootstrap removal" >&2; exit 1; }
 

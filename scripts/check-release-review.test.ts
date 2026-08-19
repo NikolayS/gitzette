@@ -16,8 +16,8 @@ const base = {
     { name: "base-controlled samorev publisher", conclusion: "success", app: { id: 15368 } },
   ] }],
   action_run_pages: [{ workflow_runs: [
-    { path: ".github/workflows/ci.yml", head_sha: reviewedSha, conclusion: "success" },
-    { path: ".github/workflows/samorev-gate.yml", head_sha: reviewedSha, conclusion: "success" },
+    { path: ".github/workflows/ci.yml", event: "pull_request", head_sha: reviewedSha, conclusion: "success", pull_requests: [] },
+    { path: ".github/workflows/samorev-gate.yml", event: "pull_request_target", head_sha: reviewedSha, conclusion: "success", pull_requests: [{ head: { sha: reviewedSha } }] },
   ] }],
   status_pages: [[
     { id: 1, context: "samorev", state: "success", created_at: "2026-08-19T00:01:00Z", creator: { id: 280144521 } },
@@ -50,6 +50,9 @@ describe("release review gate", () => {
     const wrongWorkflowHead = structuredClone(base);
     wrongWorkflowHead.action_run_pages[0].workflow_runs[0].head_sha = "another-head";
     expect(() => releaseReview(wrongWorkflowHead)).toThrow("ci.yml");
+    const wrongGatePull = structuredClone(base);
+    wrongGatePull.action_run_pages[0].workflow_runs[1].pull_requests[0].head.sha = "another-head";
+    expect(() => releaseReview(wrongGatePull)).toThrow("samorev-gate.yml");
   });
 
   test("executes the checked-in fixture entrypoint", async () => {

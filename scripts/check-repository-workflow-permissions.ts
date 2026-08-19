@@ -6,6 +6,10 @@ import {
 } from "./check-pr-workflow-permissions";
 
 export type RepositoryRef = { name: string; sha: string };
+export type RepositoryAuditOptions = {
+  checkActionsDefaults?: boolean;
+  afterFetchForTest?: () => void;
+};
 
 function runGit(cwd: string, args: string[]): string {
   const result = Bun.spawnSync({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
@@ -103,8 +107,11 @@ function remoteHeads(cwd: string): { snapshot: string; refs: RepositoryRef[] } {
   return { snapshot, refs };
 }
 
-export function checkRepositoryWorkflowPermissions(cwd: string, checkActionsDefaults = true): void {
-  if (checkActionsDefaults) checkActionsWorkflowDefaults(cwd);
+export function checkRepositoryWorkflowPermissions(
+  cwd: string,
+  options: RepositoryAuditOptions = {},
+): void {
+  if (options.checkActionsDefaults !== false) checkActionsWorkflowDefaults(cwd);
   const before = remoteHeads(cwd);
   const main = before.refs.find(({ name }) => name === "main");
   if (!main) throw new Error("remote main branch is missing");
@@ -112,6 +119,7 @@ export function checkRepositoryWorkflowPermissions(cwd: string, checkActionsDefa
     "fetch", "--no-tags", "--force", "origin",
     "+refs/heads/*:refs/gitzette/repository-audit/*",
   ]);
+  options.afterFetchForTest?.();
   for (const ref of before.refs) {
     const fetched = runGit(cwd, ["rev-parse", `refs/gitzette/repository-audit/${ref.name}`]).trim();
     if (fetched !== ref.sha) throw new Error(`remote branch ${ref.name} changed while it was fetched`);
@@ -130,7 +138,11 @@ if (import.meta.main) {
     process.exit(2);
   }
   try {
-    checkRepositoryWorkflowPermissions(process.cwd(), args[0] !== "--git-only");
+    const gitOnly = args[0] === "--git-only";
+    if (gitOnly) {
+      console.error("WARNING: --git-only skips the admin-scoped live Actions-default check; operator readiness must run the full audit");
+    }
+    checkRepositoryWorkflowPermissions(process.cwd(), { checkActionsDefaults: !gitOnly });
     console.log("Repository workflow permissions OK");
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

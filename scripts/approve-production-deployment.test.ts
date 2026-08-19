@@ -14,8 +14,8 @@ const base = {
     { name: "base-controlled samorev publisher", conclusion: "success", app: { id: 15368 } },
   ] }],
   action_run_pages: [{ workflow_runs: [
-    { path: ".github/workflows/ci.yml", head_sha: reviewedSha, conclusion: "success" },
-    { path: ".github/workflows/samorev-gate.yml", head_sha: reviewedSha, conclusion: "success" },
+    { path: ".github/workflows/ci.yml", event: "pull_request", head_sha: reviewedSha, conclusion: "success", pull_requests: [] },
+    { path: ".github/workflows/samorev-gate.yml", event: "pull_request_target", head_sha: reviewedSha, conclusion: "success", pull_requests: [{ head: { sha: reviewedSha } }] },
   ] }],
   status_pages: [[
     { id: 1, context: "samorev", state: "failure", created_at: "2026-08-19T00:00:00Z", creator: { id: 280144521 } },

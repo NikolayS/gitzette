@@ -72,10 +72,20 @@ export function releaseReview(document: unknown): { reviewedSha: string } {
     if (!passed) throw new Error(`reviewed head lacks successful ${name}`);
   }
   const workflowRuns = actionRuns(input.action_run_pages);
-  for (const path of [".github/workflows/ci.yml", ".github/workflows/samorev-gate.yml"]) {
-    const passed = workflowRuns.some((run) => run.path === path &&
-      run.head_sha === head.sha && run.conclusion === "success");
-    if (!passed) throw new Error(`reviewed head lacks successful workflow run from ${path}`);
+  const ciPassed = workflowRuns.some((run) => run.path === ".github/workflows/ci.yml" &&
+    run.event === "pull_request" && run.head_sha === head.sha && run.conclusion === "success");
+  if (!ciPassed) throw new Error("reviewed head lacks successful workflow run from .github/workflows/ci.yml");
+  const gatePassed = workflowRuns.some((run) => {
+    if (run.path !== ".github/workflows/samorev-gate.yml" || run.event !== "pull_request_target" ||
+      run.head_sha !== head.sha || run.conclusion !== "success") return false;
+    return array(run.pull_requests, "workflow run pull_requests").some((pull) => {
+      const pullRecord = record(pull, "workflow run pull request");
+      const pullHead = record(pullRecord.head, "workflow run pull request head");
+      return pullHead.sha === head.sha;
+    });
+  });
+  if (!gatePassed) {
+    throw new Error("reviewed head lacks successful workflow run from .github/workflows/samorev-gate.yml");
   }
 
   const statuses = pages(input.status_pages, "status pages");
