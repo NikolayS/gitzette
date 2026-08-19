@@ -77,6 +77,7 @@ destroying the sole currently deploy-capable credential before that handoff.
    repository secrets as rollback copies:
 
    ```bash
+   set -euo pipefail
    migration_dir=/home/tars/.secrets/gitzette-migration-RUN_ID-1
    install -d -m 0700 "$migration_dir"
    gh run download RUN_ID --name encrypted-credentials-RUN_ID-1 --dir "$migration_dir"
@@ -85,6 +86,7 @@ destroying the sole currently deploy-capable credential before that handoff.
      -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
      -pkeyopt rsa_mgf1_md:sha256 \
      -in "$migration_dir/credentials.bin")"
+   [[ -n "$plaintext" ]]
    artifact_id="$(gh api repos/NikolayS/gitzette/actions/runs/RUN_ID/artifacts \
      --jq '.artifacts[] | select(.name == "encrypted-credentials-RUN_ID-1") | .id')"
    gh api --method DELETE "repos/NikolayS/gitzette/actions/artifacts/$artifact_id"
@@ -116,11 +118,13 @@ destroying the sole currently deploy-capable credential before that handoff.
    is protected by `credential-migration`.
 
 6. Verify the values GitHub actually stored. Temporarily add `main` to the
-   `production` environment while retaining `v*`, Nik-only approval,
-   self-review prevention, and `can_admins_bypass: false`; dispatch
+   `production` environment while retaining `v*`, the reviewed two-reviewer
+   set, self-review prevention, and `can_admins_bypass: false`; dispatch
    `operation=verify` as `samo-agent`, approve as Nik, and require the run to
    pass. The verify job reads the `production` environment secrets and performs
-   the exact-account Worker GET. Remove the temporary `main` policy immediately
+   the exact-account Worker GET. Its runtime approval check still accepts only
+   immutable reviewer ID `1345402`, while self-review prevention blocks the
+   `samo-agent` dispatcher. Remove the temporary `main` policy immediately
    after the run, then delete the repository rollback copies. Those two deletes
    are the point of no return.
 
@@ -134,9 +138,9 @@ destroying the sole currently deploy-capable credential before that handoff.
      bash scripts/check-production-environment.sh
    }
    trap cleanup_production_policy EXIT
-   jq '. | {wait_timer,prevent_self_review,
-     reviewers:[.reviewers[]|{type,id}],deployment_branch_policy} |
-     . + {can_admins_bypass:false}' config/production-environment.json |
+   jq '{wait_timer,can_admins_bypass,prevent_self_review,
+     reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' \
+     config/production-environment.json |
      gh api --method PUT repos/NikolayS/gitzette/environments/production --input -
    main_policy_id="$(gh api --method POST \
      repos/NikolayS/gitzette/environments/production/deployment-branch-policies \

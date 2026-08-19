@@ -15,14 +15,19 @@ describe("one-shot credential migration boundary", () => {
     };
     const parsed = Bun.YAML.parse(workflow) as {
       on: Record<string, unknown>;
-      jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }>;
+      jobs: Record<string, {
+        needs?: string;
+        environment?: string;
+        permissions?: Record<string, string>;
+        steps: Array<{ name?: string; run?: string }>;
+      }>;
     };
     expect(Object.keys(parsed.on)).toEqual(["workflow_dispatch"]);
     expect(workflow).toContain('[[ "$DISPATCHER_ID" != "280144521" ]]');
     expect(workflow).toContain('[[ "$TRIGGERING_ACTOR" != "samo-agent" ]]');
     expect(workflow).toContain('[[ "$DISPATCH_REF" != "refs/heads/main" ]]');
     expect(workflow).toContain('[[ "$RUN_ATTEMPT" != "1" ]]');
-    expect(workflow.match(/MIGRATION_OPEN: \$\{\{ vars\.CREDENTIAL_MIGRATION_OPEN \}\}/g)?.length).toBe(2);
+    expect(workflow.match(/MIGRATION_OPEN: \$\{\{ vars\.CREDENTIAL_MIGRATION_OPEN \}\}/g)?.length).toBe(3);
     expect(workflow).toContain('triggering_actor_id="$(curl');
     expect(workflow).toContain('[[ "$triggering_actor_id" != "280144521" ]]');
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_MIGRATION_OPEN }}");
@@ -44,10 +49,20 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).not.toContain("GITHUB_ENV");
     expect(workflow).not.toContain("credentials.json");
     expect(workflow).toContain("permissions: {}");
+    expect(parsed.jobs["export-encrypted-credentials"].needs).toBe("authorize-export");
+    expect(parsed.jobs["export-encrypted-credentials"].environment).toBe("credential-migration");
+    expect(parsed.jobs["verify-production-credentials"].needs).toBe("authorize-export");
+    expect(parsed.jobs["verify-production-credentials"].environment).toBe("production");
     expect(policy.can_admins_bypass).toBe(false);
     expect(policy.prevent_self_review).toBe(true);
     expect(policy.reviewers.map(({ id }) => id)).toEqual([1345402]);
     expect(policy.branch_policies).toEqual([{ name: "main", type: "branch" }]);
+    const productionPolicy = JSON.parse(await Bun.file("config/production-environment.json").text()) as {
+      can_admins_bypass: boolean;
+    };
+    expect(productionPolicy.can_admins_bypass).toBe(false);
+    expect(await Bun.file("scripts/apply-production-environment.sh").text()).toContain("can_admins_bypass");
+    expect(await Bun.file("scripts/check-production-environment.sh").text()).toContain("can_admins_bypass: $environment.can_admins_bypass");
 
     const encoded = workflow.match(/^\s*RSA_PUBLIC_KEY_PEM_B64:\s*(\S+)$/m)?.[1];
     expect(encoded).toBeDefined();
@@ -81,7 +96,9 @@ arguments="$*"
 if [[ -n "\${FAKE_CURL_RECORD:-}" ]]; then printf '%s\\n' "$@" >>"$FAKE_CURL_RECORD.args"; cat >>"$FAKE_CURL_RECORD.stdin"; else cat >/dev/null; fi
 [[ "\${FAKE_CURL_FAIL:-false}" != true ]] || exit 22
 if [[ "$arguments" == *'/approvals'* ]]; then
-  printf '[{"state":"approved","user":{"id":%s},"environments":[{"name":"%s"}]}]\\n' "\${FAKE_APPROVER_ID:-1345402}" "\${FAKE_APPROVAL_ENV:-credential-migration}"
+  if [[ "\${FAKE_APPROVAL_EMPTY:-false}" == true ]]; then printf '[]\\n'; else
+    printf '[{"state":"%s","user":{"id":%s},"environments":[{"name":"%s"}]}]\\n' "\${FAKE_APPROVAL_STATE:-approved}" "\${FAKE_APPROVER_ID:-1345402}" "\${FAKE_APPROVAL_ENV:-credential-migration}"
+  fi
 elif [[ "$arguments" == *'api.github.com/users/'* ]]; then
   printf '{"id":%s}\\n' "\${FAKE_ACTOR_ID:-280144521}"
 else
@@ -122,6 +139,8 @@ fi
     expect(await execute(revalidateRun, { FAKE_ACTOR_ID: "1" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_APPROVER_ID: "1" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_APPROVAL_ENV: "other" })).toBe(1);
+    expect(await execute(revalidateRun, { FAKE_APPROVAL_STATE: "rejected" })).toBe(1);
+    expect(await execute(revalidateRun, { FAKE_APPROVAL_EMPTY: "true" })).toBe(1);
     const curlRecord = join(gateRoot, "curl-record");
     expect(await execute(revalidateRun, { FAKE_CURL_RECORD: curlRecord })).toBe(0);
     const curlArgs = await Bun.file(`${curlRecord}.args`).text();
@@ -135,6 +154,10 @@ fi
     expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production" })).toBe(0);
     expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "other" })).toBe(1);
     expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", FAKE_APPROVER_ID: "1" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", FAKE_APPROVAL_STATE: "rejected" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", FAKE_APPROVAL_EMPTY: "true" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", MIGRATION_OPEN: "false" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", DISPATCH_REF: "refs/heads/other" })).toBe(1);
     expect(await execute(verifyCredentialsRun, {
       CLOUDFLARE_ACCOUNT_ID: "exact-account", CLOUDFLARE_API_TOKEN: "exact-token",
     })).toBe(0);

@@ -1,5 +1,6 @@
 {
   "wait_timer": 0,
+  "can_admins_bypass": false,
   "prevent_self_review": true,
   "reviewers": [
     { "type": "User", "id": 1345402, "login": "NikolayS" },

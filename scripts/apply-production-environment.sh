@@ -9,7 +9,7 @@ else
 fi
 policy="$root/config/production-environment.json"
 
-jq '{wait_timer,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' "$policy" |
+jq '{wait_timer,can_admins_bypass,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' "$policy" |
   gh api --method PUT "repos/$repository/environments/production" --input - --silent
 
 live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add')"
