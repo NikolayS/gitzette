@@ -35,12 +35,15 @@ describe("deploy review revalidation", () => {
     const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
     const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
     expect(reviewGate).toContain("checks: read");
-    expect(reviewGate).toContain("if: github.event.sender.id == 1345402");
+    expect(reviewGate).toContain("RELEASE_SENDER_ID: ${{ github.event.sender.id }}");
+    expect(reviewGate).not.toContain("if: github.event.sender.id");
+    expect(reviewScript).toContain('[[ "$RELEASE_SENDER_ID" != 1345402 ]]');
     expect(reviewGate).toContain("pull-requests: read");
     expect(reviewGate).toContain("statuses: read");
     expect(reviewGate).not.toContain("/reviews");
     expect(reviewGate).not.toContain("APPROVED");
     expect(deploy).toContain("needs: review-gate");
+    expect(workflow).not.toContain("always()");
     expect(deploy).toContain("contents: read");
     expect(deploy).not.toContain("checks: read");
     expect(deploy).not.toContain("pull-requests: read");

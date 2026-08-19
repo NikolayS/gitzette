@@ -6,7 +6,8 @@ every conversation to be resolved. A separate formal GitHub approval is not a
 merge or release gate. The repository owner explicitly chose this zero-formal-
 approval policy: the mandatory human release action is an immutable-ID `v*` tag
 push by Nik, followed by authorization from a different production-environment
-reviewer.
+reviewer. The checked-in approval validator rejects the release actor even if
+that actor is also configured as an environment reviewer.
 
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
@@ -67,12 +68,15 @@ remains a mandatory exact-head execution signal, and deploy revalidates both.
 Classic branch protection cannot make the zero-approval merge itself
 non-overwritable: every same-repository Actions workflow shares app ID `15368`,
 and commit-status context names are last-writer-wins. Production release is the
-non-overwritable enforcement boundary. The `production` environment permits Nik
+sole non-overwritable authorization boundary. `samorev-gate` validates merge
+evidence but is deliberately not described as an unforgeable identity. The
+`production` environment permits Nik
 or the separate `samo-agent` user to authorize `v*` tags plus the temporary
 `main` credential-scope bootstrap, and forbids the workflow actor from approving
 its own deployment. Normal release tags must be pushed by immutable user ID
-`1345402` (Nik) and are authorized by `samo-agent`; Nik remains the break-glass
-alternate if `samo-agent` triggered the run. The tag workflow first revalidates
+`1345402` (Nik) and are authorized by `samo-agent`. Both GitHub's
+`prevent_self_review` rule and the checked-in approval validator reject the tag
+pusher as approver. The tag workflow first revalidates
 the exact merged PR head,
 immutable `samo-agent` verdict creator ID, and exact-head checks; only then can
 the environment expose Cloudflare credentials. Those credentials must exist

@@ -5,7 +5,7 @@ if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 run_id="${1:-}"
 if [[ ! "$run_id" =~ ^[0-9]+$ ]]; then
   echo "usage: GH_TOKEN=<production reviewer token> bash scripts/approve-production-deployment.sh RUN_ID" >&2

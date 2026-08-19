@@ -8,7 +8,7 @@ set -euo pipefail
 : "${HEAD_SHA:?HEAD_SHA is required}"
 : "${REPOSITORY:?REPOSITORY is required}"
 : "${SAMOREV_NOT_BEFORE:?SAMOREV_NOT_BEFORE is required}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 max_attempts="${SAMOREV_MAX_ATTEMPTS:-60}"
 sleep_seconds="${SAMOREV_SLEEP_SECONDS:-30}"
 

@@ -7,7 +7,7 @@ const base = {
   current_user_id: 280144521,
   local_sha: releaseSha,
   main_sha: releaseSha,
-  run: { event: "push", path: ".github/workflows/deploy.yml", head_branch: "v0.1.0", head_sha: releaseSha },
+  run: { event: "push", path: ".github/workflows/deploy.yml", head_branch: "v0.1.0", head_sha: releaseSha, actor: { id: 1345402 } },
   pulls: [[{ base: { ref: "main" }, head: { sha: reviewedSha }, merged_at: "2026-08-19T00:00:00Z", merge_commit_sha: releaseSha }]],
   check_run_pages: [{ check_runs: [
     { name: "typecheck", conclusion: "success", app: { id: 15368 } },
@@ -50,8 +50,9 @@ describe("production deployment approval", () => {
     expect(() => productionDeploymentApproval({ ...base, local_sha: "stale" })).toThrow("are not exact");
   });
 
-  test("accepts the owner break-glass approver", () => {
-    expect(productionDeploymentApproval({ ...base, current_user_id: 1345402 })).toEqual({ environmentId: 19965704930, reviewedSha });
+  test("rejects approval by the release actor", () => {
+    expect(() => productionDeploymentApproval({ ...base, current_user_id: 1345402 }))
+      .toThrow("release actor cannot approve their own production deployment");
   });
 
   test("rejects an untrusted approver and non-production request", () => {

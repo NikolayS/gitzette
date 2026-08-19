@@ -211,6 +211,18 @@ describe("production migration credential guards", () => {
       "check-branch-protection.sh",
       "check-production-environment.sh",
       "check-release-review.sh",
+      "poll-samorev-gate.sh",
+    ]) {
+      const source = await Bun.file(`${repoRoot}/scripts/${name}`).text();
+      expect(source, `${name} must ignore hostile CDPATH`).toContain(
+        'root="$(CDPATH=\'\' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"',
+      );
+    }
+    for (const name of [
+      "approve-production-deployment.sh",
+      "check-branch-protection.sh",
+      "check-production-environment.sh",
+      "check-release-review.sh",
       "evaluate-samorev-gate-status.sh",
       "evaluate-samorev-status.sh",
       "poll-samorev-gate.sh",

@@ -25,6 +25,9 @@ describe("Worker environment provenance", () => {
     const vars = [...wrangler.matchAll(/^([A-Z][A-Z0-9_]*) = "[^"]*"$/gm)].map((match) => match[1]);
     const secretBlockMatch = wrangler.match(/# secrets \(set via:[^\n]*\)\n([\s\S]*?)# end secrets/);
     expect(secretBlockMatch, "wrangler.toml must contain a bounded # secrets block").not.toBeNull();
+    const secretBlockEnd = wrangler.indexOf("# end secrets");
+    expect(secretBlockEnd).toBeGreaterThanOrEqual(0);
+    expect(wrangler.slice(secretBlockEnd + "# end secrets".length)).not.toMatch(/^# [A-Z][A-Z0-9_]+(?:\s|$)/gm);
     const secretBlock = secretBlockMatch?.[1] ?? "";
     const secrets = [...secretBlock.matchAll(/^# ([A-Z][A-Z0-9_]+)(?:\s|$)/gm)].map((match) => match[1]);
     const generatedEnv = interfaceBody(generated, "__BaseEnv_Env");

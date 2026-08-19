@@ -13,6 +13,11 @@ export function productionDeploymentApproval(document: unknown): { environmentId
   if (typeof input.main_sha !== "string" || input.main_sha.length === 0) throw new Error("main SHA is missing");
 
   const run = record(input.run, "workflow run");
+  const runActor = record(run.actor, "workflow run actor");
+  if (typeof runActor.id !== "number") throw new Error("workflow run actor ID is missing");
+  if (runActor.id === input.current_user_id) {
+    throw new Error("release actor cannot approve their own production deployment");
+  }
   if (run.event !== "push" || run.path !== ".github/workflows/deploy.yml") {
     throw new Error("deployment request is not the tag deploy workflow");
   }

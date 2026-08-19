@@ -5,12 +5,17 @@ if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 : "${GH_TOKEN:?GH_TOKEN is required}"
+: "${RELEASE_SENDER_ID:?RELEASE_SENDER_ID is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${GITHUB_SHA:?GITHUB_SHA is required}"
 : "${GITHUB_REF_TYPE:?GITHUB_REF_TYPE is required}"
 : "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required}"
+if [[ "$RELEASE_SENDER_ID" != 1345402 ]]; then
+  echo "release tag must be pushed by immutable owner ID 1345402" >&2
+  exit 1
+fi
 if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v[^/]*$ ]]; then
   echo "release review requires a v* tag" >&2
   exit 1

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
 mkdir -p "$test_root/bin"
@@ -37,6 +37,10 @@ case "$endpoint" in
       printf '%s\n' '[{"secrets":[{"name":"UNRELATED"}]}]'
     fi
     ;;
+  *contents/.github/workflows/migrate-production-credentials.yml*)
+    [[ "${FAKE_BOOTSTRAP_ON_MAIN:-false}" == true ]] || exit 1
+    printf '%s\n' '{"type":"file"}'
+    ;;
   *) echo "unexpected fake gh endpoint: $endpoint" >&2; exit 91 ;;
 esac
 EOF
@@ -47,7 +51,7 @@ run_case() {
   secret_mode="$2"
   policy_mode="$3"
   actual=0
-  PATH="$test_root/bin:$PATH" GITHUB_REPOSITORY=example/gitzette \
+  CDPATH="$test_root" PATH="$test_root/bin:$PATH" GITHUB_REPOSITORY=example/gitzette \
     FAKE_SECRET_MODE="$secret_mode" FAKE_POLICY_MODE="$policy_mode" \
     bash "$root/scripts/check-production-environment.sh" >/dev/null 2>&1 || actual=$?
   if [[ "$actual" -ne "$expected" ]]; then
@@ -60,5 +64,11 @@ run_case 0 ok ok
 run_case 1 missing ok
 run_case 1 repository-copy ok
 run_case 1 ok wrong-reviewer
+
+actual=0
+CDPATH="$test_root" PATH="$test_root/bin:$PATH" GITHUB_REPOSITORY=example/gitzette \
+  FAKE_SECRET_MODE=ok FAKE_POLICY_MODE=ok FAKE_BOOTSTRAP_ON_MAIN=true \
+  bash "$root/scripts/check-production-environment.sh" >/dev/null 2>&1 || actual=$?
+[[ "$actual" -eq 1 ]] || { echo "completed migration did not require bootstrap removal" >&2; exit 1; }
 
 echo "production environment policy tests passed"

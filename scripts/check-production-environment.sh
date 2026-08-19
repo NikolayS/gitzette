@@ -5,7 +5,7 @@ if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
   repository="$GITHUB_REPOSITORY"
 else
@@ -52,7 +52,13 @@ fi
 
 repository_secret_names="$(gh api --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add | map(.name)')"
 forbidden_repository_secret_names="$(jq -c '.forbidden_repository_secret_names' "$policy")"
-if jq -e --argjson forbidden "$forbidden_repository_secret_names" 'any(.[]; . as $name | any($forbidden[]; . == $name))' <<<"$repository_secret_names" >/dev/null; then
+repository_credentials_present="$(jq -r --argjson forbidden "$forbidden_repository_secret_names" 'any(.[]; . as $name | any($forbidden[]; . == $name))' <<<"$repository_secret_names")"
+if [[ "$bootstrap_workflow_present" == true && "$repository_credentials_present" == false ]] &&
+   gh api "repos/$repository/contents/.github/workflows/migrate-production-credentials.yml?ref=main" >/dev/null 2>&1; then
+  echo "credential migration is complete; remove its workflow and temporary main environment policy in the next reviewed PR" >&2
+  exit 1
+fi
+if [[ "$repository_credentials_present" == true ]]; then
   echo "production credentials must not be repository-scoped Actions secrets" >&2
   exit 1
 fi
