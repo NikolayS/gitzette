@@ -73,22 +73,23 @@ text matching is not the authorization proof.
    `7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc`.
 
 1. From a clean checkout of protected `main`, first verify that production
-   still has its default `v*`-only policy. Investigate any diff before changing
+   admits exactly reviewed `main` and `v*` refs. Investigate any diff before changing
    it; do not erase a tamper signal by applying over it. Then apply the
    dedicated migration environment. GitHub's environment API cannot set
    `can_admins_bypass`; if the migration check reports that field as `true`,
    disable **Allow administrators to bypass configured protection rules** in
    Settings -> Environments -> `credential-migration`, then rerun the apply
    command. This UI-only action is expected after first creating the
-   environment and is required before export. Do not widen production yet.
+   environment and is required before export. Production is never widened during
+   this migration: reviewed `main` is permanently admitted for the one-shot
+   verifier, and every production job still requires Nik's environment approval.
    Both apply scripts refuse to mutate an existing environment while that
-   bypass is enabled. On first creation the apply command intentionally ends
-   non-zero immediately after the PUT, even if the API currently reports bypass
-   disabled. Nik must verify the UI setting, rerun the apply command, and pass
-   the checker before opening a switch; never treat the initial PUT as ready.
+   bypass is enabled. After first creation each apply command re-reads the
+   environment and hard-fails if the API reports bypass enabled. Nik must disable
+   it in the UI, rerun the apply command, and pass the checker before opening a switch.
 
    ```bash
-   bash scripts/check-production-environment.sh default
+   bash scripts/check-production-environment.sh
    bash scripts/apply-credential-migration-environment.sh
    gh workflow run credential-migration-policy-guard.yml --ref main
    gh run watch POLICY_GUARD_RUN_ID --exit-status
@@ -96,15 +97,13 @@ text matching is not the authorization proof.
 
    This preflight dispatch must be green before the scheduled guard is relied
    on; API-read failures exit separately from policy drift. Green proves the
-   default production policy and that neither migration switch resolves to a
+   fixed production policy and that neither migration switch resolves to a
    nonempty value. It
    does not claim that the intentionally installed bootstrap workflow or
    migration environment has already been removed.
 
-   The default production policy remains `v*` only. Running
-   `bash scripts/check-production-environment.sh` without `migration` later
-   fails while protected `main` is temporarily admitted and makes stale
-   widening loud.
+   The production policy does not change during export or verification; any
+   checker failure is therefore real drift, never an expected migration window.
 
 2. Open the independently removable switch and dispatch exactly one export as
    immutable runner ID `280144521` (`samo-agent`). Workflow concurrency only
@@ -223,12 +222,11 @@ text matching is not the authorization proof.
    Repository copies must be absent before stored-value verification; otherwise
    GitHub can silently fall back from a missing environment secret to the same
    repository secret. If verification later fails, restore repository copies
-   from `$plaintext` immediately after restoring the default policy. Delete the
+   from `$plaintext` immediately. Delete the
    repository copies again before any verification retry.
 
-6. From a clean checkout exactly synchronized to protected `main`, apply the
-   temporary protected-branch production policy immediately before dispatch,
-   and run stored-value verification as `samo-agent`. GitHub pins the workflow
+6. From a clean checkout exactly synchronized to protected `main`, run
+   stored-value verification as `samo-agent`. GitHub pins the workflow
    run to the immutable `main` SHA at dispatch; the workflow re-resolves
    protected `main` both before and after Nik's production approval and fails
    if it moved. The dispatcher and triggering actor must both be immutable
@@ -239,17 +237,8 @@ text matching is not the authorization proof.
    ```bash
    git fetch origin main
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
-   cleanup_verification_policy() {
-     local cleanup_status=0
-     gh variable delete CREDENTIAL_VERIFY_OPEN || true
-     bash scripts/apply-production-environment.sh default || cleanup_status=1
-     bash scripts/check-production-environment.sh default || cleanup_status=1
-     return "$cleanup_status"
-   }
-   trap cleanup_verification_policy EXIT
-   bash scripts/apply-production-environment.sh migration
    bash scripts/check-credential-migration-environment.sh
-   bash scripts/check-production-environment.sh migration
+   bash scripts/check-production-environment.sh
    gh variable set CREDENTIAL_VERIFY_OPEN --body true
    GH_TOKEN="$(gh auth token --user samo-agent)" \
      gh workflow run migrate-production-credentials.yml \
@@ -258,47 +247,47 @@ text matching is not the authorization proof.
    gh run watch VERIFY_RUN_ID --exit-status
    verify_status=$?
    set -e
-   cleanup_verification_policy
-   trap - EXIT
+   gh variable delete CREDENTIAL_VERIFY_OPEN
+   bash scripts/check-production-environment.sh
    [[ "$verify_status" == 0 ]]
    ```
 
    Before Nik approves the production deployment, independently verify outside
    the workflow logs that the run is still pinned to current protected `main`,
    rerun both live environment checks, and record the guard/verification run
-   IDs that bound the expected-red window:
+   IDs that bound the approval window:
 
    ```bash
    test "$(gh run view VERIFY_RUN_ID --json headSha --jq .headSha)" = \
      "$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
    bash scripts/check-credential-migration-environment.sh
-   bash scripts/check-production-environment.sh migration
+   bash scripts/check-production-environment.sh
    ```
 
-   The exit trap is installed before production is widened, and repeated
-   default-policy application is tested and idempotent. On any abort or operator
-   shell interruption, run both recovery commands immediately:
+   Production is not widened, so cancellation cannot strand a broader deploy
+   policy. On any abort or operator shell interruption, close the verification
+   switch and re-audit immediately:
 
    ```bash
-   bash scripts/apply-production-environment.sh default
-   bash scripts/check-production-environment.sh default
+   gh variable delete CREDENTIAL_VERIFY_OPEN
+   bash scripts/check-production-environment.sh
    ```
 
    A best-effort scheduled guard also runs approximately every five minutes on
-   GitHub's scheduler. Its production-policy job checks the migration policy
-   while `CREDENTIAL_VERIFY_OPEN=true` and the default policy after that switch
-   closes; therefore policy drift is never an expected result. Its separate
+   GitHub's scheduler. Its production-policy job always checks the same fixed
+   `main` plus `v*` policy; therefore policy drift is never an expected result.
+   Its separate
    switch-residue job is expected red during an open export switch or the
-   legitimate production approval wait. After the switch closes, lingering
-   widening emits a distinct CRITICAL default-policy failure even if the
-   operator shell or runner was killed before its exit trap ran.
+   legitimate production approval wait.
    After cleanup, explicitly dispatch that guard and require it to turn green;
    a red result after the verify run is no longer waiting is lingering
-   widening. The explicit post-cleanup dispatch, not schedule timing, is
-   authoritative for closing this operational window. It does not prove final
+   switch residue. The explicit post-cleanup dispatch, not schedule timing, is
+   authoritative for closing this operational window. GitHub schedules are
+   best-effort and may be delayed or disabled after repository inactivity. The
+   green manual run does not prove final
    deletion of the bootstrap workflow or environment; the #67 teardown diff
    and live deletion checks prove that separately.
-   Record its run ID next to the pre-widening run ID and reconcile every red
+   Record its run ID next to the pre-verification run ID and reconcile every red
    scheduled run between them to this single verification window.
 
    On verification failure, restore repository rollback scope before debugging:
@@ -325,8 +314,7 @@ text matching is not the authorization proof.
    `.github/workflows/migrate-production-credentials.yml`,
    `.github/workflows/credential-migration-policy-guard.yml`,
    `config/credential-migration-environment.json`,
-   `config/production-environment-migration.json`, all corresponding
-   apply/check scripts, `scripts/get-github-environment.sh`, and
+   all corresponding apply/check scripts, `scripts/get-github-environment.sh`, and
    `scripts/credential-migration-gate.test.ts`. Remove
    the `migration` case from both shared production-environment scripts so no
    code path points at the deleted config, then delete the live

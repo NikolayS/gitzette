@@ -16,9 +16,28 @@ if ! jq -e --argjson allowed "$allowed_cloudflare" 'all(.[]; .name as $name | $a
   exit 1
 fi
 
+repository_variables="$(gh api --paginate --slurp "repos/$repository/actions/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
+if ! jq -e 'all(.[];
+  (.name == "CREDENTIAL_EXPORT_OPEN" or .name == "CREDENTIAL_VERIFY_OPEN") and
+  .value == "true")' <<<"$repository_variables" >/dev/null; then
+  echo "repository contains an unexpected Actions variable name or value" >&2
+  exit 1
+fi
+
+dependabot_secrets="$(gh api --paginate --slurp "repos/$repository/dependabot/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
+if [[ "$(jq length <<<"$dependabot_secrets")" -ne 0 ]]; then
+  echo "repository contains an unexpected Dependabot secret" >&2
+  exit 1
+fi
+
 environments="$(gh api --paginate --slurp "repos/$repository/environments?per_page=100" | jq -c 'map(.environments) | add // []')"
 while IFS= read -r environment; do
   secrets="$(gh api --paginate --slurp "repos/$repository/environments/$environment/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
+  variables="$(gh api --paginate --slurp "repos/$repository/environments/$environment/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
+  if [[ "$(jq length <<<"$variables")" -ne 0 ]]; then
+    echo "$environment contains an unexpected environment variable" >&2
+    exit 1
+  fi
   if [[ "$environment" == production ]]; then
     if ! jq -e --argjson allowed "$allowed_cloudflare" 'all(.[]; .name as $name | $allowed | index($name))' <<<"$secrets" >/dev/null; then
       echo "production contains a secret outside the reviewed Cloudflare allowlist" >&2
@@ -30,4 +49,4 @@ while IFS= read -r environment; do
   fi
 done < <(jq -r '.[].name' <<<"$environments")
 
-echo "Reviewer credential isolation OK: no repository or environment secret can name an external review credential"
+echo "Reviewer credential isolation OK: Actions variables and all Actions, environment, and Dependabot secret names satisfy the external-review isolation policy"

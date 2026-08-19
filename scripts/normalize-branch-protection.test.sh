@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow_permissions='{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}'
-rulesets='[]'
+rulesets='[{"name":"main-admin-only-updates","target":"branch","enforcement":"active","bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}],"conditions":{"ref_name":{"exclude":[],"include":["refs/heads/main"]}},"rules":[{"type":"update","parameters":{"update_allows_fetch_and_merge":false}}]}]'
 protection='{
   "required_status_checks":{"strict":true,"checks":[{"context":"typecheck","app_id":15368},{"context":"samorev-gate","app_id":15368},{"context":"samorev","app_id":null}]},
   "enforce_admins":{"enabled":true},
@@ -25,7 +25,7 @@ actual="$(jq -nSc --argjson protection "$mutated" --argjson workflow_permissions
 assert_drift() {
   name="$1"
   changed_protection="$2"
-  changed_rulesets="${3:-[]}"
+  changed_rulesets="${3:-$rulesets}"
   normalized="$(jq -nSc --argjson protection "$changed_protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$changed_rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
   [[ "$normalized" != "$expected" ]] || { echo "$name drift was not detected" >&2; exit 1; }
 }
@@ -33,6 +33,7 @@ assert_drift() {
 assert_drift bypass "$(jq -c '.required_pull_request_reviews.bypass_pull_request_allowances={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 assert_drift dismissal "$(jq -c '.required_pull_request_reviews.dismissal_restrictions={users:[{login:"attacker"}],teams:[]}' <<<"$protection")"
 assert_drift restrictions "$(jq -c '.restrictions={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
-assert_drift ruleset "$protection" '[{"name":"bypass","target":"branch","enforcement":"active","bypass_actors":[{"actor_type":"RepositoryRole","actor_id":5,"bypass_mode":"always"}],"conditions":{},"rules":[]}]'
+assert_drift missing-ruleset "$protection" '[]'
+assert_drift actions-bypass "$protection" '[{"name":"main-admin-only-updates","target":"branch","enforcement":"active","bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"},{"actor_id":15368,"actor_type":"Integration","bypass_mode":"always"}],"conditions":{"ref_name":{"exclude":[],"include":["refs/heads/main"]}},"rules":[{"type":"update","parameters":{"update_allows_fetch_and_merge":false}}]}]'
 
 echo "branch-protection normalization and security-field tests passed"

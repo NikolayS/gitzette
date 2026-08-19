@@ -76,28 +76,16 @@ describe("one-shot credential migration boundary", () => {
       reviewers: Array<{ id: number }>;
       branch_policies: Array<{ name: string; type: string }>;
     };
-    const migrationProductionPolicy = JSON.parse(await Bun.file("config/production-environment-migration.json").text()) as {
-      can_admins_bypass: boolean;
-      prevent_self_review: boolean;
-      reviewers: Array<{ id: number }>;
-      deployment_branch_policy: Record<string, boolean>;
-      branch_policies: Array<{ name: string; type: string }>;
-    };
     expect(productionPolicy.can_admins_bypass).toBe(false);
-    expect(productionPolicy.branch_policies).toEqual([{ name: "v*", type: "tag" }]);
-    expect(migrationProductionPolicy.can_admins_bypass).toBe(false);
-    expect(migrationProductionPolicy.prevent_self_review).toBe(true);
-    expect(migrationProductionPolicy.reviewers.map(({ id }) => id)).toEqual([1345402]);
-    expect(migrationProductionPolicy.branch_policies).toEqual([]);
-    expect(migrationProductionPolicy.deployment_branch_policy).toEqual({ protected_branches: true, custom_branch_policies: false });
-    expect(policy.can_admins_bypass).toBe(migrationProductionPolicy.can_admins_bypass);
-    expect(policy.prevent_self_review).toBe(migrationProductionPolicy.prevent_self_review);
-    expect(policy.reviewers.map(({ id }) => id)).toEqual(migrationProductionPolicy.reviewers.map(({ id }) => id));
-    expect(policy.deployment_branch_policy).toEqual(migrationProductionPolicy.deployment_branch_policy);
+    expect(productionPolicy.prevent_self_review).toBe(true);
+    expect(productionPolicy.reviewers.map(({ id }) => id)).toEqual([1345402]);
+    expect(productionPolicy.branch_policies).toEqual([
+      { name: "main", type: "branch" }, { name: "v*", type: "tag" },
+    ]);
     const applyProduction = await Bun.file("scripts/apply-production-environment.sh").text();
     const checkProduction = await Bun.file("scripts/check-production-environment.sh").text();
     expect(applyProduction).not.toContain("{wait_timer,can_admins_bypass");
-    expect(applyProduction).toContain('check-production-environment.sh" "$mode"');
+    expect(applyProduction).toContain('check-production-environment.sh"');
     expect(applyProduction).toContain("post_apply_environment");
     expect(applyProduction).toContain("unable to re-read production environment after apply");
     expect(applyProduction).toContain("production was newly created");
@@ -137,7 +125,7 @@ describe("one-shot credential migration boundary", () => {
       migrationDoc.indexOf('operator_token_file="${OPERATOR_TOKEN_FILE'),
     );
     expect(migrationDoc).toContain("gh variable set CREDENTIAL_VERIFY_OPEN --body true");
-    expect(migrationDoc.lastIndexOf("bash scripts/check-production-environment.sh migration", migrationDoc.indexOf("gh variable set CREDENTIAL_VERIFY_OPEN"))).toBeGreaterThan(-1);
+    expect(migrationDoc.lastIndexOf("bash scripts/check-production-environment.sh", migrationDoc.indexOf("gh variable set CREDENTIAL_VERIFY_OPEN"))).toBeGreaterThan(-1);
     expect(migrationDoc).toContain("gh variable delete CREDENTIAL_VERIFY_OPEN");
     expect(migrationDoc).toContain("only clean closed state is an absent variable");
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
@@ -146,8 +134,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("remaining_repository_cloudflare_secrets");
     expect(migrationDoc).toContain("GitHub can silently fall back");
     expect(migrationDoc).toContain("GitHub pins the workflow\n   run to the immutable `main` SHA at dispatch");
-    expect(migrationDoc).toContain("trap cleanup_verification_policy EXIT");
-    expect(migrationDoc).toContain("trap - EXIT");
+    expect(migrationDoc).toContain("Production is not widened");
     expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
       migrationDoc.indexOf("drop table credential_migration_transfer"),
@@ -158,7 +145,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("Each violation must exit nonzero");
     for (const teardownItem of [
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
-      "production-environment-migration.json", "credential-migration-gate.test.ts",
+      "credential-migration-gate.test.ts",
       "get-github-environment.sh",
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);
@@ -170,9 +157,8 @@ describe("one-shot credential migration boundary", () => {
       jobs: Record<string, { permissions: Record<string, string>; steps: Array<{ name?: string; run?: string }> }>;
     };
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
-    expect(policyGuard).toContain('true) expected_mode=migration');
-    expect(policyGuard).toContain('bash scripts/check-production-environment.sh "$expected_mode"');
-    expect(policyGuard).toContain("CRITICAL: production is not v*-only after the verification switch closed");
+    expect(policyGuard).toContain("bash scripts/check-production-environment.sh");
+    expect(policyGuard).toContain("CRITICAL: production no longer admits exactly protected main and release tags");
     expect(policyGuard).toContain("GUARD UNREADABLE: production environment API evidence could not be retrieved");
     expect(policyGuard).toContain("CRITICAL: production environment is missing");
     expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" ]]');
@@ -186,7 +172,7 @@ describe("one-shot credential migration boundary", () => {
     expect(parsedPolicyGuard.jobs["production-policy"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(parsedPolicyGuard.jobs["migration-switches"].permissions).toEqual({});
     const policyGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
-      name?.startsWith("Fail if temporary production widening"))?.run;
+      name?.startsWith("Audit the fixed production ref policy"))?.run;
     expect(policyGuardRun).toBeDefined();
     const policyGuardRoot = await mkdtemp(join(tmpdir(), "gitzette-policy-guard-run-"));
     const fakeBash = join(policyGuardRoot, "bash");
@@ -194,19 +180,17 @@ describe("one-shot credential migration boundary", () => {
 exit "\${FAKE_CHECKER_STATUS:-0}"
 `);
     await Bun.spawn(["chmod", "+x", fakeBash]).exited;
-    const executePolicyGuard = (verifyOpen: string, checkerStatus: number): Promise<number> => Bun.spawn([
+    const executePolicyGuard = (checkerStatus: number): Promise<number> => Bun.spawn([
       "/bin/bash", "-c", policyGuardRun ?? "exit 99",
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${policyGuardRoot}:${process.env.PATH}`, VERIFY_OPEN: verifyOpen, FAKE_CHECKER_STATUS: String(checkerStatus) },
+      env: { ...process.env, PATH: `${policyGuardRoot}:${process.env.PATH}`, FAKE_CHECKER_STATUS: String(checkerStatus) },
       stdout: "pipe", stderr: "pipe",
     }).exited;
-    expect(await executePolicyGuard("", 0)).toBe(0);
-    expect(await executePolicyGuard("true", 0)).toBe(0);
-    expect(await executePolicyGuard("", 1)).toBe(1);
-    expect(await executePolicyGuard("", 3)).toBe(3);
-    expect(await executePolicyGuard("", 4)).toBe(4);
-    expect(await executePolicyGuard("false", 0)).toBe(1);
+    expect(await executePolicyGuard(0)).toBe(0);
+    expect(await executePolicyGuard(1)).toBe(1);
+    expect(await executePolicyGuard(3)).toBe(3);
+    expect(await executePolicyGuard(4)).toBe(4);
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
@@ -384,7 +368,7 @@ fi
     }).exited).toBe(1);
   });
 
-  test("makes temporary protected-main widening explicit and stale widening fail loud", async () => {
+  test("keeps one fixed production ref policy and fails drift loud", async () => {
     const root = await mkdtemp(join(tmpdir(), "gitzette-production-policy-mode-"));
     const bin = join(root, "bin");
     await mkdir(bin);
@@ -403,9 +387,7 @@ case "$endpoint" in
     esac
     bypass=false; [[ "\${FAKE_API_ERROR:-none}" != bypass ]] || bypass=true
     protected=false; custom=true
-    if [[ "\${FAKE_LIVE_POLICY:-default}" == migration ]]; then protected=true; custom=false; fi
-    reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
-    [[ "\${FAKE_LIVE_POLICY:-default}" != migration ]] || reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
+    reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
     jq -nc --argjson bypass "$bypass" --argjson protected "$protected" --argjson custom "$custom" --argjson reviewers "$reviewers" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:$reviewers}],deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}}'
     ;;
   *environments?per_page=100) printf '%s\n' '[{"environments":[]}]' ;;
@@ -416,15 +398,15 @@ case "$endpoint" in
     elif [[ "\${FAKE_LIVE_POLICY:-default}" == empty ]]; then
       printf '%s\\n' '[{"branch_policies":[]}]'
     else
-      printf '%s\\n' '[{"branch_policies":[{"name":"v*","type":"tag"}]}]'
+      printf '%s\\n' '[{"branch_policies":[{"name":"main","type":"branch"},{"name":"v*","type":"tag"}]}]'
     fi
     ;;
   *) exit 91 ;;
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (mode: string, live: string, apiError = "none"): Promise<{ code: number; stdout: string; stderr: string }> => {
-      const child = Bun.spawn(["bash", "scripts/check-production-environment.sh", mode], {
+    const run = async (live: string, apiError = "none"): Promise<{ code: number; stdout: string; stderr: string }> => {
+      const child = Bun.spawn(["bash", "scripts/check-production-environment.sh"], {
         cwd: process.cwd(),
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_LIVE_POLICY: live, FAKE_API_ERROR: apiError },
         stdout: "pipe", stderr: "pipe",
@@ -434,36 +416,30 @@ esac
       ]);
       return { code, stdout, stderr };
     };
-    const normal = await run("default", "default");
+    const normal = await run("default");
     expect(normal.code).toBe(0);
-    expect(normal.stdout).toContain("admitted refs: v*");
-    expect((await run("default", "migration")).code).toBe(1);
-    const migration = await run("migration", "migration");
-    expect(migration.code).toBe(0);
-    expect(migration.stdout).toContain("admitted refs: protected branches");
-    expect((await run("migration", "default")).code).toBe(1);
-    expect((await run("attacker", "default")).code).toBe(2);
-    const empty = await run("default", "empty");
+    expect(normal.stdout).toContain("admitted refs: main, v*");
+    const empty = await run("empty");
     expect(empty.code).toBe(1);
     expect(empty.stderr).toContain('"branch_policies":[]');
-    const policyApiFailure = await run("default", "api-error");
+    const policyApiFailure = await run("api-error");
     expect(policyApiFailure.code).toBe(3);
     expect(policyApiFailure.stderr).toContain("unable to read production deployment branch policies");
-    const apiFailure = await run("default", "default", "auth");
+    const apiFailure = await run("default", "auth");
     expect(apiFailure.code).toBe(3);
     expect(apiFailure.stderr).toContain("unable to read production environment");
     expect(apiFailure.stderr).toContain("fake production API failure");
-    const missing = await run("default", "default", "missing");
+    const missing = await run("default", "missing");
     expect(missing.code).toBe(4);
-    expect(missing.stderr).toContain("production environment is missing; run scripts/apply-production-environment.sh default");
+    expect(missing.stderr).toContain("production environment is missing; run scripts/apply-production-environment.sh");
     expect(missing.stderr).toContain("absent from the readable repository inventory");
-    const bypass = await run("default", "default", "bypass");
+    const bypass = await run("default", "bypass");
     expect(bypass.code).toBe(1);
     expect(bypass.stderr).toContain('disable "Allow administrators to bypass configured protection rules"');
     expect(bypass.stderr).toContain("environment production");
   });
 
-  test("applies migration widening and then actually removes it in default mode", async () => {
+  test("applies the fixed main and release-tag policy idempotently", async () => {
     const root = await mkdtemp(join(tmpdir(), "gitzette-production-policy-apply-"));
     const bin = join(root, "bin");
     await mkdir(bin);
@@ -484,7 +460,7 @@ case "$method:$endpoint" in
   GET:repos/example/gitzette/environments/production)
     bypass=false; [[ "\${FAKE_ADMIN_BYPASS:-false}" != true ]] || bypass=true
     policy='{"protected_branches":false,"custom_branch_policies":true}'
-    reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
+    reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
     [[ ! -f "$FAKE_STATE.put" ]] || policy="$(jq -c .deployment_branch_policy "$FAKE_STATE.put")"
     if [[ -f "$FAKE_STATE.put" ]]; then
       reviewers="$(jq -c '[.reviewers[] | {type,reviewer:{id,login:(if .id == 1345402 then "NikolayS" else "samo-agent" end)}}]' "$FAKE_STATE.put")"
@@ -506,21 +482,19 @@ case "$method:$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (mode: string, adminBypass = false): Promise<number> => Bun.spawn([
-      "bash", "scripts/apply-production-environment.sh", mode,
+    const run = async (adminBypass = false): Promise<number> => Bun.spawn([
+      "bash", "scripts/apply-production-environment.sh",
     ], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state, FAKE_ADMIN_BYPASS: String(adminBypass) },
       stdout: "pipe", stderr: "pipe",
     }).exited;
-    expect(await run("migration")).toBe(0);
+    expect(await run()).toBe(0);
     expect(JSON.parse(await Bun.file(`${state}.put`).text()).can_admins_bypass).toBeUndefined();
-    expect(JSON.parse(await Bun.file(state).text())).toEqual([]);
-    expect(await run("default")).toBe(0);
-    expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name)).toEqual(["v*"]);
-    expect(await Bun.file(`${state}.put-count`).text()).toBe("xx");
-    expect(await run("default", true)).toBe(1);
-    expect(await Bun.file(`${state}.put-count`).text()).toBe("xx");
+    expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name).sort()).toEqual(["main", "v*"]);
+    expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
+    expect(await run(true)).toBe(1);
+    expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
   });
 
   test("executes the reviewed environment policy against live-response shapes", async () => {

@@ -9,6 +9,8 @@ describe("deploy review revalidation", () => {
     const gate = await Bun.file("scripts/check-release-review-evidence.sh").text();
     const codeowners = await Bun.file(".github/CODEOWNERS").text();
     const documentation = await Bun.file("docs/review-gate.md").text();
+    const branchPolicy = JSON.parse(await Bun.file("config/main-branch-protection.json").text());
+    const applyBranchPolicy = await Bun.file("scripts/apply-branch-protection.sh").text();
     expect(workflow).toContain('bash scripts/check-release-review-evidence.sh "$reviewed_sha"');
     expect(workflow).not.toContain('/reviews\")');
     expect(workflow).not.toContain('.state == "APPROVED"');
@@ -23,8 +25,18 @@ describe("deploy review revalidation", () => {
     expect(gate).toContain('.creator.id == 280144521');
     expect(gate).not.toContain('.creator.login == "samo-agent"');
     expect(codeowners.trim()).toBe("* @samo-agent");
+    expect(branchPolicy.repository_rulesets).toEqual([{
+      name: "main-admin-only-updates", target: "branch", enforcement: "active",
+      bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+      conditions: { ref_name: { exclude: [], include: ["refs/heads/main"] } },
+      rules: [{ type: "update", parameters: { update_allows_fetch_and_merge: false } }],
+    }]);
+    expect(applyBranchPolicy.indexOf("ruleset_payload=")).toBeLessThan(
+      applyBranchPolicy.indexOf("actions/permissions/workflow"),
+    );
     expect(documentation).toContain("every changed enforcement script under\n`scripts/check-*.sh`");
     expect(documentation).toContain("Actions bot's immutable ID, not `280144521`");
+    expect(documentation).toContain("GitHub Actions is not a bypass actor");
     const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
     const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
     expect(reviewGate).toContain("actions: read");
@@ -121,6 +133,15 @@ case "$endpoint" in
     name=CLOUDFLARE_API_TOKEN; [[ "\${FAKE_MODE:-ok}" != repository ]] || name=SAMO_AGENT_TOKEN
     jq -nc --arg name "$name" '[{secrets:[{name:$name}]}]'
     ;;
+  *actions/variables*)
+    name=CREDENTIAL_EXPORT_OPEN; value=true
+    [[ "\${FAKE_MODE:-ok}" != variable ]] || name=SAMO_AGENT_TOKEN
+    [[ "\${FAKE_MODE:-ok}" != variable-value ]] || value=reviewer-token
+    jq -nc --arg name "$name" --arg value "$value" '[{variables:[{name:$name,value:$value}]}]'
+    ;;
+  *dependabot/secrets*)
+    if [[ "\${FAKE_MODE:-ok}" == dependabot ]]; then printf '[{"secrets":[{"name":"SAMOREV_TOKEN"}]}]\n'; else printf '[{"secrets":[]}]\n'; fi
+    ;;
   *environments?per_page=100) printf '[{"environments":[{"name":"production"},{"name":"credential-migration"}]}]\n' ;;
   *production/secrets*)
     name=CLOUDFLARE_ACCOUNT_ID; [[ "\${FAKE_MODE:-ok}" != production ]] || name=GH_TOKEN
@@ -128,6 +149,9 @@ case "$endpoint" in
     ;;
   *credential-migration/secrets*)
     if [[ "\${FAKE_MODE:-ok}" == migration ]]; then printf '[{"secrets":[{"name":"SAMOREV_TOKEN"}]}]\n'; else printf '[{"secrets":[]}]\n'; fi
+    ;;
+  *production/variables*|*credential-migration/variables*)
+    if [[ "\${FAKE_MODE:-ok}" == environment-variable ]]; then printf '[{"variables":[{"name":"SAMOREV_TOKEN","value":"x"}]}]\n'; else printf '[{"variables":[]}]\n'; fi
     ;;
   *) exit 91 ;;
 esac
@@ -144,6 +168,10 @@ esac
     expect(await run("repository")).toBe(1);
     expect(await run("production")).toBe(1);
     expect(await run("migration")).toBe(1);
+    expect(await run("variable")).toBe(1);
+    expect(await run("variable-value")).toBe(1);
+    expect(await run("dependabot")).toBe(1);
+    expect(await run("environment-variable")).toBe(1);
     expect(await Bun.file("scripts/check-branch-protection.sh").text()).toContain("check-reviewer-credential-isolation.sh");
   });
 });

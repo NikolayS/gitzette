@@ -7,11 +7,11 @@ if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
-case "${1:-default}" in
-  default) policy="$root/config/production-environment.json" ;;
-  migration) policy="$root/config/production-environment-migration.json" ;;
-  *) echo "usage: $0 [default|migration]" >&2; exit 2 ;;
-esac
+if [[ "$#" -ne 0 ]]; then
+  echo "usage: $0" >&2
+  exit 2
+fi
+policy="$root/config/production-environment.json"
 expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
@@ -21,7 +21,7 @@ environment_status=$?
 set -e
 if [[ "$environment_status" -ne 0 ]]; then
   if [[ "$environment_status" -eq 4 ]]; then
-    echo "production environment is missing; run scripts/apply-production-environment.sh default" >&2
+    echo "production environment is missing; run scripts/apply-production-environment.sh" >&2
     sed 's/^/  /' "$error_file" >&2
     exit 4
   else

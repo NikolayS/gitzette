@@ -59,12 +59,12 @@ if ! post_apply_environment="$(gh api "repos/$repository/environments/$environme
   sed 's/^/  /' "$error_file" >&2
   exit 3
 fi
-if [[ "$created_environment" == true ]]; then
-  echo 'credential-migration was newly created; verify admin bypass is disabled in Settings -> Environments, then re-run this command and its checker before opening any switch' >&2
-  exit 1
-fi
 if [[ "$(jq -r .can_admins_bypass <<<"$post_apply_environment")" != false ]]; then
-  echo 'disable "Allow administrators to bypass configured protection rules" for environment credential-migration in Settings -> Environments, then re-run' >&2
+  if [[ "$created_environment" == true ]]; then
+    echo 'credential-migration was newly created with admin bypass enabled; disable "Allow administrators to bypass configured protection rules" in Settings -> Environments, then re-run before opening any switch' >&2
+  else
+    echo 'disable "Allow administrators to bypass configured protection rules" for environment credential-migration in Settings -> Environments, then re-run' >&2
+  fi
   exit 1
 fi
 

@@ -25,4 +25,4 @@ if [[ "$actual" != "$expected" ]]; then
 fi
 
 "$root/scripts/check-reviewer-credential-isolation.sh"
-echo "Branch protection OK: pull requests, exact-head technical gates, and resolved conversations are required for admins; approval count is zero"
+echo "Branch protection OK: only repository administrators can update main, and they remain subject to pull requests, exact-head technical gates, and resolved conversations; approval count is zero"

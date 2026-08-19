@@ -7,13 +7,12 @@ if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
-mode="${1:-default}"
 created_environment=false
-case "$mode" in
-  default) policy="$root/config/production-environment.json" ;;
-  migration) policy="$root/config/production-environment-migration.json" ;;
-  *) echo "usage: $0 [default|migration]" >&2; exit 2 ;;
-esac
+if [[ "$#" -ne 0 ]]; then
+  echo "usage: $0" >&2
+  exit 2
+fi
+policy="$root/config/production-environment.json"
 
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
@@ -64,12 +63,12 @@ if ! post_apply_environment="$(gh api "repos/$repository/environments/production
   sed 's/^/  /' "$error_file" >&2
   exit 3
 fi
-if [[ "$created_environment" == true ]]; then
-  echo 'production was newly created; verify admin bypass is disabled in Settings -> Environments, then re-run this command and its checker before any deployment' >&2
-  exit 1
-fi
 if [[ "$(jq -r .can_admins_bypass <<<"$post_apply_environment")" != false ]]; then
-  echo 'disable "Allow administrators to bypass configured protection rules" for environment production in Settings -> Environments, then re-run' >&2
+  if [[ "$created_environment" == true ]]; then
+    echo 'production was newly created with admin bypass enabled; disable "Allow administrators to bypass configured protection rules" in Settings -> Environments, then re-run before any deployment' >&2
+  else
+    echo 'disable "Allow administrators to bypass configured protection rules" for environment production in Settings -> Environments, then re-run' >&2
+  fi
   exit 1
 fi
 
@@ -85,4 +84,4 @@ if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies "$policy")" == t
   done <<<"$desired_policies"
 fi
 
-"$root/scripts/check-production-environment.sh" "$mode"
+"$root/scripts/check-production-environment.sh"

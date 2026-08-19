@@ -6,8 +6,10 @@ Those context names are not an identity boundary: a same-repository workflow
 can request `statuses: write`, and GitHub Actions check names share app ID
 `15368`. A GitHub `APPROVED` review is not accepted as merge or release
 evidence. Branch protection requires a pull request but sets the approval count
-to zero; merge is allowed only after exact-head CI, terminal-clean samorev,
-resolved conversations, and readiness review. Any push after a verdict invalidates it: merge requires a new
+to zero. A separate active ruleset restricts every `main` update to repository
+administrators; GitHub Actions is not a bypass actor and cannot merge even after
+forging all displayed contexts. Nik merges only after exact-head CI,
+terminal-clean samorev, resolved conversations, and readiness review. Any push after a verdict invalidates it: merge requires a new
 terminal-clean samorev verdict on the exact current head, and a green pipeline
 is never a substitute.
 
@@ -39,21 +41,27 @@ records that status under the Actions bot's immutable ID, not `280144521`, so
 the gate rejects it. The `samo-agent` credential is not stored in repository or
 environment secrets, must never be added there under any name, and is
 unavailable to repository workflows or the self-hosted GitZette runner.
-`scripts/check-reviewer-credential-isolation.sh` enforces that repository
-secrets and `production` contain only the two independently validated
-Cloudflare names and every other environment contains no secrets; the external
+`scripts/check-reviewer-credential-isolation.sh` enforces that Actions variables
+are only the two boolean migration switches, Dependabot has no secrets,
+repository secrets and `production` contain only the two independently validated
+Cloudflare names, and every environment has no variables while every other
+environment has no secrets; the external
 readiness operator runs that inventory check with repository-administration
 read access. Before
 publishing success, the external reviewer must inspect every
 `.github/workflows/**` change and every changed enforcement script under
-`scripts/check-*.sh` in the full base-to-head delta. `.github/CODEOWNERS` covers
-the entire repository (`* @samo-agent`), including those scripts. The final
+`scripts/check-*.sh` in the full base-to-head delta. `.github/CODEOWNERS` still
+documents ownership of the entire repository (`* @samo-agent`), including those
+scripts, but is intentionally not a merge gate. The final
 deploy job also requires Nik's approval in the non-bypassable `production`
 environment.
 
 Classic branch protection requires pull requests for administrators while its
-approval count is zero, so the technical gates and resolved conversations —
-not a formal approval — admit the merge. Merge does not authorize a release:
+approval count is zero. The active `main-admin-only-updates` ruleset permits
+only RepositoryRole 5 (repository administrator) to update `main`, so a
+same-repository Actions token cannot turn forged contexts into a merge. The
+administrator remains subject to classic technical gates and resolved
+conversations. Merge does not authorize a release:
 the tag workflow revalidates the external exact-head evidence, and its
 deployment cannot read production credentials without a new approval from Nik
 in the non-bypassable `production` environment. Repository Actions cannot mint
@@ -85,17 +93,16 @@ workflow job. The bootstrap adds exactly one new intentional reader,
 Nik-only, self-review-blocked, protected-branch-only `credential-migration`
 environment, with `refs/heads/main` separately pinned by `authorize-export`.
 Protected `main` is currently the only admitted export ref; adding another
-protected branch would widen the environment and requires a fresh review. It
+protected branch would expand the environment and requires a fresh review. It
 does not narrow the existing repository-secret exposure, which is why #67 must
 close the window immediately after verification. Follow
 `docs/credential-migration.md`; #67 deletes
 `.github/workflows/migrate-production-credentials.yml`,
-`.github/workflows/credential-migration-policy-guard.yml`, both temporary
-configs, `scripts/apply-credential-migration-environment.sh`,
+`.github/workflows/credential-migration-policy-guard.yml`, the temporary
+credential-migration config, `scripts/apply-credential-migration-environment.sh`,
 `scripts/check-credential-migration-environment.sh`,
 `scripts/get-github-environment.sh`,
-`scripts/credential-migration-gate.test.ts`, the
-`migration` mode from the shared production-environment apply/check scripts,
+`scripts/credential-migration-gate.test.ts`,
 the live `credential-migration` environment, and `CREDENTIAL_EXPORT_OPEN` plus
 `CREDENTIAL_VERIFY_OPEN` in the same recovery cycle. After its stored-value verification
 and repository-copy deletion, deployment credentials are available only to the
@@ -107,16 +114,12 @@ private D1 database; no public Actions artifact is created. Stored-value
 verification uses a workflow-dispatch run pinned to the exact protected `main`
 tip. GitHub records that immutable run SHA before the production approval wait,
 and the workflow re-resolves `main` before and after approval. Immediately
-before verification, production is temporarily widened to
-`config/production-environment-migration.json`; an exit trap attempts immediate
-restoration of the default `v*`-only policy. The independent scheduled guard
-checks the migration policy while `CREDENTIAL_VERIFY_OPEN=true`, so real drift
-does not disappear into an expected red result. Once the switch closes, the
-same guard checks the default policy and emits a distinct CRITICAL failure if
-widening remains after a killed shell or runner. The runbook then explicitly
-reapplies default and requires a green manual dispatch; the trap is not treated
-as durable recovery. The switch-residue job remains red while either switch is
-open. A green cleanup run is not evidence that the bootstrap workflow or
+Production permanently admits only reviewed `main` and `v*` refs, so
+verification never widens policy and cancellation cannot strand broader access.
+The independent scheduled guard always checks that same fixed policy. The
+switch-residue job remains red while either switch is open, and the runbook
+requires a green manual guard dispatch after each switch closes because GitHub
+schedules are best-effort. A green cleanup run is not evidence that the bootstrap workflow or
 environment has been removed; #67 verifies that separate teardown. The D1
 transfer table remains as a durable consumed-once marker until repository
 credential copies are gone.
@@ -168,9 +171,9 @@ A GitHub `APPROVED` review is not required evidence; the reviewed branch policy
 requires a pull request with zero approvals instead. For the bootstrap that
 changes this policy, run `bash scripts/apply-branch-protection.sh` from the
 terminal-clean exact reviewed head, rerun its audit, and only then merge that
-same SHA. The apply keeps admin enforcement, required technical statuses,
-required conversations, and force-push/deletion denial while changing only the
-formal approval requirements to zero/false.
+same SHA. The apply creates and verifies the admin-only update ruleset before it
+changes formal approval requirements to zero/false, and keeps admin enforcement,
+required technical statuses, required conversations, and force-push/deletion denial.
 
 ## Full-delta review proof
 
@@ -246,11 +249,13 @@ gh api 'repos/NikolayS/gitzette/contents/.github/workflows/samorev-gate.yml?ref=
 
 ## Policy audit and bootstrap
 
-`config/main-branch-protection.json` records the reviewed classic-branch
-policy. `scripts/check-branch-protection.sh` exact-matches it against live
+`config/main-branch-protection.json` records the reviewed classic-branch policy
+plus the sole active `main-admin-only-updates` ruleset.
+`scripts/check-branch-protection.sh` exact-matches it against live
 classic branch protection, Actions workflow permissions, and full repository or
 inherited ruleset details. Its approval count is zero and must not be restored
-or awaited. The apply script does not delete rulesets; unexpected
+or awaited. The ruleset's only bypass actor is RepositoryRole 5; no Integration
+or GitHub Actions actor may update `main`. The apply script does not delete rulesets; unexpected
 rulesets must be reconciled deliberately.
 
 For the bootstrap PR, require its own exact-head CI, a clean samorev verdict,

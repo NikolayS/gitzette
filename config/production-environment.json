@@ -3,14 +3,14 @@
   "can_admins_bypass": false,
   "prevent_self_review": true,
   "reviewers": [
-    { "type": "User", "id": 1345402, "login": "NikolayS" },
-    { "type": "User", "id": 280144521, "login": "samo-agent" }
+    { "type": "User", "id": 1345402, "login": "NikolayS" }
   ],
   "deployment_branch_policy": {
     "protected_branches": false,
     "custom_branch_policies": true
   },
   "branch_policies": [
+    { "name": "main", "type": "branch" },
     { "name": "v*", "type": "tag" }
   ]
 }

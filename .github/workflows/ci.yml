@@ -9,6 +9,9 @@ on:
 
 jobs:
   typecheck:
+    permissions:
+      actions: read
+      contents: read
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -34,10 +37,22 @@ jobs:
           .required_pull_request_reviews.require_code_owner_reviews == false and
           .required_pull_request_reviews.required_approving_review_count == 0 and
           .required_pull_request_reviews.require_last_push_approval == false and
+          (.repository_rulesets | length) == 1 and
+          .repository_rulesets[0].name == "main-admin-only-updates" and
+          .repository_rulesets[0].enforcement == "active" and
+          .repository_rulesets[0].bypass_actors == [{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}] and
+          .repository_rulesets[0].rules == [{"type":"update","parameters":{"update_allows_fetch_and_merge":false}}] and
           .allow_force_pushes == false and .allow_deletions == false'
           config/main-branch-protection.json
       - name: Verify generated Worker binding types
         run: bun run check:worker-types
+      - name: Prove policy guard API readability
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/environments/production" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=1" >/dev/null
       - run: bun run test:all
       - run: bash scripts/evaluate-samorev-status.test.sh
       - run: bash scripts/normalize-branch-protection.test.sh
