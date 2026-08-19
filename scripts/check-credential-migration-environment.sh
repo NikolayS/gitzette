@@ -33,8 +33,16 @@ if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies <<<"$environment
 else
   policies='[]'
 fi
-variables="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
-secrets="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
+if ! variables="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/variables?per_page=100" 2>"$error_file" | jq -c 'map(.variables) | add // []')"; then
+  echo "unable to read credential-migration environment variables:" >&2
+  sed 's/^/  /' "$error_file" >&2
+  exit 3
+fi
+if ! secrets="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/secrets?per_page=100" 2>"$error_file" | jq -c 'map(.secrets) | add // []')"; then
+  echo "unable to read credential-migration environment secrets:" >&2
+  sed 's/^/  /' "$error_file" >&2
+  exit 3
+fi
 if [[ "$(jq -r 'length' <<<"$variables")" -ne 0 || "$(jq -r 'length' <<<"$secrets")" -ne 0 ]]; then
   echo "credential-migration environment must not define variables or secrets" >&2
   exit 1

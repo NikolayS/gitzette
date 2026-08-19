@@ -24,4 +24,5 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-echo "Branch protection OK: base-controlled gate, exact-head verdict, CI, and an independent fresh approval are required for admins"
+"$root/scripts/check-reviewer-credential-isolation.sh"
+echo "Branch protection OK: pull requests, exact-head technical gates, and resolved conversations are required for admins; approval count is zero"

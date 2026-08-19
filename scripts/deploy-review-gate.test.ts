@@ -14,10 +14,6 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain('.state == "APPROVED"');
     expect(gate).toContain('actions/workflows/ci.yml/runs?event=pull_request&head_sha=$reviewed_sha');
     expect(gate).toContain('actions/workflows/samorev-gate.yml/runs?event=pull_request_target&head_sha=$reviewed_sha');
-    expect(gate).toContain('.default_branch == "main"');
-    expect(gate).toContain('.enforce_admins.enabled == true');
-    expect(gate).toContain('.allow_force_pushes.enabled == false');
-    expect(gate).toContain('.require_last_push_approval == true');
     expect(gate).toContain('.path == ".github/workflows/ci.yml"');
     expect(gate).toContain('.path == ".github/workflows/samorev-gate.yml"');
     expect(gate).toContain('.base.ref == "main"');
@@ -54,29 +50,16 @@ endpoint="\${*: -1}"
 mode="\${FAKE_MODE:-success}"
 if [[ "$mode" == api-error ]]; then echo "fake API failure" >&2; exit 1; fi
 case "$endpoint" in
-  repos/example/gitzette)
-    default_branch=main; [[ "$mode" != wrong-default ]] || default_branch=attacker
-    jq -nc --arg default_branch "$default_branch" '{default_branch:$default_branch}'
-    ;;
-  repos/example/gitzette/branches/main/protection)
-    enforce=true; force=false; delete=false; reviews=true
-    [[ "$mode" != admin-bypass ]] || enforce=false
-    [[ "$mode" != force-push ]] || force=true
-    [[ "$mode" != deletable-main ]] || delete=true
-    [[ "$mode" != no-reviews ]] || reviews=false
-    jq -nc --argjson enforce "$enforce" --argjson force "$force" --argjson delete "$delete" --argjson reviews "$reviews" '{enforce_admins:{enabled:$enforce},allow_force_pushes:{enabled:$force},allow_deletions:{enabled:$delete},required_pull_request_reviews:(if $reviews then {dismiss_stale_reviews:true,require_code_owner_reviews:true,require_last_push_approval:true} else null end)}'
-    ;;
-  *rulesets*)
-    if [[ "$mode" == ruleset ]]; then printf '[{"id":1}]\n'; else printf '[]\n'; fi
-    ;;
   *actions/workflows/ci.yml/runs*)
     if [[ "$mode" == no-ci-path ]]; then
       jq -nc --arg sha "$FAKE_SHA" '{workflow_runs:[{id:2,path:".github/workflows/attacker.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:"success"}]}'
     else
       latest=success; [[ "$mode" != latest-ci-failure ]] || latest=failure
-      jq -nc --arg sha "$FAKE_SHA" --arg latest "$latest" '{workflow_runs:[
-        {id:1,path:".github/workflows/ci.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-01T00:00:00Z",conclusion:"success"},
-        {id:2,path:".github/workflows/ci.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:$latest}]}'
+      base=main; [[ "$mode" != wrong-ci-base ]] || base=attacker
+      repository=example/gitzette; [[ "$mode" != fork-ci-head ]] || repository=attacker/gitzette
+      jq -nc --arg sha "$FAKE_SHA" --arg latest "$latest" --arg base "$base" --arg repository "$repository" '{workflow_runs:[
+        {id:1,path:".github/workflows/ci.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-01T00:00:00Z",conclusion:"success",head_repository:{full_name:"example/gitzette"},pull_requests:[{base:{ref:"main",repo:{url:"https://api.github.com/repos/example/gitzette"}},head:{sha:$sha,repo:{url:"https://api.github.com/repos/example/gitzette"}}}]},
+        {id:2,path:".github/workflows/ci.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:$latest,head_repository:{full_name:$repository},pull_requests:[{base:{ref:$base,repo:{url:"https://api.github.com/repos/example/gitzette"}},head:{sha:$sha,repo:{url:("https://api.github.com/repos/" + $repository)}}}]}]}'
     fi
     ;;
   *actions/workflows/samorev-gate.yml/runs*)
@@ -119,9 +102,48 @@ esac
     expect(await run("renamed-reviewer")).toBe(0);
     for (const mode of [
       "latest-ci-failure", "no-ci-path", "latest-gate-failure", "no-gate-path",
-      "latest-review-failure", "forged-reviewer", "wrong-default", "admin-bypass",
-      "force-push", "deletable-main", "no-reviews", "ruleset",
+      "latest-review-failure", "forged-reviewer", "wrong-ci-base", "fork-ci-head",
       "wrong-base", "fork-head", "wrong-publisher-target", "predated-verdict", "api-error",
-    ]) expect(await run(mode)).not.toBe(0);
+    ]) {
+      const code = await run(mode);
+      expect(code).not.toBe(0);
+    }
+  });
+
+  test("keeps the external reviewer credential out of Actions secret stores", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gitzette-reviewer-isolation-"));
+    const gh = join(root, "gh");
+    await Bun.write(gh, `#!/usr/bin/env bash
+set -euo pipefail
+endpoint="\${*: -1}"
+case "$endpoint" in
+  *actions/secrets*)
+    name=CLOUDFLARE_API_TOKEN; [[ "\${FAKE_MODE:-ok}" != repository ]] || name=SAMO_AGENT_TOKEN
+    jq -nc --arg name "$name" '[{secrets:[{name:$name}]}]'
+    ;;
+  *environments?per_page=100) printf '[{"environments":[{"name":"production"},{"name":"credential-migration"}]}]\n' ;;
+  *production/secrets*)
+    name=CLOUDFLARE_ACCOUNT_ID; [[ "\${FAKE_MODE:-ok}" != production ]] || name=GH_TOKEN
+    jq -nc --arg name "$name" '[{secrets:[{name:$name}]}]'
+    ;;
+  *credential-migration/secrets*)
+    if [[ "\${FAKE_MODE:-ok}" == migration ]]; then printf '[{"secrets":[{"name":"SAMOREV_TOKEN"}]}]\n'; else printf '[{"secrets":[]}]\n'; fi
+    ;;
+  *) exit 91 ;;
+esac
+`);
+    await Bun.spawn(["chmod", "+x", gh]).exited;
+    const run = (mode: string): Promise<number> => Bun.spawn([
+      "bash", "scripts/check-reviewer-credential-isolation.sh",
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await run("ok")).toBe(0);
+    expect(await run("repository")).toBe(1);
+    expect(await run("production")).toBe(1);
+    expect(await run("migration")).toBe(1);
+    expect(await Bun.file("scripts/check-branch-protection.sh").text()).toContain("check-reviewer-credential-isolation.sh");
   });
 });

@@ -22,10 +22,20 @@ if gh api "repos/$repository/environments/$environment" >"$response_file" 2>"$er
   exit 0
 fi
 
-if ! gh api --include "repos/$repository/environments/$environment" >"$response_file" 2>"$error_file"; then
-  :
+set +e
+gh api --include "repos/$repository/environments/$environment" >"$response_file" 2>"$error_file"
+include_status=$?
+set -e
+status_code="$(awk '/^HTTP\// { status=$2 } END { print status }' "$response_file")"
+if [[ "$include_status" -eq 0 && "$status_code" =~ ^2[0-9][0-9]$ ]]; then
+  awk '
+    /^HTTP\// { body=0; content=""; next }
+    !body && /^\r?$/ { body=1; next }
+    body { content=content $0 ORS }
+    END { printf "%s", content }
+  ' "$response_file"
+  exit 0
 fi
-status_code="$(sed -n '1s/^HTTP\/[^ ]* \([0-9][0-9][0-9]\).*/\1/p' "$response_file")"
 if [[ "$status_code" != 404 ]]; then
   echo "environment lookup failed with HTTP status ${status_code:-unknown}:" >&2
   sed 's/^/  /' "$error_file" >&2

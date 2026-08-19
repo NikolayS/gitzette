@@ -12,8 +12,10 @@ delete the ciphertext but cannot deploy Workers or replace the production
 token. Rotate the exported Worker-capable token through a dashboard-authorized
 session after service restoration.
 
-Start a disposable child shell with `bash --noprofile --norc` and run every
-code block below only inside that child shell. Do not paste a block containing
+Start a disposable child shell with
+`HISTFILE=/dev/null bash --noprofile --norc`, then immediately run
+`unset HISTFILE; set +o history`; `--noprofile --norc` alone does not disable
+history. Run every code block below only inside that child shell. Do not paste a block containing
 `set -euo pipefail`, `${VAR:?}`, or `exit` directly into the parent interactive
 shell. If a step aborts after decryption, immediately `unset plaintext` and
 shred the exact run directory before retrying; if step 0 aborts before the

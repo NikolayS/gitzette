@@ -22,6 +22,8 @@ set -e
 if [[ "$environment_status" -ne 0 ]]; then
   if [[ "$environment_status" -eq 4 ]]; then
     echo "production environment is missing; run scripts/apply-production-environment.sh default" >&2
+    sed 's/^/  /' "$error_file" >&2
+    exit 4
   else
     echo "unable to read production environment; apply only after resolving this API error:" >&2
   fi

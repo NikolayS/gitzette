@@ -13,54 +13,41 @@ fi
 repository="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 reviewed_sha="$1"
 
-repository_metadata="$(gh api "repos/$repository")"
-if ! jq -e '.default_branch == "main"' <<<"$repository_metadata" >/dev/null; then
-  echo "release gate requires main to be the repository default branch" >&2
-  exit 1
-fi
-main_protection="$(gh api "repos/$repository/branches/main/protection")"
-if ! jq -e '
-  .enforce_admins.enabled == true and
-  .allow_force_pushes.enabled == false and
-  .allow_deletions.enabled == false and
-  .required_pull_request_reviews.dismiss_stale_reviews == true and
-  .required_pull_request_reviews.require_code_owner_reviews == true and
-  .required_pull_request_reviews.require_last_push_approval == true
-' <<<"$main_protection" >/dev/null; then
-  echo "release gate requires non-bypassable main protection against direct overwrite" >&2
-  exit 1
-fi
-rulesets="$(gh api "repos/$repository/rulesets?includes_parents=true")"
-if ! jq -e 'length == 0' <<<"$rulesets" >/dev/null; then
-  echo "release gate refuses unreviewed repository or inherited ruleset bypass state" >&2
-  exit 1
-fi
-
 ci_runs="$(gh api "repos/$repository/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$reviewed_sha&per_page=100")"
-if ! jq -e --arg sha "$reviewed_sha" '
+ci_run="$(jq -ce --arg sha "$reviewed_sha" '
   [.workflow_runs[] | select(.path == ".github/workflows/ci.yml" and
     .event == "pull_request" and .head_sha == $sha)] |
-  sort_by(.created_at, .id) | last | .conclusion == "success"
-' <<<"$ci_runs" >/dev/null; then
-  echo "reviewed head lacks a successful exact-path CI run" >&2
+  sort_by(.created_at, .id) | last
+' <<<"$ci_runs")" || {
+  echo "reviewed head lacks an exact-path CI run" >&2
+  exit 1
+}
+if ! jq -e --arg sha "$reviewed_sha" --arg repository "$repository" '
+  .conclusion == "success" and .head_repository.full_name == $repository and
+  any(.pull_requests[];
+    .base.ref == "main" and .base.repo.url == "https://api.github.com/repos/\($repository)" and
+    .head.sha == $sha and .head.repo.url == "https://api.github.com/repos/\($repository)")
+' <<<"$ci_run" >/dev/null; then
+  echo "latest exact-path CI run is not successful same-repository main-base evidence" >&2
   exit 1
 fi
 
 gate_runs="$(gh api "repos/$repository/actions/workflows/samorev-gate.yml/runs?event=pull_request_target&head_sha=$reviewed_sha&per_page=100")"
-gate_run="$(jq -ce --arg sha "$reviewed_sha" --arg repository "$repository" '
+gate_run="$(jq -ce --arg sha "$reviewed_sha" '
   [.workflow_runs[] | select(.path == ".github/workflows/samorev-gate.yml" and
-    .event == "pull_request_target" and .head_sha == $sha and
-    .head_repository.full_name == $repository and
-    any(.pull_requests[];
-      .base.ref == "main" and .base.repo.url == "https://api.github.com/repos/\($repository)" and
-      .head.sha == $sha and .head.repo.url == "https://api.github.com/repos/\($repository)"))] |
+    .event == "pull_request_target" and .head_sha == $sha)] |
   sort_by(.created_at, .id) | last
 ' <<<"$gate_runs")" || {
-  echo "reviewed head lacks a same-repository publisher run based on protected main" >&2
+  echo "reviewed head lacks an exact-path publisher run" >&2
   exit 1
 }
-if ! jq -e '.conclusion == "success"' <<<"$gate_run" >/dev/null; then
-  echo "reviewed head lacks a successful latest base-controlled publisher run" >&2
+if ! jq -e --arg sha "$reviewed_sha" --arg repository "$repository" '
+  .conclusion == "success" and .head_repository.full_name == $repository and
+  any(.pull_requests[];
+    .base.ref == "main" and .base.repo.url == "https://api.github.com/repos/\($repository)" and
+    .head.sha == $sha and .head.repo.url == "https://api.github.com/repos/\($repository)")
+' <<<"$gate_run" >/dev/null; then
+  echo "latest exact-path publisher run is not successful same-repository main-base evidence" >&2
   exit 1
 fi
 

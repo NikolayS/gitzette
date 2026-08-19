@@ -5,9 +5,9 @@ on the exact pull-request head and requires every conversation to be resolved.
 Those context names are not an identity boundary: a same-repository workflow
 can request `statuses: write`, and GitHub Actions check names share app ID
 `15368`. A GitHub `APPROVED` review is not accepted as merge or release
-evidence. The authorized admin merge path may bypass a legacy approval-count
-setting, but only after exact-head CI, terminal-clean samorev, and readiness review.
-Any push after a verdict invalidates it: admin merge requires a new
+evidence. Branch protection requires a pull request but sets the approval count
+to zero; merge is allowed only after exact-head CI, terminal-clean samorev,
+resolved conversations, and readiness review. Any push after a verdict invalidates it: merge requires a new
 terminal-clean samorev verdict on the exact current head, and a green pipeline
 is never a substitute.
 
@@ -22,10 +22,10 @@ binding means every push, ready/draft transition, reopen, or PR edit requires a
 new verdict.
 
 Release enforcement does not trust those displayed names. The reviewed tag
-workflow requires `main` to remain the protected default branch. It exact-checks
-admin enforcement, stale CODEOWNER review dismissal, last-pusher rejection,
-force-push/deletion denial, and the absence of unreviewed rulesets before it queries
-GitHub's workflow-run records by exact path, event, and PR head SHA. The latest
+workflow queries GitHub's workflow-run records by exact path, event, same-repo
+head, `main` base, and PR head SHA. These endpoints require only the job's
+declared `actions: read`; admin-only protection/ruleset APIs are deliberately
+kept out of the deploy job. The latest
 `.github/workflows/samorev-gate.yml` run must also name `main` as its PR base
 and `NikolayS/gitzette` as both its base and head repository. The workflow
 requires the latest CI and publisher runs to have succeeded, and separately
@@ -37,7 +37,13 @@ protected-main `pull_request_target` run record and the external user's status.
 A repository Actions token can publish the same context name, but GitHub
 records that status under the Actions bot's immutable ID, not `280144521`, so
 the gate rejects it. The `samo-agent` credential is not stored in repository or
-environment secrets and is unavailable to repository workflows. Before
+environment secrets, must never be added there under any name, and is
+unavailable to repository workflows or the self-hosted GitZette runner.
+`scripts/check-reviewer-credential-isolation.sh` enforces that repository
+secrets and `production` contain only the two independently validated
+Cloudflare names and every other environment contains no secrets; the external
+readiness operator runs that inventory check with repository-administration
+read access. Before
 publishing success, the external reviewer must inspect every
 `.github/workflows/**` change and every changed enforcement script under
 `scripts/check-*.sh` in the full base-to-head delta. `.github/CODEOWNERS` covers
@@ -45,11 +51,10 @@ the entire repository (`* @samo-agent`), including those scripts. The final
 deploy job also requires Nik's approval in the non-bypassable `production`
 environment.
 
-Classic branch protection blocks ordinary direct pushes and ordinary merges;
-the explicitly authorized admin merge is the only exception and is a readiness
-action, not review evidence. There is deliberately no claim that a technical
-control prevents Nik from making that admin merge. Merge does not authorize a
-release: the tag workflow revalidates the external exact-head evidence, and its
+Classic branch protection requires pull requests for administrators while its
+approval count is zero, so the technical gates and resolved conversations —
+not a formal approval — admit the merge. Merge does not authorize a release:
+the tag workflow revalidates the external exact-head evidence, and its
 deployment cannot read production credentials without a new approval from Nik
 in the non-bypassable `production` environment. Repository Actions cannot mint
 that environment approval. This is why a PR approval is redundant for the
@@ -62,7 +67,7 @@ The live GitHub API shape was checked while PR #68 was open at head
 head in both `head_sha` and `pull_requests[0].head.sha`, base ref `main`, and
 repository ID `1187899133` on both sides. This is the shape enforced by the
 release script; synthetic tests fail closed for a non-main base, fork head,
-wrong publisher target, predated verdict, or unprotected/default-branch drift.
+wrong publisher target, or predated verdict on both CI and publisher evidence.
 
 `samorev-gate` is fail-closed orchestration, not a second identity boundary. It
 publishes pending immediately, retries transient API/malformed-response failures
@@ -148,16 +153,24 @@ a clean checkout of the PR head:
 
 ```bash
 SAMOREV_HOME=/path/to/samorev
-GH_TOKEN="$(gh auth token --user samo-agent)" \
+SAMO_TOKEN="$(gh auth token --user samo-agent)"
+GH_TOKEN="$SAMO_TOKEN" GITHUB_REPOSITORY=NikolayS/gitzette \
+  bash scripts/check-reviewer-credential-isolation.sh
+GH_TOKEN="$SAMO_TOKEN" \
   bun "$SAMOREV_HOME/src/cli.ts" review \
   https://github.com/NikolayS/gitzette/pull/NUMBER --blocking --fetch
+unset SAMO_TOKEN
 ```
 
-Only after that exact-head review exits zero, CI is green, and the readiness
-review confirms the same head SHA may the PR merge. A GitHub `APPROVED` review
-is not required evidence; if the legacy branch rule still asks for one, use the
-explicitly authorized admin merge path without changing or forging any
-technical status.
+Only after that exact-head review exits zero, CI is green, conversations are
+resolved, and the readiness review confirms the same head SHA may the PR merge.
+A GitHub `APPROVED` review is not required evidence; the reviewed branch policy
+requires a pull request with zero approvals instead. For the bootstrap that
+changes this policy, run `bash scripts/apply-branch-protection.sh` from the
+terminal-clean exact reviewed head, rerun its audit, and only then merge that
+same SHA. The apply keeps admin enforcement, required technical statuses,
+required conversations, and force-push/deletion denial while changing only the
+formal approval requirements to zero/false.
 
 ## Full-delta review proof
 
@@ -233,11 +246,11 @@ gh api 'repos/NikolayS/gitzette/contents/.github/workflows/samorev-gate.yml?ref=
 
 ## Policy audit and bootstrap
 
-`config/main-branch-protection.json` records the current legacy classic-branch
+`config/main-branch-protection.json` records the reviewed classic-branch
 policy. `scripts/check-branch-protection.sh` exact-matches it against live
 classic branch protection, Actions workflow permissions, and full repository or
-inherited ruleset details. Its approval count is not a release gate and must not
-be restored or awaited. The apply script does not delete rulesets; unexpected
+inherited ruleset details. Its approval count is zero and must not be restored
+or awaited. The apply script does not delete rulesets; unexpected
 rulesets must be reconciled deliberately.
 
 For the bootstrap PR, require its own exact-head CI, a clean samorev verdict,
@@ -246,6 +259,7 @@ reapply the legacy approval rule. Audit production policy before migration:
 
 ```bash
 bash scripts/check-branch-protection.sh
+bash scripts/check-reviewer-credential-isolation.sh
 bash scripts/check-production-environment.sh
 ```
 

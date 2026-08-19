@@ -154,6 +154,7 @@ describe("one-shot credential migration boundary", () => {
     );
     expect(migrationDoc).toContain("switch-residue job is expected red during an open export switch");
     expect(migrationDoc).toContain("dedicated child Bash process");
+    expect(migrationDoc).toContain("unset HISTFILE; set +o history");
     expect(migrationDoc).toContain("Each violation must exit nonzero");
     for (const teardownItem of [
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
@@ -173,6 +174,7 @@ describe("one-shot credential migration boundary", () => {
     expect(policyGuard).toContain('bash scripts/check-production-environment.sh "$expected_mode"');
     expect(policyGuard).toContain("CRITICAL: production is not v*-only after the verification switch closed");
     expect(policyGuard).toContain("GUARD UNREADABLE: production environment API evidence could not be retrieved");
+    expect(policyGuard).toContain("CRITICAL: production environment is missing");
     expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" ]]');
     expect(policyGuard).not.toContain("github.event.repository.fork");
     expect(policyGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
@@ -203,6 +205,7 @@ exit "\${FAKE_CHECKER_STATUS:-0}"
     expect(await executePolicyGuard("true", 0)).toBe(0);
     expect(await executePolicyGuard("", 1)).toBe(1);
     expect(await executePolicyGuard("", 3)).toBe(3);
+    expect(await executePolicyGuard("", 4)).toBe(4);
     expect(await executePolicyGuard("false", 0)).toBe(1);
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
@@ -451,7 +454,7 @@ esac
     expect(apiFailure.stderr).toContain("unable to read production environment");
     expect(apiFailure.stderr).toContain("fake production API failure");
     const missing = await run("default", "default", "missing");
-    expect(missing.code).toBe(3);
+    expect(missing.code).toBe(4);
     expect(missing.stderr).toContain("production environment is missing; run scripts/apply-production-environment.sh default");
     expect(missing.stderr).toContain("absent from the readable repository inventory");
     const bypass = await run("default", "default", "bypass");
@@ -561,10 +564,14 @@ case "$endpoint" in
     fi
     ;;
   *credential-migration/variables*)
-    if [[ "\${FAKE_MODE:-ok}" == environment-variable ]]; then printf '%s\\n' '[{"variables":[{"name":"CREDENTIAL_EXPORT_OPEN","value":"true"}]}]'; else printf '%s\\n' '[{"variables":[]}]'; fi
+    if [[ "\${FAKE_MODE:-ok}" == variable-api-error ]]; then echo 'variable API failed' >&2; exit 1
+    elif [[ "\${FAKE_MODE:-ok}" == environment-variable ]]; then printf '%s\\n' '[{"variables":[{"name":"CREDENTIAL_EXPORT_OPEN","value":"true"}]}]'
+    else printf '%s\\n' '[{"variables":[]}]'; fi
     ;;
   *credential-migration/secrets*)
-    if [[ "\${FAKE_MODE:-ok}" == environment-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"SHADOW"}]}]'; else printf '%s\\n' '[{"secrets":[]}]'; fi
+    if [[ "\${FAKE_MODE:-ok}" == secret-api-error ]]; then echo 'secret API failed' >&2; exit 1
+    elif [[ "\${FAKE_MODE:-ok}" == environment-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"SHADOW"}]}]'
+    else printf '%s\\n' '[{"secrets":[]}]'; fi
     ;;
   *) exit 91 ;;
 esac
@@ -589,6 +596,8 @@ esac
     expect(await run("admin-bypass")).toBe(1);
     expect(await run("environment-variable")).toBe(1);
     expect(await run("environment-secret")).toBe(1);
+    expect(await run("variable-api-error")).toBe(3);
+    expect(await run("secret-api-error")).toBe(3);
     expect(await run("missing")).toBe(3);
     expect(await run("auth")).toBe(3);
     const bypassFailure = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
@@ -729,6 +738,10 @@ case "$endpoint" in
   repos/example/gitzette/environments/production)
     if [[ "\${FAKE_MODE:-ok}" == ok ]]; then printf '{"name":"production"}\n'; exit 0; fi
     if [[ "$*" == *--include* ]]; then
+      if [[ "\${FAKE_MODE:-ok}" == transient ]]; then
+        printf 'HTTP/1.1 301 Redirect\r\n\r\nHTTP/2.0 200 OK\r\n\r\n{"name":"production"}\n'
+        exit 0
+      fi
       status=404; [[ "\${FAKE_MODE:-ok}" != server-error ]] || status=500
       printf 'HTTP/2.0 %s Error\r\n\r\n{"message":"error"}\n' "$status"
     fi
@@ -757,5 +770,6 @@ esac
     expect(await run("absent")).toBe(4);
     expect(await run("masked")).toBe(3);
     expect(await run("server-error")).toBe(3);
+    expect(await run("transient")).toBe(0);
   });
 });
