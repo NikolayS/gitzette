@@ -19,7 +19,14 @@ for argument in "$@"; do
 done
 case "$endpoint" in
   repos/example/gitzette)
-    printf 'User\n'
+    if [[ "$*" == *'--method PATCH'* ]]; then
+      # A real `gh api --input -` drains stdin even with --silent. If this
+      # double exits before reading, the producer can receive SIGPIPE and make
+      # the apply script fail nondeterministically under `set -o pipefail`.
+      cat >/dev/null
+    else
+      printf 'User\n'
+    fi
     ;;
   *rulesets\?includes_parents=false*)
     if [[ "${GH_TOKEN:-}" == fake-samo-token ]]; then
