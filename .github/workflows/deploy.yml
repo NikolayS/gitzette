@@ -51,13 +51,15 @@ jobs:
           fi
 
           statuses="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/statuses?per_page=100")"
+          if ! printf '%s' "$statuses" | bash scripts/evaluate-samorev-status.sh >/dev/null; then
+            echo "reviewed head lacks the latest identity-checked samorev verdict" >&2
+            exit 1
+          fi
           if ! jq -e '
-            (map(select(.context == "samorev")) | sort_by(.created_at, .id) | last) as $samorev |
-            (map(select(.context == "samorev-gate")) | sort_by(.created_at, .id) | last) as $gate |
-            $samorev.state == "success" and $samorev.creator.id == 280144521 and
-            $gate.state == "success"
+            map(select(.context == "samorev-gate")) |
+            sort_by(.created_at // "", .id // 0) | last | .state == "success"
           ' <<<"$statuses" >/dev/null; then
-            echo "reviewed head lacks the CODEOWNER samorev verdict or base-controlled gate" >&2
+            echo "reviewed head lacks the latest base-controlled gate" >&2
             exit 1
           fi
 

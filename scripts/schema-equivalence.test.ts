@@ -27,6 +27,13 @@ describe("schema equivalence", () => {
       schema("CREATE TABLE jobs(id TEXT DEFAULT 'a  b')"),
       schema("CREATE TABLE jobs(id TEXT DEFAULT 'a b')"),
     )).toBe(false);
+    for (const strict of [false, true]) {
+      expect(schemasMatch(
+        schema("CREATE TABLE jobs(id TEXT DEFAULT 'a\n  b')"),
+        schema("CREATE TABLE jobs(id TEXT DEFAULT 'a\nb')"),
+        strict,
+      )).toBe(false);
+    }
     expect(schemasMatch(
       [{ results: [{ type: "index", name: "sqlite_autoindex_jobs_1", sql: null }] }],
       [{ results: [{ type: "index", name: "sqlite_autoindex_jobs_1", sql: null }] }],

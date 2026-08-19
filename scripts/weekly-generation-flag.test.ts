@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { weeklyGenerationEnabled } from "./weekly-generation-flag";
 
@@ -24,14 +27,21 @@ describe("weekly generation activation flag", () => {
       ]);
       return { exitCode, stdout, stderr };
     };
-    expect(await run("wrangler.toml")).toEqual({ exitCode: 0, stdout: "false", stderr: "" });
-    const missingArgument = await run();
-    expect(missingArgument.exitCode).toBe(1);
-    expect(missingArgument.stderr).toContain("usage: bun scripts/weekly-generation-flag.ts");
-    expect(missingArgument.stderr).not.toMatch(/^\s+at /m);
-    const missingFile = await run("missing-wrangler.toml");
-    expect(missingFile.exitCode).toBe(1);
-    expect(missingFile.stderr).toContain("could not read weekly generation config:");
-    expect(missingFile.stderr).not.toMatch(/^\s+at /m);
+    const root = await mkdtemp(join(process.env.RUNNER_TEMP || tmpdir(), "weekly-flag-cli-"));
+    try {
+      const fixture = join(root, "wrangler.toml");
+      await Bun.write(fixture, '[vars]\nWEEKLY_GENERATION_ENABLED = "false"\n');
+      expect(await run(fixture)).toEqual({ exitCode: 0, stdout: "false", stderr: "" });
+      const missingArgument = await run();
+      expect(missingArgument.exitCode).toBe(1);
+      expect(missingArgument.stderr).toContain("usage: bun scripts/weekly-generation-flag.ts");
+      expect(missingArgument.stderr).not.toMatch(/^\s+at /m);
+      const missingFile = await run("missing-wrangler.toml");
+      expect(missingFile.exitCode).toBe(1);
+      expect(missingFile.stderr).toContain("could not read weekly generation config:");
+      expect(missingFile.stderr).not.toMatch(/^\s+at /m);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

@@ -4,6 +4,7 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
   let result = "";
   let quote = "";
   let pendingSpace = false;
+  let afterLineComment = false;
   for (let index = 0; index < sql.length; index++) {
     const char = sql[index];
     if (quote) {
@@ -14,6 +15,8 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
       }
       continue;
     }
+    if (afterLineComment && /\s/.test(char)) continue;
+    afterLineComment = false;
     if (char === "-" && sql[index + 1] === "-") {
       const commentStart = index;
       index += 2;
@@ -22,6 +25,7 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
         if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
         result += `${sql.slice(commentStart, index)}\n`;
       }
+      afterLineComment = !stripComments;
       pendingSpace = stripComments;
       continue;
     }
@@ -55,7 +59,7 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
       result += char;
     }
   }
-  return result.trim().replace(/\n[ \t]+/g, "\n");
+  return result.trim();
 }
 
 function canonicalSql(sql: string | null): string | null {

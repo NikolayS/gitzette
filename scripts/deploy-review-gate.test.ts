@@ -7,10 +7,9 @@ describe("deploy review revalidation", () => {
     expect(workflow).toContain('.name == "base-controlled samorev publisher" and .conclusion == "success" and .app.id == 15368');
     expect(workflow).toContain('commits/$reviewed_sha/statuses?per_page=100');
     expect(workflow).not.toContain('commits/$reviewed_sha/status\")');
-    expect(workflow).toContain('map(select(.context == "samorev")) | sort_by(.created_at, .id) | last');
-    expect(workflow).toContain('map(select(.context == "samorev-gate")) | sort_by(.created_at, .id) | last');
-    expect(workflow).toContain('$samorev.state == "success" and $samorev.creator.id == 280144521');
-    expect(workflow).toContain('$gate.state == "success"');
+    expect(workflow).toContain('printf \'%s\' "$statuses" | bash scripts/evaluate-samorev-status.sh');
+    expect(workflow).toContain('map(select(.context == "samorev-gate"))');
+    expect(workflow).toContain('sort_by(.created_at // "", .id // 0) | last | .state == "success"');
     expect(workflow).not.toContain('creator.login == "samo-agent"');
     const gates = [
       ["Verify required Worker secrets", "bash scripts/check-production-secrets.sh"],

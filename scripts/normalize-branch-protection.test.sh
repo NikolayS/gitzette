@@ -45,6 +45,11 @@ normalized="$(jq -nSc --argjson protection "$approval" --argjson workflow_permis
 [[ "$(jq -r '.required_pull_request_reviews.required_approving_review_count' <<<"$normalized")" == 1 ]] || { echo "approval count was hidden" >&2; exit 1; }
 [[ "$(jq -r '.required_pull_request_reviews.require_last_push_approval' <<<"$normalized")" == true ]] || { echo "last-push approval was hidden" >&2; exit 1; }
 assert_drift approval "$approval"
+
+no_pr_requirement="$(jq -c 'del(.required_pull_request_reviews)' <<<"$protection")"
+normalized="$(jq -nSc --argjson protection "$no_pr_requirement" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
+[[ "$(jq -c '.required_pull_request_reviews' <<<"$normalized")" == null ]] || { echo "missing PR requirement did not normalize to null" >&2; exit 1; }
+assert_drift no_pr_requirement "$no_pr_requirement"
 assert_drift restrictions "$(jq -c '.restrictions={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 assert_drift ruleset "$protection" '[{"name":"bypass","target":"branch","enforcement":"active","bypass_actors":[{"actor_type":"RepositoryRole","actor_id":5,"bypass_mode":"always"}],"conditions":{},"rules":[]}]'
 
