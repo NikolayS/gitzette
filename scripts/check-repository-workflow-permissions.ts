@@ -14,6 +14,35 @@ function runGit(cwd: string, args: string[]): string {
   return new TextDecoder().decode(result.stdout);
 }
 
+function runCommand(cwd: string, command: string, args: string[]): string {
+  const result = Bun.spawnSync({ cmd: [command, ...args], cwd, stdout: "pipe", stderr: "pipe" });
+  if (result.exitCode !== 0) {
+    throw new Error(new TextDecoder().decode(result.stderr).trim() || `${command} ${args[0]} failed`);
+  }
+  return new TextDecoder().decode(result.stdout);
+}
+
+export function assertReadOnlyActionsDefaults(document: unknown): void {
+  if (document === null || typeof document !== "object" || Array.isArray(document)) {
+    throw new Error("Actions workflow permission response must be an object");
+  }
+  const policy = document as Record<string, unknown>;
+  if (policy.default_workflow_permissions !== "read" || policy.can_approve_pull_request_reviews !== false) {
+    throw new Error("Actions workflow defaults must be read-only and unable to approve pull requests");
+  }
+}
+
+function checkActionsWorkflowDefaults(cwd: string): void {
+  const repositoryDocument = process.env.GITHUB_REPOSITORY ? null :
+    JSON.parse(runCommand(cwd, "gh", ["repo", "view", "--json", "nameWithOwner"]));
+  const repository = process.env.GITHUB_REPOSITORY || repositoryDocument?.nameWithOwner;
+  if (typeof repository !== "string" || repository.length === 0) {
+    throw new Error("could not resolve repository for Actions workflow permission audit");
+  }
+  const response = runCommand(cwd, "gh", ["api", `repos/${repository}/actions/permissions/workflow`]);
+  assertReadOnlyActionsDefaults(JSON.parse(response));
+}
+
 function workflowPaths(cwd: string, sha: string): string[] {
   return runGit(cwd, ["ls-tree", "-r", "--name-only", "-z", sha, "--", ".github/workflows"])
     .split("\0")
@@ -66,6 +95,7 @@ function remoteHeads(cwd: string): { snapshot: string; refs: RepositoryRef[] } {
 }
 
 export function checkRepositoryWorkflowPermissions(cwd: string): void {
+  checkActionsWorkflowDefaults(cwd);
   const before = remoteHeads(cwd);
   const main = before.refs.find(({ name }) => name === "main");
   if (!main) throw new Error("remote main branch is missing");

@@ -81,9 +81,11 @@ This bootstrap is intentionally fail-closed. Run these steps in order:
 4. Decrypt the emitted ciphertext locally with the operator-held private key,
    then create `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as
    `production` environment secrets.
-5. Delete both repository-scoped Cloudflare secret copies.
-6. Delete repository variable `CREDENTIAL_MIGRATION_OPEN` immediately.
-7. Merge the reviewed cleanup PR that deletes the migration workflow and removes
+5. Delete the migration workflow run logs through the GitHub API, then destroy
+   the migration-only private key after verifying both environment secrets.
+6. Delete both repository-scoped Cloudflare secret copies.
+7. Delete repository variable `CREDENTIAL_MIGRATION_OPEN` immediately.
+8. Merge the reviewed cleanup PR that deletes the migration workflow and removes
    the temporary `main` environment branch policy, then rerun the live audit.
 
 The workflow's authorization job always runs and fails explicitly for a wrong
@@ -91,8 +93,8 @@ dispatcher or a migration variable other than exact `true`. Only its successful
 completion can create the protected-environment export job.
 
 `scripts/check-production-environment.sh` is expected to fail from step 1 until
-step 7 completes: before step 5 it rejects repository-scoped production
-credentials; after step 5 it requires the open variable and export workflow to
+step 8 completes: before step 6 it rejects repository-scoped production
+credentials; after step 6 it requires the open variable and export workflow to
 be removed. Do not weaken the check to make the transitional state green.
 
 ## Captured baseline provenance

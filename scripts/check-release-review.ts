@@ -28,6 +28,13 @@ function checkRuns(value: unknown): JsonRecord[] {
   });
 }
 
+function actionRuns(value: unknown): JsonRecord[] {
+  return array(value, "Actions run pages").flatMap((page) => {
+    const pageRecord = record(page, "Actions run page");
+    return array(pageRecord.workflow_runs, "workflow_runs").map((item) => record(item, "Actions run"));
+  });
+}
+
 function latestStatus(statuses: unknown[], context: string): JsonRecord {
   const matches = statuses
     .map((item) => record(item, "status"))
@@ -63,6 +70,12 @@ export function releaseReview(document: unknown): { reviewedSha: string } {
       return check.name === name && check.conclusion === "success" && app.id === actionsAppId;
     });
     if (!passed) throw new Error(`reviewed head lacks successful ${name}`);
+  }
+  const workflowRuns = actionRuns(input.action_run_pages);
+  for (const path of [".github/workflows/ci.yml", ".github/workflows/samorev-gate.yml"]) {
+    const passed = workflowRuns.some((run) => run.path === path &&
+      run.head_sha === head.sha && run.conclusion === "success");
+    if (!passed) throw new Error(`reviewed head lacks successful workflow run from ${path}`);
   }
 
   const statuses = pages(input.status_pages, "status pages");

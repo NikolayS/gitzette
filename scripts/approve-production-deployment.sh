@@ -30,6 +30,7 @@ main_sha="$(gh api "repos/$repository/git/ref/heads/main" --jq .object.sha)"
 pulls="$(gh api --paginate --slurp -H 'Accept: application/vnd.github+json' "repos/$repository/commits/$main_sha/pulls?per_page=100")"
 reviewed_sha="$(jq -er --arg sha "$main_sha" 'map(.[]) | map(select(.base.ref == "main" and .merged_at != null and .merge_commit_sha == $sha)) | .[0].head.sha' <<<"$pulls")"
 check_run_pages="$(gh api --paginate --slurp "repos/$repository/commits/$reviewed_sha/check-runs?filter=latest&per_page=100")"
+action_run_pages="$(gh api --paginate --slurp "repos/$repository/actions/runs?head_sha=$reviewed_sha&per_page=100")"
 status_pages="$(gh api --paginate --slurp "repos/$repository/commits/$reviewed_sha/statuses?per_page=100")"
 pending_deployments="$(gh api "repos/$repository/actions/runs/$run_id/pending_deployments")"
 
@@ -42,9 +43,10 @@ jq -n \
   --argjson run "$run" \
   --argjson pulls "$pulls" \
   --argjson check_run_pages "$check_run_pages" \
+  --argjson action_run_pages "$action_run_pages" \
   --argjson status_pages "$status_pages" \
   --argjson pending_deployments "$pending_deployments" \
-  '{current_user_id:$current_user_id,local_sha:$local_sha,main_sha:$main_sha,run:$run,pulls:$pulls,check_run_pages:$check_run_pages,status_pages:$status_pages,pending_deployments:$pending_deployments}' \
+  '{current_user_id:$current_user_id,local_sha:$local_sha,main_sha:$main_sha,run:$run,pulls:$pulls,check_run_pages:$check_run_pages,action_run_pages:$action_run_pages,status_pages:$status_pages,pending_deployments:$pending_deployments}' \
   >"$approval_document"
 
 approval="$(bun "$root/scripts/approve-production-deployment.ts" "$approval_document")"

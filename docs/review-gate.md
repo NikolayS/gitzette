@@ -44,6 +44,11 @@ release validation:
 bun scripts/check-repository-workflow-permissions.ts
 ```
 
+That runtime audit also reads the live Actions workflow-permission setting and
+fails unless the repository default is read-only and Actions cannot approve
+pull requests. Missing workflow permission blocks therefore cannot silently
+gain write authority through repository-setting drift.
+
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
 remains meaningful. `dismiss_stale_reviews`, `dismissal_restrictions`, and
@@ -120,6 +125,10 @@ the environment expose Cloudflare credentials. Those credentials must exist
 only as environment secrets. Keeping either credential as a repository secret
 would let a forged merge use a new `push` workflow to bypass the environment,
 so `scripts/check-production-environment.sh` fails that configuration.
+The release validator binds successful checks to Actions workflow runs whose
+paths are exactly `.github/workflows/ci.yml` and
+`.github/workflows/samorev-gate.yml`; a PR-head job that copies a trusted check
+name is not release evidence.
 
 This environment review is a human owner release authorization, not a formal
 GitHub pull-request approval. Run it only after a
@@ -149,10 +158,11 @@ The dispatch authorization runs as an ordinary required job before the
 environment job. A wrong dispatcher or closed migration window therefore fails
 red; it cannot appear as a successful workflow containing a skipped export job.
 
-CI and `scripts/check-production-environment.sh` enforce that removal. The
-temporary `main` environment policy and migration workflow must appear or
-disappear together. Once the repository credential copies are absent, the
-check fails if the migration workflow is still present on protected `main`.
+CI enforces that the temporary `main` environment policy and migration workflow
+appear or disappear together. The live `scripts/check-production-environment.sh`
+audit enforces eventual removal: once the repository credential copies are
+absent, it fails if the migration workflow is still present on protected
+`main`.
 The workflow never uploads an artifact or contains a decryption key; it prints
 only ciphertext for the operator-held private key.
 
@@ -167,6 +177,17 @@ their repository-scoped copies, immediately run
 `gh variable delete CREDENTIAL_MIGRATION_OPEN --repo NikolayS/gitzette`. The
 authorization job fails and the protected export job cannot start while the
 variable is absent, even before the cleanup PR deletes the workflow itself.
+Immediately delete the migration run's retained logs after the ciphertext has
+been decrypted and the environment secrets have been set:
+
+```bash
+gh api --method DELETE \
+  repos/NikolayS/gitzette/actions/runs/MIGRATION_RUN_ID/logs
+```
+
+Treat the operator-held private key as migration-only material and destroy it
+after the cutover and cleanup audit; never retain a decryptor for historical
+workflow logs.
 
 Broadening a workflow's protected write set requires a three-PR recovery: first
 land a narrowly scoped, exact-head-reviewed exception in the base parser; then

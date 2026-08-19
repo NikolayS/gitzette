@@ -73,8 +73,10 @@ jobs:
           .allow_force_pushes == false and .allow_deletions == false'
           config/main-branch-protection.json
       - name: Validate non-overwritable production release policy
-        run: >-
-          jq -e '.prevent_self_review == true and .wait_timer == 0 and
+        run: |
+          bootstrap=false
+          [[ ! -f .github/workflows/migrate-production-credentials.yml ]] || bootstrap=true
+          jq -e --argjson bootstrap "$bootstrap" '.prevent_self_review == true and .wait_timer == 0 and
           (.reviewers | sort_by(.id)) ==
           [{"type":"User","id":1345402,"login":"NikolayS"}] and
           (.environment_secret_names | sort) ==
@@ -86,8 +88,9 @@ jobs:
           .deployment_branch_policy ==
           {"protected_branches":false,"custom_branch_policies":true} and
           (.branch_policies | sort_by(.name,.type)) ==
-          [{"name":"main","type":"branch"},{"name":"v*","type":"tag"}]'
-          config/production-environment.json
+          (([{"name":"v*","type":"tag"}] +
+            (if $bootstrap then [{"name":"main","type":"branch"}] else [] end)) |
+            sort_by(.name,.type))' config/production-environment.json
       - name: Verify generated Worker binding types
         run: bun run check:worker-types
       - run: bun run test:all

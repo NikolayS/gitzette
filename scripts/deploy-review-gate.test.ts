@@ -9,7 +9,10 @@ describe("deploy review revalidation", () => {
     expect(workflow).toContain("run: bun scripts/check-repository-workflow-permissions.ts");
     expect(workflow).not.toContain("check_runs=");
     expect(reviewScript).toContain('commits/$reviewed_sha/statuses?per_page=100');
+    expect(reviewScript).toContain('actions/runs?head_sha=$reviewed_sha');
+    expect(reviewScript).toContain('evaluate-samorev-gate-status.sh');
     expect(reviewEvaluator).toContain('check.name === name && check.conclusion === "success" && app.id === actionsAppId');
+    expect(reviewEvaluator).toContain('run.path === path');
     expect(reviewEvaluator).toContain("samorevCreator.id !== reviewerId");
     expect(reviewEvaluator).toContain("gateCreator.id !== actionsBotId");
     const gates = [
@@ -41,6 +44,7 @@ describe("deploy review revalidation", () => {
     expect(reviewScript).toContain('[[ "$RELEASE_SENDER_ID" != 280144521 ]]');
     expect(reviewGate).toContain("pull-requests: read");
     expect(reviewGate).toContain("statuses: read");
+    expect(reviewGate).toContain("GH_TOKEN: ${{ github.token }}");
     expect(reviewGate).not.toContain("/reviews");
     expect(reviewGate).not.toContain("APPROVED");
     expect(deploy).toContain("needs: review-gate");

@@ -258,6 +258,8 @@ describe("production migration credential guards", () => {
 
   test("privileged policy and approval entrypoints reject sourcing and stdin", async () => {
     for (const name of [
+      "apply-branch-protection.sh",
+      "apply-production-environment.sh",
       "approve-production-deployment.sh",
       "check-branch-protection.sh",
       "check-production-environment.sh",
@@ -270,6 +272,8 @@ describe("production migration credential guards", () => {
       );
     }
     for (const name of [
+      "apply-branch-protection.sh",
+      "apply-production-environment.sh",
       "approve-production-deployment.sh",
       "check-branch-protection.sh",
       "check-production-environment.sh",

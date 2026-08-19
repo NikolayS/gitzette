@@ -69,12 +69,17 @@ if [[ "$repository_identity_present" == true ]]; then
   echo "dedicated reviewer or release identity credentials must not be repository-scoped Actions secrets" >&2
   exit 1
 fi
-if [[ "$repository_credentials_present" == true && "$bootstrap_workflow_present" == true ]]; then
-  if [[ "$migration_variable_open" != true ]]; then
-    echo "CREDENTIAL_MIGRATION_OPEN=true is required while repository credentials await migration" >&2
-    exit 1
+if [[ "$repository_credentials_present" == true ]]; then
+  if [[ "$bootstrap_workflow_present" == true && "$migration_variable_open" != true ]]; then
+    echo "production credentials remain repository-scoped; open the migration window, then migrate and delete them before this audit can pass" >&2
+  elif [[ "$bootstrap_workflow_present" == true ]]; then
+    echo "production credentials remain repository-scoped while the migration window is open; migrate and delete them before this audit can pass" >&2
+  else
+    echo "production credentials must not be repository-scoped Actions secrets" >&2
   fi
-elif [[ "$migration_variable_open" == true ]]; then
+  exit 1
+fi
+if [[ "$migration_variable_open" == true ]]; then
   echo "CREDENTIAL_MIGRATION_OPEN must be deleted after repository credentials are migrated" >&2
   exit 1
 fi
@@ -83,9 +88,4 @@ if [[ "$bootstrap_workflow_present" == true && "$repository_credentials_present"
   echo "credential migration is complete; remove its workflow and temporary main environment policy in the next reviewed PR" >&2
   exit 1
 fi
-if [[ "$repository_credentials_present" == true ]]; then
-  echo "production credentials must not be repository-scoped Actions secrets" >&2
-  exit 1
-fi
-
 echo "Production environment OK: separate release approval, v* tags plus temporary main bootstrap, and environment-only credentials are active"

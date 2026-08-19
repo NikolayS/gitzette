@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { auditRepositoryWorkflowRefs } from "./check-repository-workflow-permissions";
+import {
+  assertReadOnlyActionsDefaults,
+  auditRepositoryWorkflowRefs,
+} from "./check-repository-workflow-permissions";
 
 const directories: string[] = [];
 
@@ -23,6 +26,22 @@ afterEach(async () => {
 });
 
 describe("repository-wide workflow permission audit", () => {
+  test("requires fail-closed live Actions defaults", () => {
+    expect(() => assertReadOnlyActionsDefaults({
+      default_workflow_permissions: "read",
+      can_approve_pull_request_reviews: false,
+    })).not.toThrow();
+    expect(() => assertReadOnlyActionsDefaults({
+      default_workflow_permissions: "write",
+      can_approve_pull_request_reviews: false,
+    })).toThrow("read-only");
+    expect(() => assertReadOnlyActionsDefaults({
+      default_workflow_permissions: "read",
+      can_approve_pull_request_reviews: true,
+    })).toThrow("unable to approve");
+    expect(() => assertReadOnlyActionsDefaults([])).toThrow("must be an object");
+  });
+
   test("allows only the default-branch publisher and OIDC-only Claude workflows", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "gitzette-repository-workflows-"));
     directories.push(cwd);

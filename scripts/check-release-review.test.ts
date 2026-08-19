@@ -15,6 +15,10 @@ const base = {
     { name: "typecheck", conclusion: "success", app: { id: 15368 } },
     { name: "base-controlled samorev publisher", conclusion: "success", app: { id: 15368 } },
   ] }],
+  action_run_pages: [{ workflow_runs: [
+    { path: ".github/workflows/ci.yml", head_sha: reviewedSha, conclusion: "success" },
+    { path: ".github/workflows/samorev-gate.yml", head_sha: reviewedSha, conclusion: "success" },
+  ] }],
   status_pages: [[
     { id: 1, context: "samorev", state: "success", created_at: "2026-08-19T00:01:00Z", creator: { id: 280144521 } },
     { id: 2, context: "samorev-gate", state: "success", created_at: "2026-08-19T00:02:00Z", creator: { id: 41898282 } },
@@ -39,6 +43,13 @@ describe("release review gate", () => {
       creator: { id: 41898282 },
     });
     expect(() => releaseReview(forged)).toThrow("immutable successful reviewer identity");
+
+    const forgedCheckNames = structuredClone(base);
+    forgedCheckNames.action_run_pages[0].workflow_runs[1].path = ".github/workflows/ci.yml";
+    expect(() => releaseReview(forgedCheckNames)).toThrow("samorev-gate.yml");
+    const wrongWorkflowHead = structuredClone(base);
+    wrongWorkflowHead.action_run_pages[0].workflow_runs[0].head_sha = "another-head";
+    expect(() => releaseReview(wrongWorkflowHead)).toThrow("ci.yml");
   });
 
   test("executes the checked-in fixture entrypoint", async () => {

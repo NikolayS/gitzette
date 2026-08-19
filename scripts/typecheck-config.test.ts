@@ -30,6 +30,8 @@ describe("TypeScript project coverage", () => {
     expect(workflow).toContain("ImageMagick installation failed after two bounded attempts");
     expect(workflow).toContain("imagemagick=8:6.9.12.98+dfsg1-5.2build2");
     expect(workflow).toContain("imagemagick-6.q16=8:6.9.12.98+dfsg1-5.2build2");
+    expect(workflow).toContain('[[ ! -f .github/workflows/migrate-production-credentials.yml ]] || bootstrap=true');
+    expect(workflow).toContain("if $bootstrap then");
   });
 
   test("the runner project typechecks every runner test file", () => {
