@@ -23,6 +23,8 @@ while IFS= read -r policy_id; do
   gh api --method DELETE "repos/$repository/environments/production/deployment-branch-policies/$policy_id" --silent
 done < <(jq -r --argjson expected "$expected_policies" '.[] | select(. as $live | any($expected[]; .name == $live.name and .type == $live.type) | not) | .id' <<<"$live")
 
+live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+
 while IFS=$'\t' read -r name type; do
   if ! jq -e --arg name "$name" --arg type "$type" 'any(.[]; .name == $name and .type == $type)' <<<"$live" >/dev/null; then
     gh api --method POST "repos/$repository/environments/production/deployment-branch-policies" \

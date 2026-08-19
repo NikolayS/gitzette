@@ -13,8 +13,11 @@ case "${1:-default}" in
   *) echo "usage: $0 [default|migration]" >&2; exit 2 ;;
 esac
 expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
-if ! environment="$(gh api "repos/$repository/environments/production" 2>/dev/null)"; then
-  echo "production environment is missing; run scripts/apply-production-environment.sh ${1:-default}" >&2
+error_file="$(mktemp)"
+trap 'rm -f "$error_file"' EXIT
+if ! environment="$(gh api "repos/$repository/environments/production" 2>"$error_file")"; then
+  echo "unable to read production environment; apply only after resolving this API error:" >&2
+  sed 's/^/  /' "$error_file" >&2
   exit 1
 fi
 policies="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add')"

@@ -13,23 +13,29 @@ token. Rotate the exported Worker-capable token through a dashboard-authorized
 session after service restoration.
 
 0. Set the private key directory containing the already provisioned reviewed
-   migration key. Immediately convert that key to passphrase-encrypted PKCS#8
-   without changing its public key. Supply the passphrase interactively; do not
-   place it in shell history, an environment variable, or a file. Destroy the
-   plaintext input only after the encrypted copy's fingerprint is verified.
+   migration key. The directory must be on tmpfs or a verified encrypted
+   volume; `shred` is only best-effort on journaling, copy-on-write, and SSD
+   storage. Immediately convert the key to passphrase-encrypted PKCS#8 without
+   changing its public key. Supply the passphrase interactively; do not place it
+   in shell history, an environment variable, or a file. Remove the plaintext
+   input only after the encrypted copy's fingerprint is verified.
 
    ```bash
    set -euo pipefail
+   umask 077
    export MIGRATION_KEY_DIR="${MIGRATION_KEY_DIR:?set a private directory}"
    install -d -m 0700 "$MIGRATION_KEY_DIR"
+   storage_type="$(findmnt -n -o FSTYPE -T "$MIGRATION_KEY_DIR")"
+   if [[ "$storage_type" != tmpfs && "${MIGRATION_KEY_STORAGE:-}" != encrypted ]]; then
+     echo "MIGRATION_KEY_DIR must be tmpfs or an operator-verified encrypted volume" >&2
+     exit 1
+   fi
    private_key="$MIGRATION_KEY_DIR/production-migration-private.pem"
    encrypted_key="$MIGRATION_KEY_DIR/production-migration-private.encrypted.pem"
    test -s "$private_key"
    openssl pkcs8 -topk8 -v2 aes-256-cbc -v2prf hmacWithSHA256 -iter 600000 \
      -in "$private_key" -out "$encrypted_key"
    chmod 600 "$encrypted_key"
-   openssl pkey -in "$encrypted_key" \
-     -pubout -out "$MIGRATION_KEY_DIR/production-migration-public.pem"
    expected_fingerprint=7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc
    actual_fingerprint="$(openssl pkey -in "$encrypted_key" \
      -pubout -outform DER | sha256sum | awk '{print $1}')"
@@ -37,6 +43,8 @@ session after service restoration.
      echo "encrypted migration key fingerprint mismatch" >&2
      exit 1
    fi
+   openssl pkey -in "$encrypted_key" \
+     -pubout -out "$MIGRATION_KEY_DIR/production-migration-public.pem"
    shred -u "$private_key"
    mv "$encrypted_key" "$private_key"
    ```
@@ -44,25 +52,26 @@ session after service restoration.
    The fingerprint must be
    `7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc`.
 
-1. From a clean checkout of protected `main`, apply and verify both reviewed
-   environments. Migration mode temporarily admits the exact non-release tag
-   `credential-migration-verify`; no out-of-band policy widening is needed.
+1. From a clean checkout of protected `main`, apply the dedicated migration
+   environment and verify that production still has its default `v*`-only
+   policy. Do not widen production yet.
 
    ```bash
    bash scripts/apply-credential-migration-environment.sh
-   bash scripts/apply-production-environment.sh migration
+   bash scripts/check-production-environment.sh default
    ```
 
    The default production policy remains `v*` only. Running
-   `bash scripts/check-production-environment.sh` without `migration` therefore
+   `bash scripts/check-production-environment.sh` without `migration` later
    fails while the temporary tag is admitted and makes stale widening loud.
 
 2. Open the independently removable switch and dispatch exactly one export as
-   immutable runner ID `280144521` (`samo-agent`). The workflow concurrency
-   group queues any accidental second dispatch.
+   immutable runner ID `280144521` (`samo-agent`). Workflow concurrency only
+   serializes accidental duplicates; it does not reject them. Confirm exactly
+   one run exists before approval.
 
    ```bash
-   gh variable set CREDENTIAL_MIGRATION_OPEN --body true
+   gh variable set CREDENTIAL_EXPORT_OPEN --body true
    GH_TOKEN="$(gh auth token --user samo-agent)" \
      gh workflow run migrate-production-credentials.yml --ref main -f operation=export
    ```
@@ -79,13 +88,15 @@ session after service restoration.
    bash scripts/check-credential-migration-environment.sh
    ```
 
-4. After the export succeeds, retrieve the exact run's ciphertext through the
+4. Immediately after the single export succeeds, close the switch before a
+   queued duplicate can start, then retrieve the exact run's ciphertext through the
    D1-only token. Decrypt locally without printing plaintext. Only after valid
    JSON is in memory, drop the entire transient table and delete the workflow
    logs. Keep repository secrets as rollback copies.
 
    ```bash
    set -euo pipefail
+   gh variable delete CREDENTIAL_EXPORT_OPEN
    operator_token_file="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
    token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$operator_token_file" || true)"
    [[ "$token_count" == 1 ]]
@@ -125,26 +136,47 @@ session after service restoration.
    ```
 
 5. Without printing values or writing plaintext, install both fields in the
-   `production` environment and verify the extracted token against the exact
-   Worker account. Do not delete repository rollback copies yet.
+   `production` environment. Independently prove the environment-scoped names
+   were updated, then verify the extracted token against the exact Worker
+   account. The local ciphertext, encrypted key, and in-memory plaintext remain
+   the out-of-band rollback copy.
 
    ```bash
+   secret_write_started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
    account_id="$(jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
    api_token="$(jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
    printf '%s' "$account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID --env production
    printf '%s' "$api_token" | gh secret set CLOUDFLARE_API_TOKEN --env production
+   environment_secrets="$(gh api --paginate --slurp \
+     'repos/NikolayS/gitzette/environments/production/secrets?per_page=100' |
+     jq -c 'map(.secrets) | add // []')"
+   jq -e --arg since "$secret_write_started" '
+     ([.[].name] | sort) == ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
+     all(.[]; .updated_at >= $since)' <<<"$environment_secrets" >/dev/null
    curl --fail --silent --show-error --connect-timeout 10 --max-time 20 --config - \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/workers/services/gitzette" \
      <<<"header = \"Authorization: Bearer $api_token\"" |
      jq -e '.success == true' >/dev/null
+   gh secret delete CLOUDFLARE_ACCOUNT_ID
+   gh secret delete CLOUDFLARE_API_TOKEN
+   remaining_repository_cloudflare_secrets="$(gh secret list --json name --jq \
+     '[.[].name | select(startswith("CLOUDFLARE_"))] | length')"
+   [[ "$remaining_repository_cloudflare_secrets" == 0 ]]
    ```
 
    Enumerate every `secrets.CLOUDFLARE_*` reference under `.github/workflows`.
    `deploy.yml` and the verifier must use `environment: production`; only the
    one-shot exporter may use repository credentials.
 
-6. Create the exact reviewed non-release tag at current `main`, push it, and
-   dispatch stored-value verification as `samo-agent`. The workflow checks the
+   Repository copies must be absent before stored-value verification; otherwise
+   GitHub can silently fall back from a missing environment secret to the same
+   repository secret. If verification later fails, restore repository copies
+   from `$plaintext` immediately after restoring the default policy. Delete the
+   repository copies again before any verification retry.
+
+6. Create the exact reviewed non-release tag at current `main`, push it, apply
+   migration policy immediately before dispatch, and run stored-value
+   verification as `samo-agent`. The workflow checks the
    tag name and re-resolves protected `main` both before and after Nik's
    production approval. It fails if `main` moved. This tag does not match the
    release workflow's `v*` trigger. The tag itself is not trusted as an
@@ -157,28 +189,42 @@ session after service restoration.
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
    git tag credential-migration-verify "$(git rev-parse main)"
    git push origin refs/tags/credential-migration-verify
+   cleanup_verification_policy() {
+     local cleanup_status=0
+     gh variable delete CREDENTIAL_VERIFY_OPEN || true
+     bash scripts/apply-production-environment.sh default || cleanup_status=1
+     git push origin :refs/tags/credential-migration-verify || true
+     git tag -d credential-migration-verify || true
+     bash scripts/check-production-environment.sh default || cleanup_status=1
+     return "$cleanup_status"
+   }
+   trap cleanup_verification_policy EXIT
+   bash scripts/apply-production-environment.sh migration
+   gh variable set CREDENTIAL_VERIFY_OPEN --body true
    GH_TOKEN="$(gh auth token --user samo-agent)" \
      gh workflow run migrate-production-credentials.yml \
        --ref credential-migration-verify -f operation=verify
+   set +e
    gh run watch VERIFY_RUN_ID --exit-status
-   git push origin :refs/tags/credential-migration-verify
-   git tag -d credential-migration-verify
-   bash scripts/apply-production-environment.sh default
-   bash scripts/check-production-environment.sh
+   verify_status=$?
+   set -e
+   cleanup_verification_policy
+   trap - EXIT
+   [[ "$verify_status" == 0 ]]
    ```
 
-   Only after verification passes, delete the repository rollback copies:
+   On verification failure, restore repository rollback scope before debugging:
 
    ```bash
-   gh secret delete CLOUDFLARE_ACCOUNT_ID
-   gh secret delete CLOUDFLARE_API_TOKEN
+   printf '%s' "$account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID
+   printf '%s' "$api_token" | gh secret set CLOUDFLARE_API_TOKEN
    ```
 
-7. Close the switch and destroy local migration material. GNU `shred -u` is
-   used for the encrypted private key and ciphertext; remove the public key.
+7. After successful verification, remove local migration material. GNU
+   `shred -u` is best-effort cleanup; tmpfs or encrypted storage is the actual
+   at-rest control.
 
    ```bash
-   gh variable delete CREDENTIAL_MIGRATION_OPEN
    shred -u "$migration_dir/credentials.bin" "$migration_dir/select.json" \
      "$migration_dir/drop.json"
    rmdir "$migration_dir"

@@ -30,8 +30,10 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain('"$DISPATCH_REF" != "refs/heads/main"');
     expect(workflow).toContain('"$DISPATCH_REF" != "refs/tags/credential-migration-verify"');
     expect(workflow).toContain('[[ "$RUN_ATTEMPT" != "1" ]]');
-    expect(workflow.match(/MIGRATION_OPEN: \$\{\{ vars\.CREDENTIAL_MIGRATION_OPEN \}\}/g)?.length).toBe(3);
-    expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_MIGRATION_OPEN }}");
+    expect(workflow).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
+    expect(workflow).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
+    expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
+    expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
     expect(workflow).toContain("    needs: authorize-export");
     expect(workflow).toContain("    environment: credential-migration");
     expect(workflow).toContain("  verify-production-credentials:");
@@ -100,14 +102,35 @@ describe("one-shot credential migration boundary", () => {
     expect(documentedFingerprints.length).toBeGreaterThan(0);
     expect([...new Set(documentedFingerprints)]).toEqual([fingerprint]);
     expect(migrationDoc).toContain("set -euo pipefail");
+    expect(migrationDoc).toContain("umask 077");
     expect(migrationDoc).toContain("-v2 aes-256-cbc -v2prf hmacWithSHA256 -iter 600000");
     expect(migrationDoc.indexOf('[[ "$actual_fingerprint" != "$expected_fingerprint" ]]')).toBeLessThan(
       migrationDoc.indexOf('shred -u "$private_key"'),
     );
+    expect(migrationDoc.indexOf('[[ "$actual_fingerprint" != "$expected_fingerprint" ]]')).toBeLessThan(
+      migrationDoc.indexOf('-pubout -out "$MIGRATION_KEY_DIR/production-migration-public.pem"'),
+    );
+    expect(migrationDoc).toContain("must be tmpfs or an operator-verified encrypted volume");
     expect(migrationDoc).toContain("$MIGRATION_KEY_DIR/production-migration-private.pem");
     expect(migrationDoc).not.toContain("/home/tars/");
     expect(migrationDoc).toContain("token_count=\"$(grep -c");
     expect(migrationDoc).not.toContain("export CLOUDFLARE_API_TOKEN");
+    expect(migrationDoc).toContain("concurrency only\n   serializes accidental duplicates");
+    expect(migrationDoc.indexOf("gh variable delete CREDENTIAL_EXPORT_OPEN")).toBeLessThan(
+      migrationDoc.indexOf('operator_token_file="${OPERATOR_TOKEN_FILE'),
+    );
+    expect(migrationDoc).toContain("gh variable set CREDENTIAL_VERIFY_OPEN --body true");
+    expect(migrationDoc).toContain("gh variable delete CREDENTIAL_VERIFY_OPEN");
+    expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
+      migrationDoc.indexOf("--ref credential-migration-verify -f operation=verify"),
+    );
+    expect(migrationDoc).toContain("remaining_repository_cloudflare_secrets");
+    expect(migrationDoc).toContain("GitHub can silently fall back");
+    expect(migrationDoc.indexOf("bash scripts/apply-production-environment.sh migration")).toBeGreaterThan(
+      migrationDoc.indexOf("git push origin refs/tags/credential-migration-verify"),
+    );
+    expect(migrationDoc).toContain("trap cleanup_verification_policy EXIT");
+    expect(migrationDoc).toContain("trap - EXIT");
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
@@ -163,6 +186,8 @@ fi
         DISPATCH_REF: "refs/heads/main",
         RUN_ATTEMPT: "1",
         OPERATION: "export",
+        EXPORT_OPEN: "true",
+        VERIFY_OPEN: "false",
         MIGRATION_OPEN: "true",
         GH_TOKEN: "fake",
         GITHUB_REPOSITORY: "example/gitzette",
@@ -181,10 +206,13 @@ fi
       expect(await execute(run, { TRIGGERING_ACTOR: "attacker" })).toBe(1);
       expect(await execute(run, { DISPATCH_REF: "refs/heads/other" })).toBe(1);
       expect(await execute(run, { RUN_ATTEMPT: "2" })).toBe(1);
-      expect(await execute(run, { MIGRATION_OPEN: undefined })).toBe(1);
-      expect(await execute(run, { MIGRATION_OPEN: "True" })).toBe(1);
-      expect(await execute(run, { MIGRATION_OPEN: "true " })).toBe(1);
     }
+    expect(await execute(authorizeRun, { EXPORT_OPEN: undefined })).toBe(1);
+    expect(await execute(authorizeRun, { EXPORT_OPEN: "True" })).toBe(1);
+    expect(await execute(authorizeRun, { EXPORT_OPEN: "true " })).toBe(1);
+    expect(await execute(revalidateRun, { MIGRATION_OPEN: undefined })).toBe(1);
+    expect(await execute(revalidateRun, { MIGRATION_OPEN: "True" })).toBe(1);
+    expect(await execute(revalidateRun, { MIGRATION_OPEN: "true " })).toBe(1);
     expect(await execute(authorizeRun, { OPERATION: "attacker" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_ACTOR_ID: "1" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_APPROVER_ID: "1" })).toBe(1);
@@ -201,7 +229,7 @@ fi
     expect(curlArgs).not.toContain("fake");
     expect(curlStdin.match(/header = "Authorization: Bearer fake"/g)?.length).toBe(2);
     expect(await execute(revalidateRun, { FAKE_CURL_FAIL: "true" })).not.toBe(0);
-    const verify = { OPERATION: "verify", DISPATCH_REF: "refs/tags/credential-migration-verify", FAKE_APPROVAL_ENV: "production" };
+    const verify = { OPERATION: "verify", DISPATCH_REF: "refs/tags/credential-migration-verify", VERIFY_OPEN: "true", FAKE_APPROVAL_ENV: "production" };
     expect(await execute(authorizeRun, verify)).toBe(0);
     expect(await execute(authorizeRun, { ...verify, GITHUB_SHA: "stale" })).toBe(1);
     expect(await execute(verifyApprovalRun, verify)).toBe(0);
@@ -280,6 +308,7 @@ set -euo pipefail
 endpoint="\${*: -1}"
 case "$endpoint" in
   repos/example/gitzette/environments/production)
+    [[ "\${FAKE_API_ERROR:-false}" != true ]] || { echo "fake production API failure" >&2; exit 1; }
     printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
     ;;
   *deployment-branch-policies*)
@@ -293,10 +322,10 @@ case "$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (mode: string, live: string): Promise<{ code: number; stdout: string; stderr: string }> => {
+    const run = async (mode: string, live: string, apiError = false): Promise<{ code: number; stdout: string; stderr: string }> => {
       const child = Bun.spawn(["bash", "scripts/check-production-environment.sh", mode], {
         cwd: process.cwd(),
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_LIVE_POLICY: live },
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_LIVE_POLICY: live, FAKE_API_ERROR: String(apiError) },
         stdout: "pipe", stderr: "pipe",
       });
       const [code, stdout, stderr] = await Promise.all([
@@ -313,6 +342,61 @@ esac
     expect(migration.stdout).toContain("admitted refs: v*, credential-migration-verify");
     expect((await run("migration", "default")).code).toBe(1);
     expect((await run("attacker", "default")).code).toBe(2);
+    const apiFailure = await run("default", "default", true);
+    expect(apiFailure.code).toBe(1);
+    expect(apiFailure.stderr).toContain("unable to read production environment");
+    expect(apiFailure.stderr).toContain("fake production API failure");
+  });
+
+  test("applies migration widening and then actually removes it in default mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gitzette-production-policy-apply-"));
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    const state = join(root, "policies.json");
+    await Bun.write(state, '[{"id":10,"name":"v*","type":"tag"}]');
+    const gh = join(bin, "gh");
+    await Bun.write(gh, `#!/usr/bin/env bash
+set -euo pipefail
+method=GET; endpoint=""; name=""; type=""
+for argument in "$@"; do
+  [[ "$argument" != PUT && "$argument" != POST && "$argument" != DELETE ]] || method="$argument"
+  [[ "$argument" != repos/* ]] || endpoint="$argument"
+  [[ "$argument" != name=* ]] || name="\${argument#name=}"
+  [[ "$argument" != type=* ]] || type="\${argument#type=}"
+done
+case "$method:$endpoint" in
+  PUT:repos/example/gitzette/environments/production) cat >/dev/null ;;
+  GET:repos/example/gitzette/environments/production)
+    printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+    ;;
+  GET:*deployment-branch-policies*) jq -c '[{branch_policies:.}]' "$FAKE_STATE" ;;
+  POST:*deployment-branch-policies*)
+    next_id="$(jq '[.[].id] | max + 1' "$FAKE_STATE")"
+    jq --argjson id "$next_id" --arg name "$name" --arg type "$type" '. + [{id:$id,name:$name,type:$type}]' "$FAKE_STATE" >"$FAKE_STATE.next"
+    mv "$FAKE_STATE.next" "$FAKE_STATE"
+    ;;
+  DELETE:*deployment-branch-policies/*)
+    id="\${endpoint##*/}"
+    jq --argjson id "$id" 'map(select(.id != $id))' "$FAKE_STATE" >"$FAKE_STATE.next"
+    mv "$FAKE_STATE.next" "$FAKE_STATE"
+    ;;
+  *) exit 91 ;;
+esac
+`);
+    await Bun.spawn(["chmod", "+x", gh]).exited;
+    const run = async (mode: string): Promise<number> => Bun.spawn([
+      "bash", "scripts/apply-production-environment.sh", mode,
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await run("migration")).toBe(0);
+    expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name).sort()).toEqual([
+      "credential-migration-verify", "v*",
+    ]);
+    expect(await run("default")).toBe(0);
+    expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name)).toEqual(["v*"]);
   });
 
   test("executes the reviewed environment policy against live-response shapes", async () => {
@@ -351,7 +435,7 @@ case "$endpoint" in
     fi
     ;;
   *credential-migration/variables*)
-    if [[ "\${FAKE_MODE:-ok}" == environment-variable ]]; then printf '%s\\n' '[{"variables":[{"name":"CREDENTIAL_MIGRATION_OPEN","value":"true"}]}]'; else printf '%s\\n' '[{"variables":[]}]'; fi
+    if [[ "\${FAKE_MODE:-ok}" == environment-variable ]]; then printf '%s\\n' '[{"variables":[{"name":"CREDENTIAL_EXPORT_OPEN","value":"true"}]}]'; else printf '%s\\n' '[{"variables":[]}]'; fi
     ;;
   *credential-migration/secrets*)
     if [[ "\${FAKE_MODE:-ok}" == environment-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"SHADOW"}]}]'; else printf '%s\\n' '[{"secrets":[]}]'; fi
