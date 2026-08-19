@@ -33,3 +33,4 @@ WEEKLY_GENERATION_ENABLED = "false"
 # SESSION_SECRET
 # STATUS_TOKEN       (rotatable Authorization bearer for the private operational dashboard)
 # RUNNER_SECRET      (narrowly scoped pull-runner credential; not an AI key)
+# The checked-in production allowlist is scripts/check-production-secrets.ts.

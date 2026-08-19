@@ -161,6 +161,13 @@ bun test
 bash scripts/e2e.sh
 ```
 
+The Wrangler/D1 preflights and privileged policy/release shell entrypoints
+enumerated by `scripts/production-credential-guards.test.ts` must be executed as
+files, not sourced or piped. Wrangler callers must live beside
+`require-wrangler.sh` and their declared entrypoints; out-of-tree wrappers and
+missing siblings fail closed. Invocation is cwd-independent, as documented in
+`docs/production-migrations.md`.
+
 The E2E launches a real local Worker with isolated D1/R2 state and crosses HTTP boundaries from website request through runner auth, claim/lease, ordered stages, artifact upload, validation, immutable publication, and public read. It covers authentication/authorization, quota, deduplication, hostile markup escaping, active and quiet editions, image/hash failures, atomic regeneration rollback, and retry/reclaim.
 
 Before production activation:

@@ -1,6 +1,8 @@
 -- Baseline snapshot verified read-only against production D1 on 2026-08-15.
 -- These statements intentionally no-op on existing production tables; all new
 -- durable-runner objects are created independently by 0001_generation_queue.sql.
+-- scripts/check-schema.sh compares comments and identifier quoting inside
+-- CREATE bodies verbatim; keep annotations like this above each statement.
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,

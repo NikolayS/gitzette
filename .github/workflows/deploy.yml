@@ -11,6 +11,7 @@ on:
 jobs:
   review-gate:
     permissions:
+      actions: read
       checks: read
       contents: read
       pull-requests: read
@@ -21,46 +22,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Reject write-capable workflows on every remote branch
+        run: bun scripts/check-repository-workflow-permissions.ts --git-only
       - name: Require the reviewed current main merge
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          git fetch --no-tags origin main
-          main_sha="$(git rev-parse origin/main)"
-          if [ "$GITHUB_SHA" != "$main_sha" ]; then
-            echo "release tag must point to the current main tip" >&2
-            exit 1
-          fi
-
-          pulls="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls")"
-          reviewed_pr="$(jq -c --arg sha "$GITHUB_SHA" '[.[] | select(.base.ref == "main" and .merged_at != null and .merge_commit_sha == $sha)][0] // {}' <<<"$pulls")"
-          reviewed_sha="$(jq -r '.head.sha // empty' <<<"$reviewed_pr")"
-          if [ -z "$reviewed_sha" ]; then
-            echo "release commit is not a merged, reviewed main PR" >&2
-            exit 1
-          fi
-
-          check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/check-runs?filter=latest&per_page=100")"
-          if ! jq -e 'any(.check_runs[]; .name == "typecheck" and .conclusion == "success" and .app.id == 15368)' <<<"$check_runs" >/dev/null; then
-            echo "reviewed head lacks successful app-bound typecheck" >&2
-            exit 1
-          fi
-          if ! jq -e 'any(.check_runs[]; .name == "base-controlled samorev publisher" and .conclusion == "success" and .app.id == 15368)' <<<"$check_runs" >/dev/null; then
-            echo "reviewed head lacks successful app-bound samorev publisher" >&2
-            exit 1
-          fi
-
-          statuses="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/statuses?per_page=100")"
-          if ! jq -e 'any(.[]; .context == "samorev" and .state == "success" and .creator.login == "samo-agent") and any(.[]; .context == "samorev-gate" and .state == "success")' <<<"$statuses" >/dev/null; then
-            echo "reviewed head lacks the CODEOWNER samorev verdict or base-controlled gate" >&2
-            exit 1
-          fi
-
-          reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$(jq -r '.number' <<<"$reviewed_pr")/reviews")"
-          if ! jq -e --arg sha "$reviewed_sha" 'any(.[]; .user.login == "samo-agent" and .state == "APPROVED" and .commit_id == $sha)' <<<"$reviews" >/dev/null; then
-            echo "reviewed head lacks the exact-head CODEOWNER approval" >&2
-            exit 1
-          fi
+          RELEASE_SENDER_ID: ${{ github.event.sender.id }}
+        run: bash scripts/check-release-review.sh
 
   deploy:
     needs: review-gate
@@ -73,7 +42,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --ignore-scripts
       - name: Verify required Worker secrets
         run: bash scripts/check-production-secrets.sh
         env:

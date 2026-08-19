@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "bootstrap-production-db.sh must be executed by path, not through stdin" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
+  exit 1
+fi
 set -euo pipefail
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
+gitzette_require_checked_in_caller \
+  "bootstrap-production-db.sh" "${BASH_SOURCE[0]:-}" "$0" "check-production-schema.sh"
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required for production bootstrap" >&2
@@ -23,5 +30,5 @@ if [[ "$table_count" -ne 0 ]]; then
 fi
 
 "$wrangler_bin" d1 migrations apply gitzette-db --remote
-bash scripts/check-production-schema.sh
+bash "$gitzette_scripts_directory/check-production-schema.sh"
 echo "Production bootstrap OK: empty D1 now matches the complete reviewed migration chain"

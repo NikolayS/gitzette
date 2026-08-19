@@ -46,6 +46,57 @@ the committed fixture and migration chain; they do not inspect or mutate live
 D1. All production schema checks are read-only. Only Wrangler's migration apply
 step mutates production.
 
+Execute these shell entry points as files; do not source or pipe them. Each must
+live beside `require-wrangler.sh` and its declared TypeScript entrypoints, so
+out-of-tree wrappers and missing siblings fail closed. Invocation is
+cwd-independent, though the documented `bun run` commands remain preferred.
+
+## Production authorization availability
+
+Nik (immutable GitHub user ID `1345402`) is deliberately the only production
+environment reviewer. Normal release tags must be pushed by `samo-agent`
+(immutable ID `280144521`), never by Nik: `prevent_self_review` rejects a run
+whose actor is also its approver. If Nik accidentally pushes a release tag,
+delete that undeployed tag and recreate it at the same reviewed commit using
+`samo-agent`; never disable self-review.
+
+Loss of Nik's account stops releases by design. Recovery requires a reviewed
+policy change that adds a named human's immutable ID to both
+`config/production-environment.json` and the checked-in approval validator,
+followed by the full exact-head CI and samorev gates and a live environment
+policy audit. Nik is the only person authorized to select that temporary human
+and apply the live reviewer change. Revert the temporary reviewer in the next
+reviewed PR immediately after the blocked release, then rerun the live audit.
+If Nik is unavailable, releases stop; there is no emergency bypass through
+repository secrets or an Actions actor.
+
+## Credential-scope cutover checklist
+
+This bootstrap is intentionally fail-closed. Run these steps in order:
+
+1. Set repository variable `CREDENTIAL_MIGRATION_OPEN=true`.
+2. As `samo-agent` ID `280144521`, dispatch
+   `migrate-production-credentials.yml` from protected `main`.
+3. As Nik ID `1345402`, authorize the pending `production` environment job.
+4. Decrypt the emitted ciphertext locally with the operator-held private key,
+   then create `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as
+   `production` environment secrets.
+5. Delete the migration workflow run logs through the GitHub API, then destroy
+   the migration-only private key after verifying both environment secrets.
+6. Delete both repository-scoped Cloudflare secret copies.
+7. Delete repository variable `CREDENTIAL_MIGRATION_OPEN` immediately.
+8. Merge the reviewed cleanup PR that deletes the migration workflow and removes
+   the temporary `main` environment branch policy, then rerun the live audit.
+
+The workflow's authorization job always runs and fails explicitly for a wrong
+dispatcher or a migration variable other than exact `true`. Only its successful
+completion can create the protected-environment export job.
+
+`scripts/check-production-environment.sh` is expected to fail from step 1 until
+step 8 completes: before step 6 it rejects repository-scoped production
+credentials; after step 6 it requires the open variable and export workflow to
+be removed. Do not weaken the check to make the transitional state green.
+
 ## Captured baseline provenance
 
 `fixtures/production-baseline-2026-08-15.sql` is a canonical SQL reconstruction
@@ -73,6 +124,12 @@ credentials. `canonicalSchema` removes line and block comments outside quoted st
 collapses whitespace around punctuation, strips `IF NOT EXISTS`, and removes
 unnecessary quotes from the declared object name. Review the resulting diff;
 never use this capture command to bless unexpected production drift.
+`check-schema.sh` alone passes `--strict`: it preserves stored SQL comments and
+identifier quoting while still normalizing horizontal layout around punctuation.
+SQLite strips `IF NOT EXISTS` before recording `sqlite_master.sql`, so that token
+cannot be compared by this gate. The production drift, applied-prefix,
+complete-chain, and baseline gates deliberately use canonical mode so authored
+DDL differences do not make equivalent live SQLite schemas fail deployment.
 
 | Script | Pre-cutover database | Migrated database |
 | --- | --- | --- |

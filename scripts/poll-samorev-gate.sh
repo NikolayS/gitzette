@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "poll-samorev-gate.sh must be executed by path, not sourced or piped to Bash" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
+  exit 1
+fi
 set -euo pipefail
 
 : "${HEAD_SHA:?HEAD_SHA is required}"
 : "${REPOSITORY:?REPOSITORY is required}"
 : "${SAMOREV_NOT_BEFORE:?SAMOREV_NOT_BEFORE is required}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 max_attempts="${SAMOREV_MAX_ATTEMPTS:-60}"
 sleep_seconds="${SAMOREV_SLEEP_SECONDS:-30}"
 
@@ -73,7 +78,7 @@ for attempt in $(seq 1 "$max_attempts"); do
   SAMOREV_NOT_BEFORE="$SAMOREV_NOT_BEFORE" bash "$root/scripts/evaluate-samorev-status.sh" <<<"$statuses" || verdict_rc=$?
   case "$verdict_rc" in
     0)
-      publish_terminal success "CODEOWNER-published samorev verdict passed"
+      publish_terminal success "Identity-checked samorev verdict passed"
       exit 0
       ;;
     1|3)

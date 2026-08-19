@@ -17,11 +17,38 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install image validation runtime
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            imagemagick=8:6.9.12.98+dfsg1-5.2build2 \
-            imagemagick-6.q16=8:6.9.12.98+dfsg1-5.2build2
+          while IFS= read -r apt_source; do
+            sudo sed -i \
+              's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+              "$apt_source"
+          done < <(find /etc/apt -type f \( -name '*.list' -o -name '*.sources' -o -name 'apt-mirrors.txt' \) -print)
+          if grep -R -Fq 'azure.archive.ubuntu.com' /etc/apt 2>/dev/null; then
+            echo "failed to replace the unavailable Azure Ubuntu mirror" >&2
+            exit 1
+          fi
+          installed=false
+          for attempt in 1 2; do
+            if sudo timeout --foreground --kill-after=10s 300s apt-get update && \
+              sudo timeout --foreground --kill-after=10s 300s apt-get install -y \
+                imagemagick=8:6.9.12.98+dfsg1-5.2build2 \
+                imagemagick-6.q16=8:6.9.12.98+dfsg1-5.2build2 && \
+              convert -version | grep -Fq 'ImageMagick 6.9.12-98'; then
+              installed=true
+              break
+            fi
+            echo "ImageMagick installation attempt $attempt failed" >&2
+            if [[ "$attempt" -eq 2 ]]; then
+              break
+            fi
+            sudo timeout --foreground --kill-after=10s 60s dpkg --configure -a || true
+            sleep 5
+          done
+          if [[ "$installed" != true ]]; then
+            echo "pinned ImageMagick 6.9.12-98 installation failed after two bounded attempts" >&2
+            exit 1
+          fi
           sudo install -o root -g root -m 0644 runner/imagemagick/policy.xml /etc/ImageMagick-6/policy.xml
+          convert -list policy | grep -Fq 'pattern: {PNG,WEBP,XC,INFO,NULL}'
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Verify systemd Bun invocation flag
         run: bun --no-env-file --version
@@ -31,16 +58,42 @@ jobs:
           (.required_status_checks.checks | sort_by(.context)) ==
           [{"context":"samorev","app_id":null},{"context":"samorev-gate","app_id":15368},{"context":"typecheck","app_id":15368}] and
           .enforce_admins == true and .required_conversation_resolution == true and
-          .required_pull_request_reviews.require_code_owner_reviews == true and
-          .required_pull_request_reviews.required_approving_review_count == 1 and
+          .required_pull_request_reviews != null and
+          .required_pull_request_reviews.require_code_owner_reviews == false and
+          .required_pull_request_reviews.required_approving_review_count == 0 and
+          .required_pull_request_reviews.require_last_push_approval == false and
+          .required_pull_request_reviews.dismiss_stale_reviews == true and
+          .required_pull_request_reviews.bypass_pull_request_allowances ==
+          {"users":[],"teams":[],"apps":[]} and
+          .required_pull_request_reviews.dismissal_restrictions ==
+          {"users":[],"teams":[]} and
+          .restrictions == null and
+          .actions_workflow_permissions.default_workflow_permissions == "read" and
+          .actions_workflow_permissions.can_approve_pull_request_reviews == false and
           .allow_force_pushes == false and .allow_deletions == false'
           config/main-branch-protection.json
+      - name: Validate non-overwritable production release policy
+        run: |
+          bootstrap=false
+          [[ ! -f .github/workflows/migrate-production-credentials.yml ]] || bootstrap=true
+          jq -e --argjson bootstrap "$bootstrap" '.prevent_self_review == true and .wait_timer == 0 and
+          (.reviewers | sort_by(.id)) ==
+          [{"type":"User","id":1345402,"login":"NikolayS"}] and
+          (.environment_secret_names | sort) ==
+          ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
+          (.forbidden_repository_secret_names | sort) ==
+          ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
+          (.forbidden_repository_identity_secret_names | sort) ==
+          ["GH_TOKEN","GITZETTE_GITHUB_TOKEN","RELEASE_GITHUB_TOKEN","SAMOREV_GITHUB_TOKEN","SAMO_AGENT_GITHUB_TOKEN","SAMO_AGENT_TOKEN"] and
+          .deployment_branch_policy ==
+          {"protected_branches":false,"custom_branch_policies":true} and
+          (.branch_policies | sort_by(.name,.type)) ==
+          (([{"name":"v*","type":"tag"}] +
+            (if $bootstrap then [{"name":"main","type":"branch"}] else [] end)) |
+            sort_by(.name,.type))' config/production-environment.json
       - name: Verify generated Worker binding types
         run: bun run check:worker-types
       - run: bun run test:all
-      - run: bash scripts/evaluate-samorev-status.test.sh
-      - run: bash scripts/normalize-branch-protection.test.sh
-      - run: bash scripts/poll-samorev-gate.test.sh
       - run: shellcheck scripts/*.sh
       - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
       # High/critical advisories block merges.

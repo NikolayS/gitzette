@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { expectedProductionSecrets } from "./check-production-secrets";
 
 function interfaceBody(source: string, name: string): string {
   const match = source.match(new RegExp(`(?:export )?interface ${name} \\{([\\s\\S]*?)\\n\\}`));
@@ -8,6 +9,12 @@ function interfaceBody(source: string, name: string): string {
 
 function expectEnvField(body: string, name: string): void {
   expect(body).toMatch(new RegExp(`(^|\\s)${name}\\??:`));
+}
+
+function reviewedSecretNames(wrangler: string): string[] {
+  const block = wrangler.match(/^# secrets[^\n]*\n([\s\S]*?)^# The checked-in production allowlist/m);
+  if (!block) throw new Error("missing bounded Wrangler secrets block");
+  return [...block[1].matchAll(/^# ([A-Z][A-Z0-9_]*)(?:\s|$)/gm)].map((match) => match[1]);
 }
 
 describe("Worker environment provenance", () => {
@@ -22,17 +29,18 @@ describe("Worker environment provenance", () => {
 
     const bindings = [...wrangler.matchAll(/^binding = "([A-Z][A-Z0-9_]*)"$/gm)].map((match) => match[1]);
     const vars = [...wrangler.matchAll(/^([A-Z][A-Z0-9_]*) = "[^"]*"$/gm)].map((match) => match[1]);
-    const secretBlock = wrangler.split("# secrets (set via:")[1] ?? "";
-    const secrets = [...secretBlock.matchAll(/^# ([A-Z][A-Z0-9_]+)(?:\s|$)/gm)].map((match) => match[1]);
     const generatedEnv = interfaceBody(generated, "__BaseEnv_Env");
     const runtimeEnv = interfaceBody(source, "Env");
 
     expect(new Set(bindings)).toEqual(new Set(["DB", "DISPATCHES"]));
-    expect(secrets.length).toBeGreaterThan(0);
     for (const name of [...bindings, ...vars]) {
       expectEnvField(generatedEnv, name);
       expectEnvField(runtimeEnv, name);
     }
-    for (const name of secrets) expectEnvField(runtimeEnv, name);
+    for (const name of expectedProductionSecrets) {
+      expectEnvField(runtimeEnv, name);
+      expect(wrangler).toMatch(new RegExp(`^# ${name}(?:\\s|$)`, "m"));
+    }
+    expect(new Set(reviewedSecretNames(wrangler))).toEqual(new Set(expectedProductionSecrets));
   });
 });

@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "e2e.sh must be executed by path, not through stdin" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
+  exit 1
+fi
 set -euo pipefail
 
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
+gitzette_require_checked_in_caller \
+  "e2e.sh" "${BASH_SOURCE[0]:-}" "$0" "e2e.ts"
 gitzette_require_local
 
 state_dir="$(mktemp -d)"
@@ -81,4 +88,4 @@ if [[ "$ready" != true ]]; then
   exit 1
 fi
 
-E2E_BASE_URL="http://127.0.0.1:$port" bun scripts/e2e.ts
+E2E_BASE_URL="http://127.0.0.1:$port" bun "$gitzette_scripts_directory/e2e.ts"

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null && pwd)/evaluate-samorev-gate-status.sh"
+
+assert_exit() {
+  expected="$1"
+  document="$2"
+  actual=0
+  "$script" <<<"$document" >/dev/null 2>&1 || actual=$?
+  [[ "$actual" == "$expected" ]] || {
+    echo "expected gate evaluator exit $expected, got $actual for $document" >&2
+    exit 1
+  }
+}
+
+assert_exit 2 '[]'
+assert_exit 2 '[{"context":"samorev-gate","state":"pending","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":41898282}}]'
+assert_exit 1 '[{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":41898282}},{"context":"samorev-gate","state":"failure","created_at":"2026-08-19T00:01:00Z","id":2,"creator":{"id":41898282}}]'
+assert_exit 0 '[{"context":"samorev-gate","state":"failure","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":41898282}},{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:01:00Z","id":2,"creator":{"id":41898282}}]'
+assert_exit 0 '[[{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":41898282}}]]'
+assert_exit 3 '[{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":1}}]'
+assert_exit 3 '[{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:00:00Z","id":1}]'
+assert_exit 4 'not-json'
+assert_exit 4 '{}'
+
+source_rc=0
+bash -c 'source "$1"' _ "$script" >/dev/null 2>&1 || source_rc=$?
+[[ "$source_rc" == 1 ]] || { echo "sourced gate evaluator returned $source_rc" >&2; exit 1; }
+stdin_rc=0
+bash <"$script" >/dev/null 2>&1 || stdin_rc=$?
+[[ "$stdin_rc" == 1 ]] || { echo "stdin gate evaluator returned $stdin_rc" >&2; exit 1; }
+
+echo "samorev-gate status evaluator tests passed"

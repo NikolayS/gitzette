@@ -31,4 +31,11 @@ SAMOREV_NOT_BEFORE=2026-08-16T00:02:00Z assert_exit 0 '[{"context":"samorev","st
 assert_exit 4 'not-json'
 assert_exit 4 '{}'
 
+source_rc=0
+bash -c 'source "$1"' _ "$script" >/dev/null 2>&1 || source_rc=$?
+[[ "$source_rc" == 1 ]] || { echo "sourced evaluator returned $source_rc" >&2; exit 1; }
+stdin_rc=0
+bash <"$script" >/dev/null 2>&1 || stdin_rc=$?
+[[ "$stdin_rc" == 1 ]] || { echo "stdin evaluator returned $stdin_rc" >&2; exit 1; }
+
 echo "samorev status evaluator tests passed"

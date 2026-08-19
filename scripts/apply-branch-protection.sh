@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "apply-branch-protection.sh must be executed by path, not sourced or piped to Bash" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
+  exit 1
+fi
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 policy="$root/config/main-branch-protection.json"
 owner_type="$(gh api "repos/$repository" --jq .owner.type)"

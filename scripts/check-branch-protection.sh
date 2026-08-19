@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "check-branch-protection.sh must be executed by path, not sourced or piped to Bash" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
+  exit 1
+fi
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 expected="$(jq -Sc 'del(.audit_command) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
 protection="$(gh api "repos/$repository/branches/main/protection")"
@@ -24,4 +29,4 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-echo "Branch protection OK: base-controlled gate, exact-head verdict, CI, and an independent fresh approval are required for admins"
+echo "Branch protection OK: base-controlled gate, exact-head verdict, CI, and conversation resolution are required for admins"

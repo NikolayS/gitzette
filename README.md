@@ -75,8 +75,14 @@ reviewed forward repair or restoring a verified pre-migration backup.
 Before cutover, delete the retired Worker secrets `OPENROUTER_API_KEY`,
 `OPENAI_API_KEY`, `GITHUB_TOKEN`, and `NEWSPAPERIFY_SECRET` with
 `wrangler secret delete`, and revoke the corresponding provider-side keys.
-`scripts/check-production-secrets.sh` enforces the exact remaining Worker secret
-set and rejects any retired or unknown standing credential.
+Execute `scripts/check-production-secrets.sh` by its checked-in path to enforce
+the exact remaining Worker secret set and reject retired or unknown standing
+credentials. The script must sit next to its checked-in helper and TypeScript
+entrypoint; sourcing and stdin-piped invocation are rejected. Secret-set changes
+must update `scripts/check-production-secrets.ts`, the bounded `# secrets` block
+in `wrangler.toml`, and the `Env` interface in `src/index.ts` together;
+`scripts/worker-env-parity.test.ts` enforces exact agreement between the first
+two and requires every declared secret in `Env`.
 
 ## Development
 
@@ -100,7 +106,13 @@ admins; neither a pending verdict nor a rewritten proxy check is sufficient.
 Release tags are also fail closed: the deploy workflow accepts only a tag on
 the current `main` merge commit and re-verifies the associated PR head's two
 app-bound checks plus the final reviewer-published samorev status before touching
-production.
+production. It also snapshots and audits workflows on every remote branch,
+rejecting any branch that could mutate GitHub state outside the protected
+default-branch publisher. The `production` environment then requires release
+authorization from Nik, independently of the `samo-agent` tag pusher.
+Cloudflare deployment credentials are allowed only at environment scope;
+repository-scoped copies would let a forged merge bypass that non-overwritable
+boundary.
 
 If production canaries fail, disable `gitzette-runner.service` first. Existing
 immutable editions remain available. Deploy the last verified Worker tag if the
