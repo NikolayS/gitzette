@@ -210,6 +210,7 @@ describe("production migration credential guards", () => {
       "approve-production-deployment.sh",
       "check-branch-protection.sh",
       "check-production-environment.sh",
+      "check-release-review.sh",
       "evaluate-samorev-gate-status.sh",
       "evaluate-samorev-status.sh",
       "poll-samorev-gate.sh",

@@ -27,7 +27,11 @@ function permissionsFrom(value: unknown, location: string): Set<string> {
   return result;
 }
 
-function effectiveProtectedPermissions(parsed: Document, includeJobNames: boolean): string[] {
+function effectiveProtectedPermissions(
+  parsed: Document,
+  includeJobNames: boolean,
+  conservativeMissing: boolean,
+): string[] {
   const workflowPermissionsDefined = parsed.permissions !== undefined && parsed.permissions !== null;
   const permissions = workflowPermissionsDefined ? [...permissionsFrom(parsed.permissions, "workflow")] : [];
   if (parsed.jobs !== undefined && !isRecord(parsed.jobs)) throw new Error("workflow jobs must be a mapping");
@@ -35,7 +39,7 @@ function effectiveProtectedPermissions(parsed: Document, includeJobNames: boolea
     for (const [name, job] of Object.entries(parsed.jobs)) {
       if (!isRecord(job)) throw new Error("workflow job must be a mapping");
       const location = includeJobNames ? `job:${name}` : "job";
-      if (!workflowPermissionsDefined && (job.permissions === undefined || job.permissions === null)) {
+      if (conservativeMissing && !workflowPermissionsDefined && (job.permissions === undefined || job.permissions === null)) {
         // Repository defaults can drift. Missing workflow and job permissions
         // are conservatively treated as both protected writes.
         permissions.push(...protectedScopes.map((scope) => `${location}:${scope}`));
@@ -49,7 +53,7 @@ function effectiveProtectedPermissions(parsed: Document, includeJobNames: boolea
 
 export function workflowWritePermissions(source: string): Set<string> {
   const parsed = parseWorkflow(source);
-  return new Set(effectiveProtectedPermissions(parsed, false));
+  return new Set(effectiveProtectedPermissions(parsed, false, true));
 }
 
 function workflowTriggers(source: string): Set<string> {
@@ -60,10 +64,10 @@ function workflowTriggers(source: string): Set<string> {
   throw new Error("workflow on trigger must be a string, array, or mapping");
 }
 
-function workflowPrivileges(source: string): Map<string, number> {
+function workflowPrivileges(source: string, conservativeMissing: boolean): Map<string, number> {
   const parsed = parseWorkflow(source);
   const result = new Map<string, number>();
-  const permissions = effectiveProtectedPermissions(parsed, true);
+  const permissions = effectiveProtectedPermissions(parsed, true, conservativeMissing);
   for (const trigger of workflowTriggers(source)) {
     for (const permission of permissions) {
       const privilege = `${trigger}|${permission}`;
@@ -115,8 +119,8 @@ export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: stri
     const headSource = workflowAt(cwd, headSha, path);
     if (headSource === null) continue;
     const baseSource = workflowAt(cwd, baseSha, path);
-    const basePrivileges = baseSource === null ? new Map<string, number>() : workflowPrivileges(baseSource);
-    const headPrivileges = workflowPrivileges(headSource);
+    const basePrivileges = baseSource === null ? new Map<string, number>() : workflowPrivileges(baseSource, false);
+    const headPrivileges = workflowPrivileges(headSource, true);
     const broadened = [...headPrivileges]
       .filter(([scope, count]) => !privilegeIsCovered(scope, count, basePrivileges))
       .map(([scope]) => scope);

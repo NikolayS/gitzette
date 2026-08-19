@@ -3,14 +3,14 @@ import { describe, expect, test } from "bun:test";
 describe("deploy review revalidation", () => {
   test("binds both checks to Actions and reads identity-bearing commit statuses", async () => {
     const workflow = await Bun.file(".github/workflows/deploy.yml").text();
-    expect(workflow).toContain('.name == "typecheck" and .conclusion == "success" and .app.id == 15368');
-    expect(workflow).toContain('.name == "base-controlled samorev publisher" and .conclusion == "success" and .app.id == 15368');
-    expect(workflow).toContain('commits/$reviewed_sha/statuses?per_page=100');
-    expect(workflow).not.toContain('commits/$reviewed_sha/status\")');
-    expect(workflow).toContain('printf \'%s\' "$statuses" | bash scripts/evaluate-samorev-status.sh');
-    expect(workflow).toContain('printf \'%s\' "$statuses" | bash scripts/evaluate-samorev-gate-status.sh');
-    expect(workflow).not.toContain('map(select(.context == "samorev-gate"))');
-    expect(workflow).not.toContain('creator.login == "samo-agent"');
+    const reviewScript = await Bun.file("scripts/check-release-review.sh").text();
+    const reviewEvaluator = await Bun.file("scripts/check-release-review.ts").text();
+    expect(workflow).toContain("run: bash scripts/check-release-review.sh");
+    expect(workflow).not.toContain("check_runs=");
+    expect(reviewScript).toContain('commits/$reviewed_sha/statuses?per_page=100');
+    expect(reviewEvaluator).toContain('check.name === name && check.conclusion === "success" && app.id === actionsAppId');
+    expect(reviewEvaluator).toContain("samorevCreator.id !== reviewerId");
+    expect(reviewEvaluator).toContain("gateCreator.id !== actionsBotId");
     const gates = [
       ["Verify required Worker secrets", "bash scripts/check-production-secrets.sh"],
       ["Verify weekly profile activation prerequisites", "bash scripts/check-weekly-profiles.sh"],
@@ -35,6 +35,7 @@ describe("deploy review revalidation", () => {
     const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
     const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
     expect(reviewGate).toContain("checks: read");
+    expect(reviewGate).toContain("if: github.event.sender.id == 1345402");
     expect(reviewGate).toContain("pull-requests: read");
     expect(reviewGate).toContain("statuses: read");
     expect(reviewGate).not.toContain("/reviews");
@@ -44,15 +45,22 @@ describe("deploy review revalidation", () => {
     expect(deploy).not.toContain("checks: read");
     expect(deploy).not.toContain("pull-requests: read");
     expect(deploy).not.toContain("statuses: read");
+    expect(deploy).toContain("bun install --frozen-lockfile --ignore-scripts");
   });
 
   test("keeps credential migration behind the production identity boundary", async () => {
-    const workflow = await Bun.file(".github/workflows/migrate-production-credentials.yml").text();
+    const migrationPath = ".github/workflows/migrate-production-credentials.yml";
+    const workflow = await Bun.file(migrationPath).text();
+    const policy = JSON.parse(await Bun.file("config/production-environment.json").text()) as {
+      branch_policies: Array<{ name: string; type: string }>;
+    };
+    expect(policy.branch_policies.some(({ name, type }) => name === "main" && type === "branch"))
+      .toBe(await Bun.file(migrationPath).exists());
     expect(workflow).toContain("  workflow_dispatch:");
     expect(workflow).not.toContain("pull_request:");
     expect(workflow).not.toContain("pull_request_target:");
     expect(workflow).not.toContain("push:");
-    expect(workflow).toContain("if: github.actor == 'NikolayS'");
+    expect(workflow).toContain("if: github.event.sender.id == 1345402");
     expect(workflow).toContain("    environment: production");
     expect(workflow).toContain("  contents: read");
     expect(workflow).not.toContain("actions/checkout");

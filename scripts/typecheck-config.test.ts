@@ -83,6 +83,21 @@ describe("TypeScript project coverage", () => {
     }
   });
 
+  test("the shell test command enumerates every top-level shell regression", async () => {
+    const packageJson = JSON.parse(await Bun.file(resolve("package.json")).text()) as {
+      scripts?: Record<string, string>;
+    };
+    const shellCommand = packageJson.scripts?.["test:shell"];
+    expect(shellCommand).toBeDefined();
+    const selected = new Set((shellCommand ?? "").split(/\s*&&\s*/).map((command) => command.trim()));
+    const discovered = ts.sys.readDirectory(resolve("scripts"), [".sh"], undefined, ["*.test.sh"], 1);
+    expect(discovered.length).toBeGreaterThan(0);
+    for (const name of discovered) {
+      const repoRelative = relative(resolve("."), resolve(name));
+      expect(selected.has(`bash ${repoRelative}`), `shell test not selected by test:shell: ${name}`).toBe(true);
+    }
+  });
+
   test("quoted glob selectors remain literal", () => {
     expect(selectorSelectsFile(
       { quoted: true, value: "scripts/*.test.ts" },

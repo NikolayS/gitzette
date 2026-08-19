@@ -12,6 +12,14 @@ else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
 policy="$root/config/production-environment.json"
+bootstrap_workflow="$root/.github/workflows/migrate-production-credentials.yml"
+bootstrap_policy_enabled="$(jq -r 'any(.branch_policies[]; .name == "main" and .type == "branch")' "$policy")"
+bootstrap_workflow_present=false
+[[ ! -f "$bootstrap_workflow" ]] || bootstrap_workflow_present=true
+if [[ "$bootstrap_policy_enabled" != "$bootstrap_workflow_present" ]]; then
+  echo "the temporary main environment policy and credential-migration workflow must be added or removed together" >&2
+  exit 1
+fi
 expected="$(jq -Sc 'del(.environment_secret_names,.forbidden_repository_secret_names) | .reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 if ! environment="$(gh api "repos/$repository/environments/production" 2>/dev/null)"; then
   echo "production environment is missing; run scripts/apply-production-environment.sh using config/production-environment.json" >&2
@@ -49,4 +57,4 @@ if jq -e --argjson forbidden "$forbidden_repository_secret_names" 'any(.[]; . as
   exit 1
 fi
 
-echo "Production environment OK: samo-agent release approval, v* tag restriction, and environment-only credentials are active"
+echo "Production environment OK: separate release approval, v* tags plus temporary main bootstrap, and environment-only credentials are active"

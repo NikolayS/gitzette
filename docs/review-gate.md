@@ -3,7 +3,10 @@
 Protected `main` requires `typecheck`, `samorev`, and `samorev-gate` on the
 exact pull-request head, applies those checks to administrators, and requires
 every conversation to be resolved. A separate formal GitHub approval is not a
-merge or release gate.
+merge or release gate. The repository owner explicitly chose this zero-formal-
+approval policy: the mandatory human release action is an immutable-ID `v*` tag
+push by Nik, followed by authorization from a different production-environment
+reviewer.
 
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
@@ -20,8 +23,10 @@ merge-base-to-head broadening of `statuses: write`, `checks: write`, or
 aliases/tags/folded values, large files, deletions, empty workflow diffs,
 head-controlled trigger additions, unchanged existing privilege, job-bound
 privilege relocation, and missing permission blocks. Missing workflow and job
-permissions are conservatively treated as protected writes, so this boundary
-does not depend on the repository default remaining read-only. A repository-
+permissions grant nothing on the base side but are conservatively treated as
+protected writes on the head side. This prevents an implicit base default from
+authorizing an explicit PR write and does not depend on the repository default
+remaining read-only. A repository-
 level test pins `samorev-gate.yml` as the only workflow with `statuses: write`
 or `checks: write`. This detects and fails permission/trigger broadening in the
 protected-main publisher; because commit-status context names are overwriteable,
@@ -63,10 +68,12 @@ Classic branch protection cannot make the zero-approval merge itself
 non-overwritable: every same-repository Actions workflow shares app ID `15368`,
 and commit-status context names are last-writer-wins. Production release is the
 non-overwritable enforcement boundary. The `production` environment permits Nik
-or the separate `samo-agent` user to authorize only `v*` tags and forbids the
-workflow actor from approving its own deployment. Normal releases are triggered
-by Nik and authorized by `samo-agent`; Nik remains the break-glass alternate if
-`samo-agent` triggered the run. The tag workflow first revalidates the exact merged PR head,
+or the separate `samo-agent` user to authorize `v*` tags plus the temporary
+`main` credential-scope bootstrap, and forbids the workflow actor from approving
+its own deployment. Normal release tags must be pushed by immutable user ID
+`1345402` (Nik) and are authorized by `samo-agent`; Nik remains the break-glass
+alternate if `samo-agent` triggered the run. The tag workflow first revalidates
+the exact merged PR head,
 immutable `samo-agent` verdict creator ID, and exact-head checks; only then can
 the environment expose Cloudflare credentials. Those credentials must exist
 only as environment secrets. Keeping either credential as a repository secret
@@ -80,12 +87,14 @@ cannot approve their own environment deployment or read its secrets first.
 
 The initial scope migration uses
 `.github/workflows/migrate-production-credentials.yml` once, under that same
-environment authorization. Only Nik may dispatch it, `samo-agent` must authorize
-the environment request, and the RSA public-key fingerprint is pinned in the
+environment authorization. Only immutable user ID `1345402` (Nik) may dispatch
+it, `samo-agent` must authorize the environment request, and the RSA public-key
+fingerprint is pinned in the
 reviewed workflow. It emits only an RSA-OAEP-SHA256 ciphertext for the
 operator-held private key. Dispatch it from `main`; the temporary `main` branch
-environment policy exists only for this bootstrap. After setting both environment secrets and deleting
-the repository copies, delete the bootstrap workflow in the next reviewed PR;
+environment policy exists only for this bootstrap. After setting both
+environment secrets and deleting the repository copies, delete the bootstrap
+workflow in the next reviewed PR;
 remove the temporary `main` policy in that same PR. Leaving a credential-export
 path around is needless attack surface.
 

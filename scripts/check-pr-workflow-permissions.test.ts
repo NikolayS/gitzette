@@ -128,5 +128,12 @@ describe("base-controlled workflow permission boundary", () => {
     );
     const implicitDefault = await commit(cwd, "implicit default");
     expect(() => checkWorkflowChanges(cwd, renamedJob, implicitDefault)).toThrow("job:attacker:checks");
+
+    await Bun.write(
+      join(cwd, ".github/workflows/implicit.yml"),
+      "on: pull_request\npermissions: {}\njobs:\n  attacker:\n    permissions: {statuses: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
+    );
+    const explicitWrite = await commit(cwd, "explicit write after implicit base");
+    expect(() => checkWorkflowChanges(cwd, implicitDefault, explicitWrite)).toThrow("job:attacker:statuses");
   });
 });
