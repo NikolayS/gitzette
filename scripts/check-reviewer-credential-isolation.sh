@@ -9,6 +9,11 @@ set -euo pipefail
 root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 allowed_cloudflare='["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
+require_production_credentials="${REQUIRE_PRODUCTION_CREDENTIALS:-false}"
+if [[ "$require_production_credentials" != true && "$require_production_credentials" != false ]]; then
+  echo "REQUIRE_PRODUCTION_CREDENTIALS must be exactly true or false" >&2
+  exit 1
+fi
 allowed_repository='["CLAUDE_CODE_OAUTH_TOKEN","CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
@@ -52,6 +57,10 @@ if [[ "$(jq length <<<"$dependabot_secrets")" -ne 0 ]]; then
 fi
 
 environments="$(read_api "environment inventory" --paginate --slurp "repos/$repository/environments?per_page=100" | jq -c 'map(.environments) | add // []')"
+if [[ "$(jq '[.[] | select(.name == "production")] | length' <<<"$environments")" -ne 1 ]]; then
+  echo "repository must contain exactly one production environment" >&2
+  exit 1
+fi
 while IFS= read -r environment; do
   secrets="$(read_api "$environment environment secrets" --paginate --slurp "repos/$repository/environments/$environment/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
   variables="$(read_api "$environment environment variables" --paginate --slurp "repos/$repository/environments/$environment/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
@@ -60,8 +69,15 @@ while IFS= read -r environment; do
     exit 1
   fi
   if [[ "$environment" == production ]]; then
-    if ! jq -e --argjson allowed "$allowed_cloudflare" 'all(.[]; .name as $name | $allowed | index($name))' <<<"$secrets" >/dev/null; then
-      echo "production contains a secret outside the reviewed Cloudflare allowlist" >&2
+    secret_names="$(jq -c '[.[].name] | sort' <<<"$secrets")"
+    expected_names="$(jq -c 'sort' <<<"$allowed_cloudflare")"
+    if [[ "$require_production_credentials" == true && "$secret_names" != "$expected_names" ]]; then
+      echo "production must contain exactly both reviewed Cloudflare secrets" >&2
+      exit 1
+    fi
+    if [[ "$require_production_credentials" == false &&
+          "$secret_names" != '[]' && "$secret_names" != "$expected_names" ]]; then
+      echo "production secrets must be empty before migration or exactly the reviewed Cloudflare pair" >&2
       exit 1
     fi
   elif [[ "$(jq length <<<"$secrets")" -ne 0 ]]; then

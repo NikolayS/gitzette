@@ -17,8 +17,11 @@ Start a disposable child shell with
 `unset HISTFILE; set +o history`; `--noprofile --norc` alone does not disable
 history. Run every code block below only inside that child shell. Do not paste a block containing
 `set -euo pipefail`, `${VAR:?}`, or `exit` directly into the parent interactive
-shell. If a step aborts after decryption, immediately `unset plaintext` and
-shred the exact run directory before retrying; if step 0 aborts before the
+shell. If a step aborts after decryption but before the environment copy is
+verified, restore the repository rollback copy, immediately `unset plaintext`,
+and shred the exact run directory before retrying. After the repository copy is
+deleted, retain the encrypted private key and ciphertext until the first
+successful production deploy and smoke test. If step 0 aborts before the
 encrypted-key fingerprint is verified, shred the plaintext private key before
 retrying. The parent terminal remains available for that cleanup.
 
@@ -125,8 +128,10 @@ text matching is not the authorization proof.
    ```
 
    This preflight dispatch must be green before the scheduled guard is relied
-   on; API-read failures exit separately from policy drift. The green guard
-   proves the fixed production policy and that neither repository-scoped
+   on; API-read failures exit separately from policy drift. Its independent
+   `production-policy`, `migration-policy`, and `migration-switches` jobs prove
+   the fixed production policy, the Nik-only migration approval boundary, and
+   that neither repository-scoped
    migration switch is nonempty. The adjacent inventory command uses the
    operator's administrator token to prove the credential-migration environment
    has no variables or secrets, the production environment has no variables
@@ -206,7 +211,11 @@ text matching is not the authorization proof.
    ```bash
    set -euo pipefail
    : "${RUN_ID:?set the exact export run ID}"
-   gh variable delete CREDENTIAL_EXPORT_OPEN
+   if ! gh variable delete CREDENTIAL_EXPORT_OPEN 2>/dev/null; then
+     remaining_export_switches="$(gh variable list --json name --jq \
+       '[.[].name | select(. == "CREDENTIAL_EXPORT_OPEN")] | length')"
+     [[ "$remaining_export_switches" == 0 ]]
+   fi
    operator_token_file="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
    token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$operator_token_file" || true)"
    [[ "$token_count" == 1 ]]
@@ -279,7 +288,6 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
-   environment_credentials_ready=false
    environment_secrets_before="$(gh api --paginate --slurp \
      'repos/NikolayS/gitzette/environments/production/secrets?per_page=100' |
      jq -c 'map(.secrets) | add // []')"
@@ -303,8 +311,6 @@ text matching is not the authorization proof.
      "https://api.cloudflare.com/client/v4/accounts/$exported_account_id/workers/services/gitzette" \
      <<<"header = \"Authorization: Bearer $api_token\"" |
      jq -e '.success == true' >/dev/null
-   environment_credentials_ready=true
-   [[ "$environment_credentials_ready" == true ]]
    gh secret delete CLOUDFLARE_ACCOUNT_ID
    gh secret delete CLOUDFLARE_API_TOKEN
    remaining_repository_cloudflare_secrets="$(gh secret list --json name --jq \
@@ -336,7 +342,8 @@ text matching is not the authorization proof.
    git fetch origin main
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
    bash scripts/check-credential-migration-environment.sh
-   bash scripts/check-credential-migration-inventory.sh
+   REQUIRE_PRODUCTION_CREDENTIALS=true \
+     bash scripts/check-credential-migration-inventory.sh
    bash scripts/check-production-environment.sh
    gh variable set CREDENTIAL_VERIFY_OPEN --body true
    previous_verify_run_id="$(gh run list --workflow=migrate-production-credentials.yml \
@@ -377,7 +384,8 @@ text matching is not the authorization proof.
    test "$(gh run view "$VERIFY_RUN_ID" --json headSha --jq .headSha)" = \
      "$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
    bash scripts/check-credential-migration-environment.sh
-   bash scripts/check-credential-migration-inventory.sh
+   REQUIRE_PRODUCTION_CREDENTIALS=true \
+     bash scripts/check-credential-migration-inventory.sh
    bash scripts/check-production-environment.sh
    ```
 
@@ -392,10 +400,10 @@ text matching is not the authorization proof.
    ```
 
    A best-effort scheduled guard also runs approximately every five minutes on
-   GitHub's scheduler. Its production-policy job checks both the temporary fixed
-   `main` plus `v*` policy and the Nik-only credential-migration approval
-   boundary; policy drift is never an expected result.
-   Its separate
+   GitHub's scheduler. Its independent `production-policy` and
+   `migration-policy` jobs check the temporary fixed `main` plus `v*` policy and
+   the Nik-only credential-migration approval boundary, so one failure never
+   masks the other. Policy drift is never an expected result. Its separate
    switch-residue job is expected red during an open export switch or the
    legitimate production approval wait.
    After cleanup, explicitly dispatch that guard and require it to turn green;
@@ -417,9 +425,11 @@ text matching is not the authorization proof.
    printf '%s' "$api_token" | gh secret set CLOUDFLARE_API_TOKEN
    ```
 
-7. After successful verification, remove local migration material. GNU
-   `shred -u` is best-effort cleanup; tmpfs or encrypted storage is the actual
-   at-rest control.
+7. After successful read-capability verification, drop the transfer table and
+   remove nonessential local material, but retain the encrypted private key and
+   `credentials.bin` rollback ciphertext until the first production deploy and
+   mandatory smoke test succeed. The API probe above does not prove the token's
+   Workers edit scope; destroying rollback material here would be premature.
 
    ```bash
    set -euo pipefail
@@ -439,13 +449,12 @@ text matching is not the authorization proof.
      jq -e '.success == true and (.result | length == 1) and
        .result[0].success == true and (.result[0].results | length == 1) and
        .result[0].results[0].remaining == 0' >/dev/null
-   shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"
-   rm -f "$MIGRATION_KEY_DIR/production-migration-public.pem"
    unset plaintext ciphertext account_id api_token d1_token
-   for material in credentials.bin select.json count.json drop.json prove-drop.json; do
+   for material in select.json count.json drop.json prove-drop.json; do
      [[ ! -f "$migration_dir/$material" ]] || shred -u "$migration_dir/$material"
    done
-   rmdir "$migration_dir"
+   test -s "$migration_dir/credentials.bin"
+   test -s "$MIGRATION_KEY_DIR/production-migration-private.pem"
    ```
 
 8. Through the exact-head review gate, delete
@@ -472,5 +481,32 @@ text matching is not the authorization proof.
    repository Actions variables must be empty and repository Actions secrets
    may contain only the reviewed `CLAUDE_CODE_OAUTH_TOKEN` after migration,
    while only the `production` environment retains the two reviewed Cloudflare
-   secret names. Run that audit in the post-teardown proof so re-created
+   secret names. Run `REQUIRE_PRODUCTION_CREDENTIALS=true bash
+   scripts/check-reviewer-credential-isolation.sh` in the post-teardown proof so re-created
    repository rollback copies or switches fail closed.
+
+9. Create the reviewed release tag only after the teardown change passes its
+   own exact-head review gate. After that tag's production deployment and the
+   mandatory smoke test both succeed, destroy the retained encrypted rollback
+   material. GNU `shred -u` remains best-effort; tmpfs or encrypted storage is
+   the actual at-rest control.
+
+   ```bash
+   set -euo pipefail
+   : "${DEPLOY_RUN_ID:?set the first successful post-migration deploy run ID}"
+   : "${RELEASE_TAG:?set the reviewed post-migration release tag}"
+   git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+   release_sha="$(git rev-list -n1 "$RELEASE_TAG")"
+   deploy_evidence="$(gh run view "$DEPLOY_RUN_ID" \
+     --json conclusion,event,headSha,workflowName)"
+   jq -e --arg release_sha "$release_sha" '
+     .conclusion == "success" and .event == "push" and
+     .workflowName == "Deploy" and .headSha == $release_sha' \
+     <<<"$deploy_evidence" >/dev/null
+   bash /tmp/gl-dispatch/dispatch/smoke-test.sh
+   shred -u "$migration_dir/credentials.bin"
+   shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"
+   rm -f "$MIGRATION_KEY_DIR/production-migration-public.pem"
+   rmdir "$migration_dir"
+   unset deploy_evidence release_sha DEPLOY_RUN_ID RELEASE_TAG
+   ```

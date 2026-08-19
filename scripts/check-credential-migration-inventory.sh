@@ -9,6 +9,11 @@ set -euo pipefail
 root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 allowed_production='["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
+require_production_credentials="${REQUIRE_PRODUCTION_CREDENTIALS:-false}"
+if [[ "$require_production_credentials" != true && "$require_production_credentials" != false ]]; then
+  echo "REQUIRE_PRODUCTION_CREDENTIALS must be exactly true or false" >&2
+  exit 1
+fi
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
 
@@ -40,8 +45,16 @@ if [[ "$(jq -r 'length' <<<"$production_variables")" -ne 0 ]]; then
   echo "production environment must not define variables that can shadow repository migration switches" >&2
   exit 1
 fi
-if ! jq -e --argjson allowed "$allowed_production" 'all(.[]; .name as $name | $allowed | index($name))' <<<"$production_secrets" >/dev/null; then
-  echo "production contains a secret outside the reviewed Cloudflare allowlist" >&2
+production_secret_names="$(jq -c '[.[].name] | sort' <<<"$production_secrets")"
+if [[ "$require_production_credentials" == true ]]; then
+  expected_production_names="$(jq -c 'sort' <<<"$allowed_production")"
+  if [[ "$production_secret_names" != "$expected_production_names" ]]; then
+    echo "production must contain exactly both reviewed Cloudflare secrets after installation" >&2
+    exit 1
+  fi
+elif [[ "$production_secret_names" != '[]' &&
+        "$production_secret_names" != "$(jq -c 'sort' <<<"$allowed_production")" ]]; then
+  echo "production secrets must be empty before migration or exactly the reviewed Cloudflare pair" >&2
   exit 1
 fi
 echo "Credential migration inventory OK: migration and production environments cannot shadow switches or expose unexpected secrets"

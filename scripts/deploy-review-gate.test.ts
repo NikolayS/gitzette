@@ -267,10 +267,23 @@ case "$endpoint" in
   *dependabot/secrets*)
     if [[ "\${FAKE_MODE:-ok}" == dependabot ]]; then printf '[{"secrets":[{"name":"SAMOREV_TOKEN"}]}]\n'; else printf '[{"secrets":[]}]\n'; fi
     ;;
-  *environments?per_page=100) printf '[{"environments":[{"name":"production"},{"name":"credential-migration"}]}]\n' ;;
+  *environments?per_page=100)
+    if [[ "\${FAKE_MODE:-ok}" == production-missing ]]; then
+      printf '[{"environments":[{"name":"credential-migration"}]}]\n'
+    else
+      printf '[{"environments":[{"name":"production"},{"name":"credential-migration"}]}]\n'
+    fi
+    ;;
   *production/secrets*)
-    name=CLOUDFLARE_ACCOUNT_ID; [[ "\${FAKE_MODE:-ok}" != production ]] || name=GH_TOKEN
-    jq -nc --arg name "$name" '[{secrets:[{name:$name}]}]'
+    if [[ "\${FAKE_MODE:-ok}" == production ]]; then
+      printf '[{"secrets":[{"name":"GH_TOKEN"}]}]\n'
+    elif [[ "\${FAKE_MODE:-ok}" == production-empty ]]; then
+      printf '[{"secrets":[]}]\n'
+    elif [[ "\${FAKE_MODE:-ok}" == production-incomplete ]]; then
+      printf '[{"secrets":[{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]\n'
+    else
+      printf '[{"secrets":[{"name":"CLOUDFLARE_API_TOKEN"},{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]\n'
+    fi
     ;;
   *credential-migration/secrets*)
     if [[ "\${FAKE_MODE:-ok}" == migration ]]; then printf '[{"secrets":[{"name":"SAMOREV_TOKEN"}]}]\n'; else printf '[{"secrets":[]}]\n'; fi
@@ -282,14 +295,26 @@ case "$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = (mode: string): Promise<number> => Bun.spawn([
+    const run = (mode: string, requireProductionCredentials = "false"): Promise<number> => Bun.spawn([
       "bash", "scripts/check-reviewer-credential-isolation.sh",
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode },
+      env: {
+        ...process.env,
+        PATH: `${root}:${process.env.PATH}`,
+        GITHUB_REPOSITORY: "example/gitzette",
+        FAKE_MODE: mode,
+        REQUIRE_PRODUCTION_CREDENTIALS: requireProductionCredentials,
+      },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await run("ok")).toBe(0);
+    expect(await run("production-empty")).toBe(0);
+    expect(await run("production-incomplete")).toBe(1);
+    expect(await run("production-missing")).toBe(1);
+    expect(await run("ok", "true")).toBe(0);
+    expect(await run("production-empty", "true")).toBe(1);
+    expect(await run("ok", "invalid")).toBe(1);
     expect(await run("repository")).toBe(1);
     expect(await run("production")).toBe(1);
     expect(await run("migration")).toBe(1);

@@ -176,10 +176,10 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("created an empty transfer table");
     expect(migrationDoc).toContain("empty-table recovery dispatched once");
     expect(migrationDoc).toContain("sqlite_schema where type = \\u0027table\\u0027");
-    expect(migrationDoc.indexOf('shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"')).toBeLessThan(
-      migrationDoc.lastIndexOf('rmdir "$migration_dir"'),
+    expect(migrationDoc.indexOf("mandatory smoke test both succeed")).toBeLessThan(
+      migrationDoc.indexOf('shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"'),
     );
-    expect(migrationDoc).toContain("credentials.bin select.json count.json drop.json prove-drop.json");
+    expect(migrationDoc).toContain("select.json count.json drop.json prove-drop.json");
     expect(migrationDoc).toContain("switch-residue job is expected red during an open export switch");
     expect(migrationDoc).toContain("dedicated child Bash process");
     expect(migrationDoc).toContain("unset HISTFILE; set +o history");
@@ -193,7 +193,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("Retain `scripts/get-github-environment.sh`");
     expect(migrationDoc).toContain("repository Actions variables must be empty and repository Actions secrets\n   may contain only the reviewed `CLAUDE_CODE_OAUTH_TOKEN` after migration");
     expect(migrationDoc).toContain("production-policy` job is expected red");
-    expect(migrationDoc).toContain("environment_credentials_ready=true");
+    expect(migrationDoc).not.toContain("environment_credentials_ready");
     expect(migrationDoc).toContain('environment_secrets_before="$(gh api');
     expect(migrationDoc).not.toContain("secret_write_started");
     expect(migrationDoc).toContain('map(select(.name == $current.name))');
@@ -220,21 +220,28 @@ describe("one-shot credential migration boundary", () => {
     expect(policyGuard).not.toContain("if: ${{ github.repository == 'NikolayS/gitzette' }}");
     expect(parsedPolicyGuard.permissions).toEqual({});
     expect(parsedPolicyGuard.jobs["production-policy"].permissions).toEqual({ actions: "read", contents: "read" });
+    expect(Object.keys(parsedPolicyGuard.jobs)).toEqual([
+      "production-policy", "migration-policy", "migration-switches",
+    ]);
+    expect(parsedPolicyGuard.jobs["migration-policy"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(parsedPolicyGuard.jobs["migration-switches"].permissions).toEqual({});
     const policyGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the fixed production ref policy"))?.run;
     const productionRepositoryPinRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
       name === "Require the canonical repository")?.run;
-    const migrationGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
+    const migrationGuardRun = parsedPolicyGuard.jobs["migration-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the credential migration approval boundary"))?.run;
     const migrationSwitchRun = parsedPolicyGuard.jobs["migration-switches"].steps.find(({ name }) =>
       name?.startsWith("Fail if a credential migration switch remains open"))?.run;
+    const migrationPolicyRepositoryPinRun = parsedPolicyGuard.jobs["migration-policy"].steps.find(({ name }) =>
+      name === "Require the canonical repository")?.run;
     const migrationRepositoryPinRun = parsedPolicyGuard.jobs["migration-switches"].steps.find(({ name }) =>
       name === "Require the canonical repository")?.run;
     expect(productionRepositoryPinRun).toBeDefined();
     expect(policyGuardRun).toBeDefined();
     expect(migrationGuardRun).toBeDefined();
     expect(migrationSwitchRun).toBeDefined();
+    expect(migrationPolicyRepositoryPinRun).toBeDefined();
     expect(migrationRepositoryPinRun).toBeDefined();
     const policyGuardRoot = await mkdtemp(join(tmpdir(), "gitzette-policy-guard-run-"));
     const fakeBash = join(policyGuardRoot, "bash");
@@ -248,7 +255,7 @@ exit "\${FAKE_CHECKER_STATUS:-0}"
         env: { ...process.env, REPOSITORY: repository },
         stdout: "pipe", stderr: "pipe",
       }).exited;
-    for (const run of [productionRepositoryPinRun, migrationRepositoryPinRun]) {
+    for (const run of [productionRepositoryPinRun, migrationPolicyRepositoryPinRun, migrationRepositoryPinRun]) {
       expect(await executeRepositoryPin(run, "NikolayS/gitzette")).toBe(0);
       expect(await executeRepositoryPin(run, "attacker/gitzette")).toBe(1);
     }
@@ -503,7 +510,7 @@ fi
     const migrationDoc = await Bun.file("docs/credential-migration.md").text();
     const bashBlocks = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
       .map((match) => match[1] ?? "");
-    expect(bashBlocks).toHaveLength(11);
+    expect(bashBlocks).toHaveLength(12);
 
     const runbookRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-runbook-"));
     try {
@@ -531,6 +538,7 @@ fi
       for (const [index, program] of jqPrograms.entries()) {
         const compile = Bun.spawn([
           "jq", "-n", "--argjson", "before", "[]", "--arg", "run_id", "1",
+          "--arg", "release_sha", "a".repeat(40),
           `def runbook_program: (${program}); empty`,
         ], { stdout: "pipe", stderr: "pipe" });
         const [status, stderr] = await Promise.all([
@@ -542,6 +550,34 @@ fi
     } finally {
       await rm(runbookRoot, { recursive: true, force: true });
     }
+  });
+
+  test("closes the export switch idempotently on operator re-entry", async () => {
+    const migrationDoc = await Bun.file("docs/credential-migration.md").text();
+    const closeBlock = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
+      .map((match) => match[1] ?? "")
+      .find((block) => block.includes("gh variable delete CREDENTIAL_EXPORT_OPEN"));
+    expect(closeBlock).toBeDefined();
+    const closeStart = closeBlock?.indexOf("if ! gh variable delete CREDENTIAL_EXPORT_OPEN") ?? -1;
+    const closeEnd = closeBlock?.indexOf('operator_token_file="${OPERATOR_TOKEN_FILE', closeStart) ?? -1;
+    expect(closeStart).toBeGreaterThanOrEqual(0);
+    expect(closeEnd).toBeGreaterThan(closeStart);
+    const closeSwitch = closeBlock?.slice(closeStart, closeEnd) ?? "exit 99";
+    const execute = (deleteStatus: string, remaining: string): Promise<number> => Bun.spawn([
+      "bash", "-c", `set -euo pipefail
+gh() {
+  if [[ "$1 $2" == "variable delete" ]]; then return "$FAKE_DELETE_STATUS"; fi
+  if [[ "$1 $2" == "variable list" ]]; then printf '%s\\n' "$FAKE_REMAINING"; return 0; fi
+  return 91
+}
+${closeSwitch}`,
+    ], {
+      env: { ...process.env, FAKE_DELETE_STATUS: deleteStatus, FAKE_REMAINING: remaining },
+      stdout: "pipe", stderr: "pipe",
+    }).exited;
+    expect(await execute("0", "1")).toBe(0);
+    expect(await execute("1", "0")).toBe(0);
+    expect(await execute("1", "1")).toBe(1);
   });
 
   test("executes the required policy API readability gate fail closed", async () => {
@@ -845,7 +881,9 @@ case "$endpoint" in
   *production/secrets*)
     if [[ "\${FAKE_MODE:-ok}" == production-secret-api-error ]]; then echo 'production secret API failed' >&2; exit 1
     elif [[ "\${FAKE_MODE:-ok}" == production-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"SHADOW"}]}]'
-    else printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]'; fi
+    elif [[ "\${FAKE_MODE:-ok}" == production-complete ]]; then printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_API_TOKEN"},{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]'
+    elif [[ "\${FAKE_MODE:-ok}" == production-incomplete ]]; then printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]'
+    else printf '%s\\n' '[{"secrets":[]}]'; fi
     ;;
   *) exit 91 ;;
 esac
@@ -870,14 +908,25 @@ esac
     expect(await run("admin-bypass")).toBe(1);
     expect(await run("missing")).toBe(4);
     expect(await run("auth")).toBe(3);
-    const runInventory = (mode: string): Promise<number> => Bun.spawn([
+    const runInventory = (mode: string, requireProductionCredentials = "false"): Promise<number> => Bun.spawn([
       "bash", "scripts/check-credential-migration-inventory.sh",
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode },
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        GITHUB_REPOSITORY: "example/gitzette",
+        FAKE_MODE: mode,
+        REQUIRE_PRODUCTION_CREDENTIALS: requireProductionCredentials,
+      },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await runInventory("ok")).toBe(0);
+    expect(await runInventory("production-complete")).toBe(0);
+    expect(await runInventory("production-incomplete")).toBe(1);
+    expect(await runInventory("production-complete", "true")).toBe(0);
+    expect(await runInventory("ok", "true")).toBe(1);
+    expect(await runInventory("ok", "invalid")).toBe(1);
     expect(await runInventory("environment-variable")).toBe(1);
     expect(await runInventory("environment-secret")).toBe(1);
     expect(await runInventory("variable-api-error")).toBe(3);
