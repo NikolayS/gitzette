@@ -8,6 +8,7 @@ else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
 mode="${1:-default}"
+created_environment=false
 case "$mode" in
   default) policy="$root/config/production-environment.json" ;;
   migration) policy="$root/config/production-environment-migration.json" ;;
@@ -27,6 +28,7 @@ if live_environment="$(gh api "repos/$repository/environments/production" 2>"$er
     live='[]'
   fi
 elif grep -Eq 'HTTP 404([^0-9]|$)' "$error_file"; then
+  created_environment=true
   live='[]'
 else
   echo "unable to inspect production environment before apply:" >&2
@@ -57,6 +59,10 @@ if ! post_apply_environment="$(gh api "repos/$repository/environments/production
   echo "unable to re-read production environment after apply:" >&2
   sed 's/^/  /' "$error_file" >&2
   exit 3
+fi
+if [[ "$created_environment" == true ]]; then
+  echo 'production was newly created; verify admin bypass is disabled in Settings -> Environments, then re-run this command and its checker before any deployment' >&2
+  exit 1
 fi
 if [[ "$(jq -r .can_admins_bypass <<<"$post_apply_environment")" != false ]]; then
   echo 'disable "Allow administrators to bypass configured protection rules" for environment production in Settings -> Environments, then re-run' >&2

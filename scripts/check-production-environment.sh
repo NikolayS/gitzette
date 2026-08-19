@@ -58,4 +58,5 @@ if [[ "$actual" != "$expected" ]]; then
 fi
 
 policy_names="$(jq -r 'if .deployment_branch_policy.protected_branches then "protected branches" else .branch_policies | map(.name) | join(", ") end' "$policy")"
-echo "Production environment OK: two-person approval; admitted refs: $policy_names"
+reviewer_names="$(jq -r '.reviewers | map(.login) | join(", ")' "$policy")"
+echo "Production environment OK: required reviewers $reviewer_names; admitted refs: $policy_names"

@@ -76,12 +76,14 @@ describe("one-shot credential migration boundary", () => {
     };
     const migrationProductionPolicy = JSON.parse(await Bun.file("config/production-environment-migration.json").text()) as {
       can_admins_bypass: boolean;
+      reviewers: Array<{ id: number }>;
       deployment_branch_policy: Record<string, boolean>;
       branch_policies: Array<{ name: string; type: string }>;
     };
     expect(productionPolicy.can_admins_bypass).toBe(false);
     expect(productionPolicy.branch_policies).toEqual([{ name: "v*", type: "tag" }]);
     expect(migrationProductionPolicy.can_admins_bypass).toBe(false);
+    expect(migrationProductionPolicy.reviewers.map(({ id }) => id)).toEqual([1345402]);
     expect(migrationProductionPolicy.branch_policies).toEqual([]);
     expect(migrationProductionPolicy.deployment_branch_policy).toEqual({ protected_branches: true, custom_branch_policies: false });
     const applyProduction = await Bun.file("scripts/apply-production-environment.sh").text();
@@ -90,6 +92,7 @@ describe("one-shot credential migration boundary", () => {
     expect(applyProduction).toContain('check-production-environment.sh" "$mode"');
     expect(applyProduction).toContain("post_apply_environment");
     expect(applyProduction).toContain("unable to re-read production environment after apply");
+    expect(applyProduction).toContain("production was newly created");
     expect(checkProduction).toContain("can_admins_bypass: $environment.can_admins_bypass");
     expect(checkProduction).toContain("admitted refs: $policy_names");
 
@@ -140,7 +143,9 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
       migrationDoc.indexOf("drop table credential_migration_transfer"),
     );
-    expect(migrationDoc).toContain("guard is expected to be red during an open export switch");
+    expect(migrationDoc).toContain("switch-residue job is expected red during an open export switch");
+    expect(migrationDoc).toContain("dedicated child Bash process");
+    expect(migrationDoc).toContain("Each violation must exit nonzero");
     for (const teardownItem of [
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
       "production-environment-migration.json", "credential-migration-gate.test.ts",
@@ -153,7 +158,9 @@ describe("one-shot credential migration boundary", () => {
       permissions: Record<string, string>;
     };
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
-    expect(policyGuard).toContain("bash scripts/check-production-environment.sh default");
+    expect(policyGuard).toContain('true) expected_mode=migration');
+    expect(policyGuard).toContain('bash scripts/check-production-environment.sh "$expected_mode"');
+    expect(policyGuard).toContain("CRITICAL: production is not v*-only after the verification switch closed");
     expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" ]]');
     expect(policyGuard).not.toContain("github.event.repository.fork");
     expect(policyGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
@@ -356,7 +363,9 @@ case "$endpoint" in
     bypass=false; [[ "\${FAKE_API_ERROR:-none}" != bypass ]] || bypass=true
     protected=false; custom=true
     if [[ "\${FAKE_LIVE_POLICY:-default}" == migration ]]; then protected=true; custom=false; fi
-    jq -nc --argjson bypass "$bypass" --argjson protected "$protected" --argjson custom "$custom" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}},{type:"User",reviewer:{id:280144521,login:"samo-agent"}}]}],deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}}'
+    reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
+    [[ "\${FAKE_LIVE_POLICY:-default}" != migration ]] || reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}}]'
+    jq -nc --argjson bypass "$bypass" --argjson protected "$protected" --argjson custom "$custom" --argjson reviewers "$reviewers" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:$reviewers}],deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}}'
     ;;
   *deployment-branch-policies*)
     if [[ "\${FAKE_LIVE_POLICY:-default}" == api-error ]]; then
@@ -433,8 +442,12 @@ case "$method:$endpoint" in
   GET:repos/example/gitzette/environments/production)
     bypass=false; [[ "\${FAKE_ADMIN_BYPASS:-false}" != true ]] || bypass=true
     policy='{"protected_branches":false,"custom_branch_policies":true}'
+    reviewers='[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
     [[ ! -f "$FAKE_STATE.put" ]] || policy="$(jq -c .deployment_branch_policy "$FAKE_STATE.put")"
-    jq -nc --argjson bypass "$bypass" --argjson policy "$policy" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}},{type:"User",reviewer:{id:280144521,login:"samo-agent"}}]}],deployment_branch_policy:$policy}'
+    if [[ -f "$FAKE_STATE.put" ]]; then
+      reviewers="$(jq -c '[.reviewers[] | {type,reviewer:{id,login:(if .id == 1345402 then "NikolayS" else "samo-agent" end)}}]' "$FAKE_STATE.put")"
+    fi
+    jq -nc --argjson bypass "$bypass" --argjson policy "$policy" --argjson reviewers "$reviewers" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:$reviewers}],deployment_branch_policy:$policy}'
     ;;
   GET:*deployment-branch-policies*) jq -c '[{branch_policies:.}]' "$FAKE_STATE" ;;
   POST:*deployment-branch-policies*)
@@ -566,6 +579,7 @@ esac
     const apply = await Bun.file("scripts/apply-credential-migration-environment.sh").text();
     expect(apply).toContain("post_apply_environment");
     expect(apply).toContain("unable to re-read credential-migration environment after apply");
+    expect(apply).toContain("credential-migration was newly created");
     expect(apply).toContain(".branch_policies[] | [.name,.type] | @tsv");
     expect(apply).not.toContain("-f name=main");
     expect(apply).not.toContain("{wait_timer,can_admins_bypass");
@@ -657,6 +671,6 @@ esac
     const firstApplyStderr = await new Response(firstApply.stderr).text();
     expect(await firstApply.exited).toBe(1);
     expect(await Bun.file(join(missing, "put.json")).exists()).toBe(true);
-    expect(firstApplyStderr).toContain('disable "Allow administrators to bypass configured protection rules"');
+    expect(firstApplyStderr).toContain("credential-migration was newly created");
   });
 });

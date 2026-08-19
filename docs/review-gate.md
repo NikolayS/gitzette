@@ -22,22 +22,34 @@ binding means every push, ready/draft transition, reopen, or PR edit requires a
 new verdict.
 
 Release enforcement does not trust those displayed names. The reviewed tag
-workflow queries GitHub's workflow-run records by exact path, event, and PR
-head SHA, requires the latest `.github/workflows/ci.yml` and protected-base
-`.github/workflows/samorev-gate.yml` runs to have succeeded, and separately
-requires the latest `samorev` status to come from immutable user ID `280144521`.
+workflow requires `main` to remain the protected default branch, then queries
+GitHub's workflow-run records by exact path, event, and PR head SHA. The latest
+`.github/workflows/samorev-gate.yml` run must also name `main` as its PR base
+and `NikolayS/gitzette` as both its base and head repository. The workflow
+requires the latest CI and publisher runs to have succeeded, and separately
+requires the latest `samorev` status to come from immutable user ID `280144521`,
+target that exact publisher run, and post after the run began.
 The `pull_request` CI workflow is head-controlled evidence, not an identity
 boundary; a PR can rewrite its own `ci.yml`. The unforgeable legs are the
-protected-base `pull_request_target` run record and the external user's status.
-Before publishing success, the external reviewer must inspect every
-`.github/workflows/**` change in the full base-to-head delta. The final deploy
-job also requires Nik's approval in the non-bypassable `production`
+protected-main `pull_request_target` run record and the external user's status.
+A repository Actions token can publish the same context name, but GitHub
+records that status under the Actions bot's immutable ID, not `280144521`, so
+the gate rejects it. The `samo-agent` credential is not stored in repository or
+environment secrets and is unavailable to repository workflows. Before
+publishing success, the external reviewer must inspect every
+`.github/workflows/**` change and every changed enforcement script under
+`scripts/check-*.sh` in the full base-to-head delta. `.github/CODEOWNERS` covers
+the entire repository (`* @samo-agent`), including those scripts. The final
+deploy job also requires Nik's approval in the non-bypassable `production`
 environment.
 
-The real GitHub API shape was checked against merged PR #65 head
-`178fe9c27ceb0ddf47e4fe27afdb9f7c961bb93c`: the exact query returned
-successful run `32191117938` with event `pull_request_target`, path
-`.github/workflows/samorev-gate.yml`, and that PR head in `head_sha`.
+The live GitHub API shape was checked while PR #68 was open at head
+`b55b9da15c142ed35ba9541a3b6652f0f3e631ec`: run `32266543608` reported event
+`pull_request_target`, path `.github/workflows/samorev-gate.yml`, that exact PR
+head in both `head_sha` and `pull_requests[0].head.sha`, base ref `main`, and
+repository ID `1187899133` on both sides. This is the shape enforced by the
+release script; synthetic tests fail closed for a non-main base, fork head,
+wrong publisher target, predated verdict, or unprotected/default-branch drift.
 
 `samorev-gate` is fail-closed orchestration, not a second identity boundary. It
 publishes pending immediately, retries transient API/malformed-response failures
@@ -75,19 +87,20 @@ The exporter writes only RSA-encrypted ciphertext to a transient table in the
 private D1 database; no public Actions artifact is created. Stored-value
 verification uses a workflow-dispatch run pinned to the exact protected `main`
 tip. GitHub records that immutable run SHA before the production approval wait,
-and the workflow re-resolves `main` before and after approval. Immediately before verification,
-production is temporarily widened to
-`config/production-environment-migration.json`; an exit trap restores the
-default `v*`-only policy, and `scripts/check-production-environment.sh default`
-fails loud if that widening lingers. A protected-main scheduled workflow runs
-that check approximately every five minutes on GitHub's best-effort scheduler
-during the bootstrap window. It is expected red
-only while a migration switch is open or the production verification run is
-waiting; the runbook requires an explicit green dispatch after closing both
-switches and restoring production, which is the authoritative window-cleanup
-signal. It is not evidence that the bootstrap workflow or environment has been
-removed; #67 verifies that separate teardown. The D1 transfer table remains as a
-durable consumed-once marker until repository credential copies are gone.
+and the workflow re-resolves `main` before and after approval. Immediately
+before verification, production is temporarily widened to
+`config/production-environment-migration.json`; an exit trap attempts immediate
+restoration of the default `v*`-only policy. The independent scheduled guard
+checks the migration policy while `CREDENTIAL_VERIFY_OPEN=true`, so real drift
+does not disappear into an expected red result. Once the switch closes, the
+same guard checks the default policy and emits a distinct CRITICAL failure if
+widening remains after a killed shell or runner. The runbook then explicitly
+reapplies default and requires a green manual dispatch; the trap is not treated
+as durable recovery. The switch-residue job remains red while either switch is
+open. A green cleanup run is not evidence that the bootstrap workflow or
+environment has been removed; #67 verifies that separate teardown. The D1
+transfer table remains as a durable consumed-once marker until repository
+credential copies are gone.
 
 ## Artifact cleanup recovery
 

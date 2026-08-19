@@ -10,6 +10,7 @@ root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && 
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 policy="$root/config/credential-migration-environment.json"
 environment=credential-migration
+created_environment=false
 
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
@@ -24,6 +25,7 @@ if live_environment="$(gh api "repos/$repository/environments/$environment" 2>"$
     live='[]'
   fi
 elif grep -Eq 'HTTP 404([^0-9]|$)' "$error_file"; then
+  created_environment=true
   live='[]'
 else
   echo "unable to inspect credential-migration environment before apply:" >&2
@@ -52,6 +54,10 @@ if ! post_apply_environment="$(gh api "repos/$repository/environments/$environme
   echo "unable to re-read credential-migration environment after apply:" >&2
   sed 's/^/  /' "$error_file" >&2
   exit 3
+fi
+if [[ "$created_environment" == true ]]; then
+  echo 'credential-migration was newly created; verify admin bypass is disabled in Settings -> Environments, then re-run this command and its checker before opening any switch' >&2
+  exit 1
 fi
 if [[ "$(jq -r .can_admins_bypass <<<"$post_apply_environment")" != false ]]; then
   echo 'disable "Allow administrators to bypass configured protection rules" for environment credential-migration in Settings -> Environments, then re-run' >&2

@@ -2,15 +2,28 @@
 
 This bootstrap moves the existing Cloudflare repository secrets into the
 protected `production` environment. Plaintext exists only inside the approved
-export job and the operator's private session. The job encrypts it with the
-reviewed RSA-4096 public key and writes only ciphertext to a transient table in
-the private production D1 database. It never publishes an Actions artifact,
-log value, output, or environment value.
+export job and a dedicated child Bash process on the operator host. The job
+encrypts it with the reviewed RSA-4096 public key and writes only ciphertext to
+a transient table in the private production D1 database. It never publishes an
+Actions artifact, log value, output, or environment value.
 
 The operator-held fallback token is restricted to D1, so it can retrieve and
 delete the ciphertext but cannot deploy Workers or replace the production
 token. Rotate the exported Worker-capable token through a dashboard-authorized
 session after service restoration.
+
+Start a disposable child shell with `bash --noprofile --norc` and run every
+code block below only inside that child shell. Do not paste a block containing
+`set -euo pipefail`, `${VAR:?}`, or `exit` directly into the parent interactive
+shell. If a step aborts after decryption, immediately `unset plaintext` and
+shred the exact run directory before retrying; if step 0 aborts before the
+encrypted-key fingerprint is verified, shred the plaintext private key before
+retrying. The parent terminal remains available for that cleanup.
+
+The migration gate tests parse the executable `run` blocks from the workflow
+and execute them with wrong dispatcher IDs, refs, attempts, switches, main
+SHAs, approvers, and triggering actors. Each violation must exit nonzero; source
+text matching is not the authorization proof.
 
 0. Set the private key directory containing the already provisioned reviewed
    migration key. The directory must be on tmpfs or a verified encrypted
@@ -68,8 +81,9 @@ session after service restoration.
    environment and is required before export. Do not widen production yet.
    Both apply scripts refuse to mutate an existing environment while that
    bypass is enabled. On first creation the apply command intentionally ends
-   non-zero through its trailing checker until Nik disables bypass and reruns
-   it; never treat the initial PUT as a ready environment.
+   non-zero immediately after the PUT, even if the API currently reports bypass
+   disabled. Nik must verify the UI setting, rerun the apply command, and pass
+   the checker before opening a switch; never treat the initial PUT as ready.
 
    ```bash
    bash scripts/check-production-environment.sh default
@@ -265,11 +279,13 @@ session after service restoration.
    ```
 
    A best-effort scheduled guard also runs approximately every five minutes on
-   GitHub's scheduler. Independent jobs check the default production policy and
-   that both migration switches resolve empty from protected `main`, so switch
-   residue is still reported while production widening is expected red. The
-   guard is expected to be red during an open export switch or the legitimate
-   production approval wait.
+   GitHub's scheduler. Its production-policy job checks the migration policy
+   while `CREDENTIAL_VERIFY_OPEN=true` and the default policy after that switch
+   closes; therefore policy drift is never an expected result. Its separate
+   switch-residue job is expected red during an open export switch or the
+   legitimate production approval wait. After the switch closes, lingering
+   widening emits a distinct CRITICAL default-policy failure even if the
+   operator shell or runner was killed before its exit trap ran.
    After cleanup, explicitly dispatch that guard and require it to turn green;
    a red result after the verify run is no longer waiting is lingering
    widening. The explicit post-cleanup dispatch, not schedule timing, is
