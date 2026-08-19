@@ -14,16 +14,26 @@ function collapseSqlWhitespace(sql: string, stripComments = true): string {
       }
       continue;
     }
-    if (stripComments && char === "-" && sql[index + 1] === "-") {
+    if (char === "-" && sql[index + 1] === "-") {
+      const commentStart = index;
       index += 2;
       while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") index += 1;
+      if (!stripComments) {
+        if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
+        result += sql.slice(commentStart, index);
+      }
       pendingSpace = true;
       continue;
     }
-    if (stripComments && char === "/" && sql[index + 1] === "*") {
+    if (char === "/" && sql[index + 1] === "*") {
+      const commentStart = index;
       index += 2;
       while (index < sql.length && !(sql[index] === "*" && sql[index + 1] === "/")) index += 1;
       if (index < sql.length) index += 1;
+      if (!stripComments) {
+        if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
+        result += sql.slice(commentStart, index + 1);
+      }
       pendingSpace = true;
       continue;
     }
@@ -98,23 +108,51 @@ export function schemasMatch(left: unknown, right: unknown, strict = false): boo
   return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 
-if (import.meta.main) {
-  const [expectedPath, actualPath, label = "schema mismatch", mode] = process.argv.slice(2);
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function readJson(path: string, label: string): Promise<unknown> {
+  let raw: string;
+  try {
+    raw = await Bun.file(path).text();
+  } catch (error) {
+    throw new Error(`could not read ${label} schema: ${formatError(error)}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`invalid ${label} schema JSON: ${formatError(error)}`);
+  }
+}
+
+async function main(args: string[]): Promise<void> {
+  const strict = args.includes("--strict");
+  const positionals = args.filter((argument) => argument !== "--strict");
+  const unknownFlag = positionals.find((argument) => argument.startsWith("--"));
+  if (unknownFlag) throw new Error(`unknown schema comparison mode: ${unknownFlag}`);
+  const [expectedPath, actualPath, label = "schema mismatch", ...extra] = positionals;
   if (!expectedPath || !actualPath) {
     throw new Error(
       "usage: bun scripts/schema-equivalence.ts <expected-json> <actual-json> [label] [--strict]",
     );
   }
-  if (mode && mode !== "--strict") throw new Error(`unknown schema comparison mode: ${mode}`);
-  const expected = JSON.parse(await Bun.file(expectedPath).text());
-  const actual = JSON.parse(await Bun.file(actualPath).text());
-  const strict = mode === "--strict";
+  if (extra.length > 0) throw new Error(`unexpected schema comparison argument: ${extra[0]}`);
+  const expected = await readJson(expectedPath, "expected");
+  const actual = await readJson(actualPath, "actual");
   const normalize = strict ? strictSchema : canonicalSchema;
   if (!schemasMatch(expected, actual, strict)) {
     console.error(label, {
       expected: normalize(expected),
       actual: normalize(actual),
     });
-    process.exit(1);
+    process.exitCode = 1;
   }
+}
+
+if (import.meta.main) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(formatError(error));
+    process.exitCode = 1;
+  });
 }

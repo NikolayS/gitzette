@@ -88,9 +88,14 @@ describe("production migration credential guards", () => {
       expect(script).toMatch(new RegExp(
         `gitzette_require_checked_in_caller[\\s\\\\]*"${escapedName}"`,
       ));
-      const invokedTypeScript = [...script.matchAll(/(?:scripts\/|gitzette_scripts_directory\/)([\w-]+\.ts)/g)]
+      const invokedSiblings = [...script.matchAll(
+        /(?:bun|bash)\s+"?(?:scripts\/|\$(?:\{)?[\w]*scripts?_directory(?:\})?\/)([\w-]+\.(?:ts|sh))/g,
+      )]
         .map((match) => match[1]);
-      for (const sibling of invokedTypeScript) {
+      if (/\b(?:bun|bash)\s+/.test(script)) {
+        expect(invokedSiblings.length, `${name} sibling invocation parser must not be vacuous`).toBeGreaterThan(0);
+      }
+      for (const sibling of invokedSiblings) {
         expect(script, `${name} must declare sibling ${sibling}`).toContain(`"${sibling}"`);
       }
     }
@@ -147,5 +152,22 @@ describe("production migration credential guards", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test("a non-secrets gate rejects stdin before strict Bash mode dereferences BASH_SOURCE", async () => {
+    const child = Bun.spawn(["bash", "-c", "bash < scripts/check-schema.sh"], {
+      cwd: repoRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("check-schema.sh must be executed by path, not through stdin");
+    expect(stderr).not.toContain("unbound variable");
   });
 });

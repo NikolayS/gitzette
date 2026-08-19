@@ -7,8 +7,25 @@ export function weeklyGenerationEnabled(toml: string): boolean {
   return value === "true";
 }
 
-if (import.meta.main) {
-  const [configPath] = process.argv.slice(2);
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function main(args: string[]): Promise<void> {
+  const [configPath] = args;
   if (!configPath) throw new Error("usage: bun scripts/weekly-generation-flag.ts <wrangler.toml>");
-  process.stdout.write(String(weeklyGenerationEnabled(await Bun.file(configPath).text())));
+  let toml: string;
+  try {
+    toml = await Bun.file(configPath).text();
+  } catch (error) {
+    throw new Error(`could not read weekly generation config: ${formatError(error)}`);
+  }
+  process.stdout.write(String(weeklyGenerationEnabled(toml)));
+}
+
+if (import.meta.main) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(formatError(error));
+    process.exitCode = 1;
+  });
 }

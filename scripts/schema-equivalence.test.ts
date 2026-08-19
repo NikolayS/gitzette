@@ -78,6 +78,11 @@ describe("schema equivalence", () => {
       schema("CREATE TABLE jobs(label TEXT DEFAULT 'a,b')"),
       true,
     )).toBe(false);
+    expect(schemasMatch(
+      schema("CREATE TABLE jobs(id TEXT, -- the user's immutable id\n state TEXT)"),
+      schema("CREATE TABLE jobs(id TEXT,-- the user's immutable id\nstate TEXT)"),
+      true,
+    )).toBe(true);
   });
 
   test("CLI pins argv order, labels, strict mode, and unknown modes", async () => {
@@ -100,9 +105,17 @@ describe("schema equivalence", () => {
       const strict = await run(canonicalPath, strictPath, "strict mismatch", "--strict");
       expect(strict.exitCode).toBe(1);
       expect(strict.stderr).toContain("strict mismatch");
+      const strictWithoutLabel = await run(canonicalPath, strictPath, "--strict");
+      expect(strictWithoutLabel.exitCode).toBe(1);
+      expect(strictWithoutLabel.stderr).toContain("schema mismatch");
       const unknown = await run(canonicalPath, strictPath, "label", "--loose");
       expect(unknown.exitCode).toBe(1);
       expect(unknown.stderr).toContain("unknown schema comparison mode: --loose");
+      expect(unknown.stderr).not.toMatch(/^\s+at /m);
+      const missing = await run(join(root, "missing.json"), strictPath);
+      expect(missing.exitCode).toBe(1);
+      expect(missing.stderr).toContain("could not read expected schema:");
+      expect(missing.stderr).not.toMatch(/^\s+at /m);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
