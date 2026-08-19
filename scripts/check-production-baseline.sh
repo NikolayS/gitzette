@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-if [[ -z "${BASH_SOURCE[0]:-}" ]]; then
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
   echo "check-production-baseline.sh must be executed by path, not through stdin" >&2
   exit 1
 fi

@@ -56,6 +56,11 @@ export function workflowWritePermissions(source: string): Set<string> {
   return new Set(effectiveProtectedPermissions(parsed, false, true));
 }
 
+function explicitWorkflowWritePermissions(source: string): Set<string> {
+  const parsed = parseWorkflow(source);
+  return new Set(effectiveProtectedPermissions(parsed, false, false));
+}
+
 function workflowTriggers(source: string): Set<string> {
   const on = parseWorkflow(source).on;
   if (typeof on === "string") return new Set([on]);
@@ -101,6 +106,22 @@ function workflowAt(cwd: string, sha: string, path: string): string | null {
   return runGit(cwd, ["show", `${sha}:${path}`]);
 }
 
+function auditHeadPublishers(cwd: string, headSha: string): void {
+  const output = runGit(cwd, ["ls-tree", "-r", "--name-only", "-z", headSha, "--", ".github/workflows"] ) ?? "";
+  for (const path of output.split("\0").filter((name) => /\.ya?ml$/.test(name))) {
+    const source = workflowAt(cwd, headSha, path);
+    if (source === null) throw new Error(`could not read workflow ${path}`);
+    const writes = [...explicitWorkflowWritePermissions(source)].sort();
+    if (writes.length === 0) continue;
+    const triggers = [...workflowTriggers(source)].sort();
+    const trustedPublisher = path === ".github/workflows/samorev-gate.yml" &&
+      writes.join(",") === "workflow:statuses" && triggers.join(",") === "pull_request_target";
+    if (!trustedPublisher) {
+      throw new Error(`untrusted workflow has protected write authority in ${path}: ${writes.join(", ")}`);
+    }
+  }
+}
+
 function privilegeIsCovered(
   privilege: string,
   count: number,
@@ -114,7 +135,6 @@ function privilegeIsCovered(
 
 export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: string): void {
   const files = workflowFiles(cwd, baseSha, headSha);
-  if (files.length === 0) return;
   for (const path of files) {
     const headSource = workflowAt(cwd, headSha, path);
     if (headSource === null) continue;
@@ -127,7 +147,11 @@ export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: stri
     if (broadened.length > 0) {
       throw new Error(`PR broadens privileged workflow permissions in ${path}: ${broadened.join(", ")}`);
     }
+    if (baseSource !== null && explicitWorkflowWritePermissions(headSource).size > 0 && baseSource !== headSource) {
+      throw new Error(`PR changes the content of privileged workflow ${path}`);
+    }
   }
+  auditHeadPublishers(cwd, headSha);
 }
 
 if (import.meta.main) {

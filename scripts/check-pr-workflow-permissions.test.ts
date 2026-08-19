@@ -61,7 +61,7 @@ describe("base-controlled workflow permission boundary", () => {
       .toThrow("statuses permission");
   });
 
-  test("fails closed only when a changed workflow broadens protected writes", async () => {
+  test("fails closed on privilege broadening and privileged workflow content changes", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "gitzette-workflow-permissions-"));
     directories.push(cwd);
     git(cwd, "init", "-q");
@@ -87,7 +87,7 @@ describe("base-controlled workflow permission boundary", () => {
 
     await Bun.write(join(cwd, ".github/workflows/large.yml"), `${large}# behavior-only change\n`);
     const unchangedPermissions = await commit(cwd, "unchanged privilege");
-    expect(() => checkWorkflowChanges(cwd, privileged, unchangedPermissions)).not.toThrow();
+    expect(() => checkWorkflowChanges(cwd, privileged, unchangedPermissions)).toThrow("changes the content of privileged workflow");
 
     await Bun.write(
       join(cwd, ".github/workflows/large.yml"),

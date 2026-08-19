@@ -4,10 +4,10 @@ Protected `main` requires `typecheck`, `samorev`, and `samorev-gate` on the
 exact pull-request head, applies those checks to administrators, and requires
 every conversation to be resolved. A separate formal GitHub approval is not a
 merge or release gate. The repository owner explicitly chose this zero-formal-
-approval policy: the mandatory human release action is an immutable-ID `v*` tag
-push by Nik, followed by authorization from a different production-environment
-reviewer. The checked-in approval validator rejects the release actor even if
-that actor is also configured as an environment reviewer.
+approval policy: the release runner (`samo-agent`, immutable ID `280144521`)
+pushes the `v*` tag, and Nik performs the mandatory human authorization at the
+protected production environment. The checked-in approval validator permits
+only Nik and rejects the release actor.
 
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
@@ -18,23 +18,23 @@ creator: any repository workflow with `statuses: write` runs as the shared
 Actions app. The protected-main publisher itself validates the external
 `samo-agent` status's immutable user ID and freshness before publishing its
 result, and deployment revalidates the latest statuses. Before polling, the
-base-controlled publisher parses changed workflows as YAML and rejects any
-merge-base-to-head broadening of `statuses: write`, `checks: write`, or
-`write-all` across trigger, workflow, and job scope. Its tests cover
+base-controlled publisher fetches the exact PR ref without executing it, parses
+every head workflow as YAML, and permits protected write authority only in the
+base-controlled `pull_request_target` publisher. It also rejects any content
+change to an already privileged workflow and any merge-base-to-head broadening
+of `statuses: write`, `checks: write`, or `write-all` across trigger, workflow,
+and job scope. Its tests cover
 aliases/tags/folded values, large files, deletions, empty workflow diffs,
-head-controlled trigger additions, unchanged existing privilege, job-bound
+head-controlled trigger additions, existing privileged content changes, job-bound
 privilege relocation, and missing permission blocks. Missing workflow and job
 permissions grant nothing on the base side but are conservatively treated as
 protected writes on the head side. This prevents an implicit base default from
 authorizing an explicit PR write and does not depend on the repository default
 remaining read-only. A repository-
 level test pins `samorev-gate.yml` as the only workflow with `statuses: write`
-or `checks: write`. This detects and fails permission/trigger broadening in the
-protected-main publisher; because commit-status context names are overwriteable,
-it is defense in depth rather than a standalone identity anchor. The gate still trusts
-repository administrator credentials, installed Apps, and the identity-checked
-samorev verdict to review behavior changes that retain an existing permission
-set.
+or `checks: write`; the runtime audit independently enforces that same absolute
+allowlist on every PR head. Because the privileged workflow cannot be changed by
+a normal PR, a new step cannot inherit grandfathered write authority.
 
 Classic branch protection enforces `samorev` by context name only because the
 external user status has no bindable GitHub App ID. The immutable creator check
@@ -74,9 +74,10 @@ evidence but is deliberately not described as an unforgeable identity. The
 or the separate `samo-agent` user to authorize `v*` tags plus the temporary
 `main` credential-scope bootstrap, and forbids the workflow actor from approving
 its own deployment. Normal release tags must be pushed by immutable user ID
-`1345402` (Nik) and are authorized by `samo-agent`. Both GitHub's
-`prevent_self_review` rule and the checked-in approval validator reject the tag
-pusher as approver. The tag workflow first revalidates
+`280144521` (`samo-agent`) and are authorized only by immutable owner ID
+`1345402` (Nik). This makes the production authorizer independent from the
+samorev verdict publisher. Both GitHub's `prevent_self_review` rule and the
+checked-in approval validator reject the tag pusher as approver. The tag workflow first revalidates
 the exact merged PR head,
 immutable `samo-agent` verdict creator ID, and exact-head checks; only then can
 the environment expose Cloudflare credentials. Those credentials must exist
@@ -84,8 +85,8 @@ only as environment secrets. Keeping either credential as a repository secret
 would let a forged merge use a new `push` workflow to bypass the environment,
 so `scripts/check-production-environment.sh` fails that configuration.
 
-This environment review is an automated release authorization by the external
-review identity, not a formal GitHub pull-request approval. Run it only after a
+This environment review is a human owner release authorization, not a formal
+GitHub pull-request approval. Run it only after a
 terminal-clean exact-head review and readiness check; same-repository Actions
 cannot approve their own environment deployment or read its secrets first.
 

@@ -37,7 +37,7 @@ describe("deploy review revalidation", () => {
     expect(reviewGate).toContain("checks: read");
     expect(reviewGate).toContain("RELEASE_SENDER_ID: ${{ github.event.sender.id }}");
     expect(reviewGate).not.toContain("if: github.event.sender.id");
-    expect(reviewScript).toContain('[[ "$RELEASE_SENDER_ID" != 1345402 ]]');
+    expect(reviewScript).toContain('[[ "$RELEASE_SENDER_ID" != 280144521 ]]');
     expect(reviewGate).toContain("pull-requests: read");
     expect(reviewGate).toContain("statuses: read");
     expect(reviewGate).not.toContain("/reviews");

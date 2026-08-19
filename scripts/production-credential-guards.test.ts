@@ -188,21 +188,32 @@ describe("production migration credential guards", () => {
     }
   });
 
-  test("a non-secrets gate rejects stdin before strict Bash mode dereferences BASH_SOURCE", async () => {
-    const child = Bun.spawn(["bash", "-c", "bash < scripts/check-schema.sh"], {
-      cwd: repoRoot,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
-    expect(exitCode).toBe(1);
-    expect(stdout).toBe("");
-    expect(stderr).toContain("check-schema.sh must be executed by path, not through stdin");
-    expect(stderr).not.toContain("unbound variable");
+  test("Wrangler-family gates reject stdin before resolving a sibling helper", async () => {
+    for (const name of [
+      "bootstrap-production-db.sh",
+      "check-production-applied-schema.sh",
+      "check-production-baseline.sh",
+      "check-production-drift.sh",
+      "check-production-schema.sh",
+      "check-schema.sh",
+      "check-weekly-profiles.sh",
+      "e2e.sh",
+    ]) {
+      const child = Bun.spawn(["bash", "-c", `bash < scripts/${name}`], {
+        cwd: repoRoot,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(exitCode, name).toBe(1);
+      expect(stdout, name).toBe("");
+      expect(stderr, name).toContain(`${name} must be executed by path, not through stdin`);
+      expect(stderr, name).not.toContain("require-wrangler.sh");
+    }
   });
 
   test("privileged policy and approval entrypoints reject sourcing and stdin", async () => {

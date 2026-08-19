@@ -12,8 +12,8 @@ root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && 
 : "${GITHUB_SHA:?GITHUB_SHA is required}"
 : "${GITHUB_REF_TYPE:?GITHUB_REF_TYPE is required}"
 : "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required}"
-if [[ "$RELEASE_SENDER_ID" != 1345402 ]]; then
-  echo "release tag must be pushed by immutable owner ID 1345402" >&2
+if [[ "$RELEASE_SENDER_ID" != 280144521 ]]; then
+  echo "release tag must be pushed by immutable release-runner ID 280144521" >&2
   exit 1
 fi
 if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v[^/]*$ ]]; then

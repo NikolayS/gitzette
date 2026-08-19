@@ -4,10 +4,10 @@ import { productionDeploymentApproval } from "./approve-production-deployment";
 const reviewedSha = "reviewed";
 const releaseSha = "release";
 const base = {
-  current_user_id: 280144521,
+  current_user_id: 1345402,
   local_sha: releaseSha,
   main_sha: releaseSha,
-  run: { event: "push", path: ".github/workflows/deploy.yml", head_branch: "v0.1.0", head_sha: releaseSha, actor: { id: 1345402 } },
+  run: { event: "push", path: ".github/workflows/deploy.yml", head_branch: "v0.1.0", head_sha: releaseSha, actor: { id: 280144521 } },
   pulls: [[{ base: { ref: "main" }, head: { sha: reviewedSha }, merged_at: "2026-08-19T00:00:00Z", merge_commit_sha: releaseSha }]],
   check_run_pages: [{ check_runs: [
     { name: "typecheck", conclusion: "success", app: { id: 15368 } },
@@ -51,7 +51,7 @@ describe("production deployment approval", () => {
   });
 
   test("rejects approval by the release actor", () => {
-    expect(() => productionDeploymentApproval({ ...base, current_user_id: 1345402 }))
+    expect(() => productionDeploymentApproval({ ...base, run: { ...base.run, actor: { id: 1345402 } } }))
       .toThrow("release actor cannot approve their own production deployment");
   });
 

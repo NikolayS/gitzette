@@ -32,8 +32,10 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          git fetch --no-tags origin "$HEAD_SHA"
+          git fetch --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/gitzette/pr-head"
+          test "$(git rev-parse refs/gitzette/pr-head)" = "$HEAD_SHA"
           bun scripts/check-pr-workflow-permissions.ts "$BASE_SHA" "$HEAD_SHA"
       - name: Require the identity-checked exact-head verdict
         id: verdict
