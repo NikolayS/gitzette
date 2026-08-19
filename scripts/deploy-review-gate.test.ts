@@ -45,4 +45,18 @@ describe("deploy review revalidation", () => {
     expect(deploy).not.toContain("pull-requests: read");
     expect(deploy).not.toContain("statuses: read");
   });
+
+  test("keeps credential migration behind the production identity boundary", async () => {
+    const workflow = await Bun.file(".github/workflows/migrate-production-credentials.yml").text();
+    expect(workflow).toContain("  workflow_dispatch:");
+    expect(workflow).not.toContain("pull_request:");
+    expect(workflow).not.toContain("pull_request_target:");
+    expect(workflow).not.toContain("push:");
+    expect(workflow).toContain("    environment: production");
+    expect(workflow).toContain("  contents: read");
+    expect(workflow).not.toContain("actions/checkout");
+    expect(workflow).toContain("rsa_padding_mode:oaep");
+    expect(workflow).toContain("rsa_oaep_md:sha256");
+    expect(workflow).toContain("encrypted_credentials=%s");
+  });
 });

@@ -7,7 +7,8 @@ if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
-expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$root/config/production-environment.json")"
+policy="$root/config/production-environment.json"
+expected="$(jq -Sc 'del(.environment_secret_names,.forbidden_repository_secret_names) | .reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 if ! environment="$(gh api "repos/$repository/environments/production" 2>/dev/null)"; then
   echo "production environment is missing; run scripts/apply-production-environment.sh using config/production-environment.json" >&2
   exit 1
@@ -28,4 +29,20 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-echo "Production environment OK: two-person approval and v* tag restriction are active"
+environment_secret_names="$(gh api --paginate --slurp "repos/$repository/environments/production/secrets?per_page=100" | jq -c 'map(.secrets) | add | map(.name) | sort')"
+required_environment_secret_names="$(jq -c '.environment_secret_names | sort' "$policy")"
+if [[ "$environment_secret_names" != "$required_environment_secret_names" ]]; then
+  echo "production environment secrets differ from config/production-environment.json" >&2
+  echo "expected: $required_environment_secret_names" >&2
+  echo "actual:   $environment_secret_names" >&2
+  exit 1
+fi
+
+repository_secret_names="$(gh api --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add | map(.name)')"
+forbidden_repository_secret_names="$(jq -c '.forbidden_repository_secret_names' "$policy")"
+if jq -e --argjson forbidden "$forbidden_repository_secret_names" 'any(.[]; . as $name | any($forbidden[]; . == $name))' <<<"$repository_secret_names" >/dev/null; then
+  echo "production credentials must not be repository-scoped Actions secrets" >&2
+  exit 1
+fi
+
+echo "Production environment OK: samo-agent release approval, v* tag restriction, and environment-only credentials are active"

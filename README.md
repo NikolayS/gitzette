@@ -106,7 +106,10 @@ admins; neither a pending verdict nor a rewritten proxy check is sufficient.
 Release tags are also fail closed: the deploy workflow accepts only a tag on
 the current `main` merge commit and re-verifies the associated PR head's two
 app-bound checks plus the final reviewer-published samorev status before touching
-production.
+production. The `production` environment then requires release authorization
+from the separate `samo-agent` identity. Cloudflare deployment credentials are
+allowed only at environment scope; repository-scoped copies would let a forged
+merge bypass that non-overwritable boundary.
 
 If production canaries fail, disable `gitzette-runner.service` first. Existing
 immutable editions remain available. Deploy the last verified Worker tag if the

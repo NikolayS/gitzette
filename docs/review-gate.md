@@ -55,6 +55,30 @@ that job without requesting write permissions. The independent `samo-agent`
 full-delta verdict is therefore the substantive review boundary; `typecheck`
 remains a mandatory exact-head execution signal, and deploy revalidates both.
 
+Classic branch protection cannot make the zero-approval merge itself
+non-overwritable: every same-repository Actions workflow shares app ID `15368`,
+and commit-status context names are last-writer-wins. Production release is the
+non-overwritable enforcement boundary. The `production` environment has exactly
+one required reviewer, the separate `samo-agent` user, and only `v*` tags may
+request it. The tag workflow first revalidates the exact merged PR head,
+immutable `samo-agent` verdict creator ID, and exact-head checks; only then can
+the environment expose Cloudflare credentials. Those credentials must exist
+only as environment secrets. Keeping either credential as a repository secret
+would let a forged merge use a new `push` workflow to bypass the environment,
+so `scripts/check-production-environment.sh` fails that configuration.
+
+This environment review is an automated release authorization by the external
+review identity, not a formal GitHub pull-request approval. Run it only after a
+terminal-clean exact-head review and readiness check; same-repository Actions
+cannot approve their own environment deployment or read its secrets first.
+
+The initial scope migration uses
+`.github/workflows/migrate-production-credentials.yml` once, under that same
+environment authorization. It emits only an RSA-OAEP-SHA256 ciphertext for an
+operator-held private key. After setting both environment secrets and deleting
+the repository copies, delete the bootstrap workflow in the next reviewed PR;
+leaving a credential-export path around is needless attack surface.
+
 Broadening a workflow's protected write set requires a three-PR recovery: first
 land a narrowly scoped, exact-head-reviewed exception in the base parser; then
 land the permission change under that protected-main exception; finally remove
@@ -66,7 +90,7 @@ cache scope with a read-only token, no repository secrets, and no persisted Git
 credential. The `pull_request_target` publisher executes only protected-main
 code. Deployment credentials are available only to the protected `production`
 environment; tag-triggered deploys remain subject to that environment's
-configured protections.
+separate-identity protection. Never configure them as repository secrets.
 
 ## Artifact cleanup recovery
 
