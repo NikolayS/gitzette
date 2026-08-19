@@ -64,18 +64,29 @@ describe("one-shot credential migration boundary", () => {
     const authorizeRun = parsed.jobs["authorize-export"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
     const revalidateRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Revalidate"))?.run;
     const exportRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Export only"))?.run;
+    const verifyApprovalRun = parsed.jobs["verify-production-credentials"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
+    const verifyCredentialsRun = parsed.jobs["verify-production-credentials"].steps.find(({ name }) => name?.startsWith("Verify stored"))?.run;
     expect(authorizeRun).toBeDefined();
     expect(revalidateRun).toBeDefined();
     expect(exportRun).toBeDefined();
+    expect(verifyApprovalRun).toBeDefined();
+    expect(verifyCredentialsRun).toBeDefined();
     const gateRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-gate-"));
     const gateBin = join(gateRoot, "bin");
     await mkdir(gateBin);
     const curl = join(gateBin, "curl");
     await Bun.write(curl, `#!/usr/bin/env bash
 set -euo pipefail
-if [[ -n "\${FAKE_CURL_RECORD:-}" ]]; then printf '%s\\n' "$@" >"$FAKE_CURL_RECORD.args"; cat >"$FAKE_CURL_RECORD.stdin"; else cat >/dev/null; fi
+arguments="$*"
+if [[ -n "\${FAKE_CURL_RECORD:-}" ]]; then printf '%s\\n' "$@" >>"$FAKE_CURL_RECORD.args"; cat >>"$FAKE_CURL_RECORD.stdin"; else cat >/dev/null; fi
 [[ "\${FAKE_CURL_FAIL:-false}" != true ]] || exit 22
-printf '{"id":%s}\\n' "\${FAKE_ACTOR_ID:-280144521}"
+if [[ "$arguments" == *'/approvals'* ]]; then
+  printf '[{"state":"approved","user":{"id":%s},"environments":[{"name":"%s"}]}]\\n' "\${FAKE_APPROVER_ID:-1345402}" "\${FAKE_APPROVAL_ENV:-credential-migration}"
+elif [[ "$arguments" == *'api.github.com/users/'* ]]; then
+  printf '{"id":%s}\\n' "\${FAKE_ACTOR_ID:-280144521}"
+else
+  printf '{"success":%s}\\n' "\${FAKE_CF_SUCCESS:-true}"
+fi
 `);
     await Bun.spawn(["chmod", "+x", curl]).exited;
     const execute = async (run: string | undefined, overrides: Record<string, string | undefined> = {}): Promise<number> => {
@@ -89,6 +100,8 @@ printf '{"id":%s}\\n' "\${FAKE_ACTOR_ID:-280144521}"
         OPERATION: "export",
         MIGRATION_OPEN: "true",
         GH_TOKEN: "fake",
+        GITHUB_REPOSITORY: "example/gitzette",
+        GITHUB_RUN_ID: "77",
       };
       for (const [name, value] of Object.entries(overrides)) {
         if (value === undefined) delete env[name]; else env[name] = value;
@@ -107,15 +120,33 @@ printf '{"id":%s}\\n' "\${FAKE_ACTOR_ID:-280144521}"
     }
     expect(await execute(authorizeRun, { OPERATION: "attacker" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_ACTOR_ID: "1" })).toBe(1);
+    expect(await execute(revalidateRun, { FAKE_APPROVER_ID: "1" })).toBe(1);
+    expect(await execute(revalidateRun, { FAKE_APPROVAL_ENV: "other" })).toBe(1);
     const curlRecord = join(gateRoot, "curl-record");
     expect(await execute(revalidateRun, { FAKE_CURL_RECORD: curlRecord })).toBe(0);
     const curlArgs = await Bun.file(`${curlRecord}.args`).text();
     const curlStdin = await Bun.file(`${curlRecord}.stdin`).text();
     expect(curlArgs).toContain("--config\n-\n");
     expect(curlArgs).toContain("https://api.github.com/users/samo-agent");
+    expect(curlArgs).toContain("https://api.github.com/repos/example/gitzette/actions/runs/77/approvals");
     expect(curlArgs).not.toContain("fake");
-    expect(curlStdin).toBe('header = "Authorization: Bearer fake"\n');
+    expect(curlStdin.match(/header = "Authorization: Bearer fake"/g)?.length).toBe(2);
     expect(await execute(revalidateRun, { FAKE_CURL_FAIL: "true" })).not.toBe(0);
+    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production" })).toBe(0);
+    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "other" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { FAKE_APPROVAL_ENV: "production", FAKE_APPROVER_ID: "1" })).toBe(1);
+    expect(await execute(verifyCredentialsRun, {
+      CLOUDFLARE_ACCOUNT_ID: "exact-account", CLOUDFLARE_API_TOKEN: "exact-token",
+    })).toBe(0);
+    expect(await execute(verifyCredentialsRun, {
+      CLOUDFLARE_ACCOUNT_ID: "exact-account", CLOUDFLARE_API_TOKEN: "exact-token", FAKE_CF_SUCCESS: "false",
+    })).not.toBe(0);
+    expect(await execute(verifyCredentialsRun, {
+      CLOUDFLARE_ACCOUNT_ID: "", CLOUDFLARE_API_TOKEN: "exact-token",
+    })).toBe(1);
+    expect(await execute(verifyCredentialsRun, {
+      CLOUDFLARE_ACCOUNT_ID: "exact-account", CLOUDFLARE_API_TOKEN: undefined,
+    })).toBe(1);
 
     const throwaway = generateKeyPairSync("rsa", { modulusLength: 4096 });
     const throwawayPublicPem = throwaway.publicKey.export({ type: "spki", format: "pem" }).toString();

@@ -69,6 +69,7 @@ destroying the sole currently deploy-capable credential before that handoff.
    ```bash
    openssl pkey -in /home/tars/.secrets/gitzette-production-migration-private.pem \
      -pubout -outform DER | sha256sum
+   bash scripts/check-credential-migration-environment.sh
    ```
 
 4. Download the exact run's one-day artifact, decrypt locally, and immediately
@@ -96,19 +97,17 @@ destroying the sole currently deploy-capable credential before that handoff.
    Cloudflare account, but do not delete the repository copies yet.
 
    ```bash
-   set -o pipefail
-   jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext" |
-     gh secret set CLOUDFLARE_ACCOUNT_ID --env production
-   jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext" |
-     gh secret set CLOUDFLARE_API_TOKEN --env production
+   set -euo pipefail
+   account_id="$(jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
+   api_token="$(jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
+   [[ -n "$account_id" && -n "$api_token" ]]
+   printf '%s' "$account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID --env production
+   printf '%s' "$api_token" | gh secret set CLOUDFLARE_API_TOKEN --env production
    gh secret list --env production
-   account_id="$(jq -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
-   api_token="$(jq -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
    curl --fail --silent --show-error --config - \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/workers/services/gitzette" \
      <<<"header = \"Authorization: Bearer $api_token\"" |
      jq -e '.success == true' >/dev/null
-   unset account_id api_token
    ```
 
    Before deletion, enumerate every `secrets.CLOUDFLARE_*` reference under
@@ -126,9 +125,18 @@ destroying the sole currently deploy-capable credential before that handoff.
    are the point of no return.
 
    ```bash
-   jq -n '{wait_timer:0,can_admins_bypass:false,prevent_self_review:true,
-     reviewers:[{type:"User",id:1345402}],
-     deployment_branch_policy:{protected_branches:false,custom_branch_policies:true}}' |
+   cleanup_production_policy() {
+     if [[ -n "${main_policy_id:-}" ]]; then
+       gh api --method DELETE \
+         "repos/NikolayS/gitzette/environments/production/deployment-branch-policies/$main_policy_id" || true
+     fi
+     bash scripts/apply-production-environment.sh
+     bash scripts/check-production-environment.sh
+   }
+   trap cleanup_production_policy EXIT
+   jq '. | {wait_timer,prevent_self_review,
+     reviewers:[.reviewers[]|{type,id}],deployment_branch_policy} |
+     . + {can_admins_bypass:false}' config/production-environment.json |
      gh api --method PUT repos/NikolayS/gitzette/environments/production --input -
    main_policy_id="$(gh api --method POST \
      repos/NikolayS/gitzette/environments/production/deployment-branch-policies \
@@ -137,11 +145,11 @@ destroying the sole currently deploy-capable credential before that handoff.
      gh workflow run migrate-production-credentials.yml --ref main -f operation=verify
    # Nik verifies the exact main SHA and approves the pending production deployment.
    gh run watch VERIFY_RUN_ID --exit-status
-   gh api --method DELETE \
-     "repos/NikolayS/gitzette/environments/production/deployment-branch-policies/$main_policy_id"
+   cleanup_production_policy
+   trap - EXIT
    gh secret delete CLOUDFLARE_ACCOUNT_ID
    gh secret delete CLOUDFLARE_API_TOKEN
-   unset plaintext
+   unset plaintext account_id api_token
    ```
 
 7. Delete the switch and local migration material, then destroy the private key
@@ -161,8 +169,9 @@ destroying the sole currently deploy-capable credential before that handoff.
 
 8. Through the exact-head review gate, delete the migration workflow, its
    temporary environment config/scripts, and the live `credential-migration`
-   environment. The normal `production` environment remains restricted to
-   release tags throughout this procedure.
+   environment. Step 6 temporarily admits `main` only for stored-secret
+   verification and unconditionally restores the reviewed production policy on
+   success, failure, or shell exit.
    The temporary apply/check scripts intentionally duplicate the established
    production environment reconciler only for this bounded bootstrap; #67
    deletes the duplicate in the same cycle, before normal development resumes.
