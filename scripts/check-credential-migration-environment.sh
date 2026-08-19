@@ -12,7 +12,11 @@ policy="$root/config/credential-migration-environment.json"
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
 if ! environment="$(gh api "repos/$repository/environments/credential-migration" 2>"$error_file")"; then
-  echo "unable to read credential-migration environment; apply only after resolving this API error:" >&2
+  if grep -Eq 'HTTP 404([^0-9]|$)' "$error_file"; then
+    echo "credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh" >&2
+  else
+    echo "unable to read credential-migration environment; apply only after resolving this API error:" >&2
+  fi
   sed 's/^/  /' "$error_file" >&2
   exit 1
 fi

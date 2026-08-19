@@ -17,16 +17,17 @@ describe("one-shot credential migration boundary", () => {
       on: Record<string, unknown>;
       concurrency: { group: string; "cancel-in-progress": boolean };
       jobs: Record<string, {
-        needs?: string;
+        needs?: string | string[];
+        if?: string;
         environment?: string;
         permissions?: Record<string, string>;
         steps: Array<{ name?: string; run?: string }>;
       }>;
     };
     expect(Object.keys(parsed.on)).toEqual(["workflow_dispatch"]);
+    expect(workflow).toContain("run-name: 'credential migration: ${{ inputs.operation }}'");
     expect(parsed.concurrency).toEqual({ group: "credential-migration", "cancel-in-progress": false });
     expect(workflow).toContain('[[ "$DISPATCHER_ID" != "280144521" ]]');
-    expect(workflow).toContain('[[ "$TRIGGERING_ACTOR" != "samo-agent" ]]');
     expect(workflow).toContain('"$DISPATCH_REF" != "refs/heads/main"');
     expect(workflow).toContain('"$DISPATCH_REF" != "refs/tags/credential-migration-verify"');
     expect(workflow).toContain('[[ "$RUN_ATTEMPT" != "1" ]]');
@@ -45,18 +46,28 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("rsa_mgf1_md:sha256");
     expect(workflow).toContain("credential_migration_transfer");
     expect(workflow).toContain("4a3624d7-7de8-46d5-91f5-7ee79856ccaa");
-    expect(workflow).not.toContain("actions/upload-artifact");
-    expect(workflow).not.toContain("retention-days:");
-    expect(workflow).not.toContain("encrypted_credentials=");
-    expect(workflow).not.toContain("set -x");
-    expect(workflow).not.toContain("GITHUB_OUTPUT");
-    expect(workflow).not.toContain("GITHUB_ENV");
-    expect(workflow).not.toContain("credentials.json");
+    const forbiddenDisclosureChannels = [
+      "actions/upload-artifact", "actions/cache", "retention-days:", "encrypted_credentials=",
+      "set -x", "GITHUB_OUTPUT", "GITHUB_ENV", "GITHUB_STEP_SUMMARY", "::notice", "::warning",
+      "credentials.json",
+    ];
+    for (const channel of forbiddenDisclosureChannels) expect(workflow).not.toContain(channel);
     expect(workflow).toContain("permissions: {}");
     expect(parsed.jobs["export-encrypted-credentials"].needs).toBe("authorize-export");
     expect(parsed.jobs["export-encrypted-credentials"].environment).toBe("credential-migration");
     expect(parsed.jobs["verify-production-credentials"].needs).toBe("authorize-export");
     expect(parsed.jobs["verify-production-credentials"].environment).toBe("production");
+    expect(parsed.jobs["authorize-export"].permissions).toEqual({ actions: "read", contents: "read" });
+    expect(workflow).toContain("only the earliest credential export run may continue");
+    expect(workflow).toContain("display_title == \"credential migration: export\"");
+    expect(workflow).toContain("  remove-verification-tag:");
+    expect(workflow).toContain("always() && inputs.operation == 'verify'");
+    expect(workflow).toContain("git/refs/tags/credential-migration-verify");
+    expect(parsed.jobs["remove-verification-tag"].needs).toEqual([
+      "authorize-export", "verify-production-credentials",
+    ]);
+    expect(parsed.jobs["remove-verification-tag"].if).toContain("always()");
+    expect(parsed.jobs["remove-verification-tag"].permissions).toEqual({ contents: "write" });
     for (const name of ["export-encrypted-credentials", "verify-production-credentials"]) {
       const jobRun = parsed.jobs[name].steps.map(({ run }) => run ?? "").join("\n");
       expect(jobRun).toContain('triggering_actor_id="$(curl');
@@ -85,7 +96,7 @@ describe("one-shot credential migration boundary", () => {
     ]);
     const applyProduction = await Bun.file("scripts/apply-production-environment.sh").text();
     const checkProduction = await Bun.file("scripts/check-production-environment.sh").text();
-    expect(applyProduction).toContain("can_admins_bypass");
+    expect(applyProduction).not.toContain("{wait_timer,can_admins_bypass");
     expect(applyProduction).toContain('check-production-environment.sh" "$mode"');
     expect(checkProduction).toContain("can_admins_bypass: $environment.can_admins_bypass");
     expect(checkProduction).toContain("admitted refs: $policy_names");
@@ -104,6 +115,8 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("set -euo pipefail");
     expect(migrationDoc).toContain("umask 077");
     expect(migrationDoc).toContain("-v2 aes-256-cbc -v2prf hmacWithSHA256 -iter 600000");
+    expect(migrationDoc).toContain("-----BEGIN ENCRYPTED PRIVATE KEY-----");
+    expect(migrationDoc).toContain("-passin pass:");
     expect(migrationDoc.indexOf('[[ "$actual_fingerprint" != "$expected_fingerprint" ]]')).toBeLessThan(
       migrationDoc.indexOf('shred -u "$private_key"'),
     );
@@ -131,6 +144,13 @@ describe("one-shot credential migration boundary", () => {
     );
     expect(migrationDoc).toContain("trap cleanup_verification_policy EXIT");
     expect(migrationDoc).toContain("trap - EXIT");
+    expect(migrationDoc).toContain("first\n   recovery action");
+
+    const policyGuard = await Bun.file(".github/workflows/credential-migration-policy-guard.yml").text();
+    const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as { on: { schedule: Array<{ cron: string }> } };
+    expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
+    expect(policyGuard).toContain("bash scripts/check-production-environment.sh default");
+    expect(policyGuard).toContain("github.repository == 'NikolayS/gitzette'");
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
@@ -168,8 +188,16 @@ if [[ "$arguments" == *'/approvals'* ]]; then
   if [[ "\${FAKE_APPROVAL_EMPTY:-false}" == true ]]; then printf '[]\\n'; else
     printf '[{"state":"%s","user":{"id":%s},"environments":[{"name":"%s"}]}]\\n' "\${FAKE_APPROVAL_STATE:-approved}" "\${FAKE_APPROVER_ID:-1345402}" "\${FAKE_APPROVAL_ENV:-credential-migration}"
   fi
-elif [[ "$arguments" == *'api.github.com/users/'* ]]; then
-  printf '{"id":%s}\\n' "\${FAKE_ACTOR_ID:-280144521}"
+elif [[ "$arguments" == *'/actions/workflows/migrate-production-credentials.yml/runs?event=workflow_dispatch'* ]]; then
+  if [[ "\${FAKE_EARLIER_EXPORT:-false}" == true ]]; then
+    printf '%s\\n' '{"total_count":2,"workflow_runs":[{"id":76,"event":"workflow_dispatch","display_title":"credential migration: export"},{"id":77,"event":"workflow_dispatch","display_title":"credential migration: export"}]}'
+  elif [[ "\${FAKE_INCOMPLETE_RUNS:-false}" == true ]]; then
+    printf '%s\\n' '{"total_count":2,"workflow_runs":[{"id":77,"event":"workflow_dispatch","display_title":"credential migration: export"}]}'
+  else
+    printf '%s\\n' '{"total_count":1,"workflow_runs":[{"id":77,"event":"workflow_dispatch","display_title":"credential migration: export"}]}'
+  fi
+elif [[ "$arguments" == *'/actions/runs/'* ]]; then
+  printf '{"triggering_actor":{"id":%s}}\\n' "\${FAKE_ACTOR_ID:-280144521}"
 elif [[ "$arguments" == *'/commits/main'* ]]; then
   printf '{"sha":"%s"}\\n' "\${FAKE_MAIN_SHA:-exact-sha}"
 else
@@ -182,7 +210,6 @@ fi
         ...process.env,
         PATH: `${gateBin}:${process.env.PATH}`,
         DISPATCHER_ID: "280144521",
-        TRIGGERING_ACTOR: "samo-agent",
         DISPATCH_REF: "refs/heads/main",
         RUN_ATTEMPT: "1",
         OPERATION: "export",
@@ -203,13 +230,15 @@ fi
     for (const run of [authorizeRun, revalidateRun]) {
       expect(await execute(run)).toBe(0);
       expect(await execute(run, { DISPATCHER_ID: "1" })).toBe(1);
-      expect(await execute(run, { TRIGGERING_ACTOR: "attacker" })).toBe(1);
       expect(await execute(run, { DISPATCH_REF: "refs/heads/other" })).toBe(1);
       expect(await execute(run, { RUN_ATTEMPT: "2" })).toBe(1);
     }
     expect(await execute(authorizeRun, { EXPORT_OPEN: undefined })).toBe(1);
     expect(await execute(authorizeRun, { EXPORT_OPEN: "True" })).toBe(1);
     expect(await execute(authorizeRun, { EXPORT_OPEN: "true " })).toBe(1);
+    expect(await execute(authorizeRun, { FAKE_ACTOR_ID: "1" })).toBe(1);
+    expect(await execute(authorizeRun, { FAKE_EARLIER_EXPORT: "true" })).toBe(1);
+    expect(await execute(authorizeRun, { FAKE_INCOMPLETE_RUNS: "true" })).not.toBe(0);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: undefined })).toBe(1);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: "True" })).toBe(1);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: "true " })).toBe(1);
@@ -224,7 +253,7 @@ fi
     const curlArgs = await Bun.file(`${curlRecord}.args`).text();
     const curlStdin = await Bun.file(`${curlRecord}.stdin`).text();
     expect(curlArgs).toContain("--config\n-\n");
-    expect(curlArgs).toContain("https://api.github.com/users/samo-agent");
+    expect(curlArgs).toContain("https://api.github.com/repos/example/gitzette/actions/runs/77");
     expect(curlArgs).toContain("https://api.github.com/repos/example/gitzette/actions/runs/77/approvals");
     expect(curlArgs).not.toContain("fake");
     expect(curlStdin.match(/header = "Authorization: Bearer fake"/g)?.length).toBe(2);
@@ -377,7 +406,7 @@ for argument in "$@"; do
   [[ "$argument" != type=* ]] || type="\${argument#type=}"
 done
 case "$method:$endpoint" in
-  PUT:repos/example/gitzette/environments/production) cat >/dev/null ;;
+  PUT:repos/example/gitzette/environments/production) cat >"$FAKE_STATE.put" ;;
   GET:repos/example/gitzette/environments/production)
     printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
     ;;
@@ -404,6 +433,7 @@ esac
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await run("migration")).toBe(0);
+    expect(JSON.parse(await Bun.file(`${state}.put`).text()).can_admins_bypass).toBeUndefined();
     expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name).sort()).toEqual([
       "credential-migration-verify", "v*",
     ]);
@@ -421,7 +451,10 @@ set -euo pipefail
 endpoint="\${*: -1}"
 case "$endpoint" in
   repos/example/gitzette/environments/credential-migration)
-    [[ "\${FAKE_MODE:-ok}" != missing ]] || { echo "fake API failure" >&2; exit 1; }
+    case "\${FAKE_MODE:-ok}" in
+      auth) echo "fake API failure" >&2; exit 1 ;;
+      missing) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+    esac
     reviewer_id=1345402; reviewer_login=NikolayS; prevent=true; admin_bypass=false; wait_timer=0; protected=false
     [[ "\${FAKE_MODE:-ok}" != reviewer ]] || { reviewer_id=280144521; reviewer_login=samo-agent; }
     [[ "\${FAKE_MODE:-ok}" != self-review ]] || prevent=false
@@ -476,6 +509,16 @@ esac
     expect(await run("environment-variable")).toBe(1);
     expect(await run("environment-secret")).toBe(1);
     expect(await run("missing")).toBe(1);
+    expect(await run("auth")).toBe(1);
+    const authFailure = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "auth" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const authStderr = await new Response(authFailure.stderr).text();
+    expect(await authFailure.exited).toBe(1);
+    expect(authStderr).toContain("unable to read credential-migration environment");
+    expect(authStderr).toContain("fake API failure");
     const missing = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "missing" },
@@ -483,12 +526,13 @@ esac
     });
     const missingStderr = await new Response(missing.stderr).text();
     expect(await missing.exited).toBe(1);
-    expect(missingStderr).toContain("unable to read credential-migration environment");
-    expect(missingStderr).toContain("fake API failure");
+    expect(missingStderr).toContain("credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh");
+    expect(missingStderr).toContain("HTTP 404");
 
     const apply = await Bun.file("scripts/apply-credential-migration-environment.sh").text();
     expect(apply).toContain(".branch_policies[] | [.name,.type] | @tsv");
     expect(apply).not.toContain("-f name=main");
+    expect(apply).not.toContain("{wait_timer,can_admins_bypass");
   });
 
   test("applies the reviewed policy and reconciles branch-policy drift", async () => {
@@ -539,7 +583,7 @@ esac
     };
     const stale = join(root, "stale");
     expect(await run("stale", stale)).toBe(0);
-    expect(JSON.parse(await Bun.file(join(stale, "put.json")).text()).can_admins_bypass).toBe(false);
+    expect(JSON.parse(await Bun.file(join(stale, "put.json")).text()).can_admins_bypass).toBeUndefined();
     expect(await Bun.file(join(stale, "delete.log")).text()).toContain("deployment-branch-policies/9");
     expect(await Bun.file(join(stale, "post.log")).text()).toContain("name=main");
     expect(await Bun.file(join(stale, "post.log")).text()).toContain("type=branch");

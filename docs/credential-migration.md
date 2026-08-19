@@ -36,6 +36,11 @@ session after service restoration.
    openssl pkcs8 -topk8 -v2 aes-256-cbc -v2prf hmacWithSHA256 -iter 600000 \
      -in "$private_key" -out "$encrypted_key"
    chmod 600 "$encrypted_key"
+   head -n1 "$encrypted_key" | grep -qx -- '-----BEGIN ENCRYPTED PRIVATE KEY-----'
+   if openssl pkey -in "$encrypted_key" -noout -passin pass: 2>/dev/null; then
+     echo "encrypted migration key must reject an empty passphrase" >&2
+     exit 1
+   fi
    expected_fingerprint=7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc
    actual_fingerprint="$(openssl pkey -in "$encrypted_key" \
      -pubout -outform DER | sha256sum | awk '{print $1}')"
@@ -52,14 +57,18 @@ session after service restoration.
    The fingerprint must be
    `7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc`.
 
-1. From a clean checkout of protected `main`, apply the dedicated migration
-   environment and verify that production still has its default `v*`-only
-   policy. Do not widen production yet.
+1. From a clean checkout of protected `main`, first verify that production
+   still has its default `v*`-only policy. Investigate any diff before changing
+   it; do not erase a tamper signal by applying over it. Then apply the dedicated
+   migration environment. GitHub's environment API cannot set
+   `can_admins_bypass`; if the migration check reports that field as `true`,
+   disable **Allow administrators to bypass configured protection rules** in
+   the GitHub environment UI and rerun the apply command. Do not widen
+   production yet.
 
    ```bash
-   bash scripts/apply-credential-migration-environment.sh
-   bash scripts/apply-production-environment.sh default
    bash scripts/check-production-environment.sh default
+   bash scripts/apply-credential-migration-environment.sh
    ```
 
    The default production policy remains `v*` only. Running
@@ -192,10 +201,10 @@ session after service restoration.
    git push origin refs/tags/credential-migration-verify
    cleanup_verification_policy() {
      local cleanup_status=0
-     gh variable delete CREDENTIAL_VERIFY_OPEN || true
-     bash scripts/apply-production-environment.sh default || cleanup_status=1
      git push origin :refs/tags/credential-migration-verify || true
      git tag -d credential-migration-verify || true
+     gh variable delete CREDENTIAL_VERIFY_OPEN || true
+     bash scripts/apply-production-environment.sh default || cleanup_status=1
      bash scripts/check-production-environment.sh default || cleanup_status=1
      return "$cleanup_status"
    }
@@ -213,6 +222,18 @@ session after service restoration.
    trap - EXIT
    [[ "$verify_status" == 0 ]]
    ```
+
+   The verification workflow independently deletes the remote migration tag in
+   an `always()` cleanup job. If the operator shell is interrupted, the first
+   recovery action is still:
+
+   ```bash
+   bash scripts/apply-production-environment.sh default
+   ```
+
+   A five-minute scheduled guard also runs
+   `scripts/check-production-environment.sh default` from protected `main` and
+   fails visibly while any widening lingers.
 
    On verification failure, restore repository rollback scope before debugging:
 

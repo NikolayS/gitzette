@@ -56,7 +56,9 @@ to the current protected `main` tip. Immediately before verification,
 production is temporarily widened to
 `config/production-environment-migration.json`; an exit trap restores the
 default `v*`-only policy, and `scripts/check-production-environment.sh default`
-fails loud if that widening lingers.
+fails loud if that widening lingers. A protected-main scheduled workflow runs
+that check every five minutes during the bootstrap window, while the verifier's
+independent `always()` cleanup job deletes the remote migration tag.
 
 ## Artifact cleanup recovery
 
