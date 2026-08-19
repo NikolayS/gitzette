@@ -51,11 +51,14 @@ the gate rejects it. The `samo-agent` credential is not stored in repository or
 environment secrets, must never be added there under any name, and is
 unavailable to repository workflows or the self-hosted GitZette runner.
 `scripts/check-reviewer-credential-isolation.sh` enforces that Actions variables
-are only the two boolean migration switches, Dependabot has no secrets,
+are only the two migration switches with value exactly `true` (`false` is
+rejected as residue), Dependabot has no secrets,
 repository secrets contain only the reviewed mention-driven Claude OAuth token
-and the two temporary Cloudflare migration names, `production` contains only
-the two independently validated Cloudflare names, and every environment has no
-variables while every other environment has no secrets; the external
+and the two temporary Cloudflare migration names, and every environment has no
+variables while every non-production environment has no secrets. Its bare
+pre-migration invocation accepts either an empty `production` secret set or the
+exact reviewed Cloudflare pair. Set `REQUIRE_PRODUCTION_CREDENTIALS=true` to
+prove both independently validated production names are installed; the external
 readiness operator runs that inventory check with repository-administration
 read access. Before
 publishing success, the external reviewer must inspect every
@@ -212,7 +215,10 @@ IDs, then run from a clean checkout of the PR head:
 ```bash
 SAMOREV_HOME=/path/to/samorev
 SAMO_TOKEN="$(gh auth token --user samo-agent)"
-bash scripts/check-reviewer-credential-isolation.sh
+# Set false only for the credential bootstrap before installation; otherwise true.
+: "${REQUIRE_PRODUCTION_CREDENTIALS:?set the credential-installation phase}"
+REQUIRE_PRODUCTION_CREDENTIALS="$REQUIRE_PRODUCTION_CREDENTIALS" \
+  bash scripts/check-reviewer-credential-isolation.sh
 GH_TOKEN="$SAMO_TOKEN" SAMOREV_HOME="$SAMOREV_HOME" \
   bash scripts/run-samorev-review.sh NUMBER PUBLISHER_RUN_ID PUBLISHER_CHECK_RUN_ID
 unset SAMO_TOKEN
@@ -335,6 +341,7 @@ reapply the legacy approval rule. Audit production policy before migration:
 bash scripts/check-branch-protection.sh
 samo_token="$(gh auth token --user samo-agent)"
 GH_TOKEN="$samo_token" bash scripts/check-branch-protection-nonadmin.sh
+# Bootstrap only; post-migration readiness uses REQUIRE_PRODUCTION_CREDENTIALS=true.
 bash scripts/check-reviewer-credential-isolation.sh
 bash scripts/check-production-environment.sh
 ```

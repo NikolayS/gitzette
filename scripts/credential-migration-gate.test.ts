@@ -167,8 +167,14 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain(': "${POLICY_GUARD_RUN_ID:?new preflight guard run was not observed}"');
     expect(migrationDoc).toContain(': "${RUN_ID:?set the exact export run ID}"');
     expect(migrationDoc).toContain(': "${VERIFY_RUN_ID:?new verification run was not observed}"');
-    const installStep = migrationDoc.slice(migrationDoc.indexOf("5. Without printing"), migrationDoc.indexOf("6. From a clean checkout"));
-    const verifyStep = migrationDoc.slice(migrationDoc.indexOf("6. From a clean checkout"), migrationDoc.indexOf("7. After successful verification"));
+    const installStart = migrationDoc.indexOf("5. Without printing");
+    const verifyStart = migrationDoc.indexOf("6. From a clean checkout");
+    const verifyEnd = migrationDoc.indexOf("7. After successful read-capability verification");
+    expect(installStart).toBeGreaterThanOrEqual(0);
+    expect(verifyStart).toBeGreaterThan(installStart);
+    expect(verifyEnd).toBeGreaterThan(verifyStart);
+    const installStep = migrationDoc.slice(installStart, verifyStart);
+    const verifyStep = migrationDoc.slice(verifyStart, verifyEnd);
     expect(installStep).not.toContain("VERIFY_RUN_ID");
     expect(verifyStep).toContain('previous_verify_run_id="$(gh run list');
     expect(verifyStep).toContain('gh run watch "$VERIFY_RUN_ID"');
@@ -510,7 +516,7 @@ fi
     const migrationDoc = await Bun.file("docs/credential-migration.md").text();
     const bashBlocks = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
       .map((match) => match[1] ?? "");
-    expect(bashBlocks).toHaveLength(12);
+    expect(bashBlocks).toHaveLength(14);
 
     const runbookRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-runbook-"));
     try {
@@ -885,6 +891,11 @@ case "$endpoint" in
     elif [[ "\${FAKE_MODE:-ok}" == production-incomplete ]]; then printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]'
     else printf '%s\\n' '[{"secrets":[]}]'; fi
     ;;
+  *actions/secrets*)
+    if [[ "\${FAKE_MODE:-ok}" == repository-secret-api-error ]]; then echo 'repository secret API failed' >&2; exit 1
+    elif [[ "\${FAKE_MODE:-ok}" == repository-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_API_TOKEN"}]}]'
+    else printf '%s\\n' '[{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN"}]}]'; fi
+    ;;
   *) exit 91 ;;
 esac
 `);
@@ -908,7 +919,11 @@ esac
     expect(await run("admin-bypass")).toBe(1);
     expect(await run("missing")).toBe(4);
     expect(await run("auth")).toBe(3);
-    const runInventory = (mode: string, requireProductionCredentials = "false"): Promise<number> => Bun.spawn([
+    const runInventory = (
+      mode: string,
+      requireProductionCredentials = "false",
+      requireNoRepositoryCredentials = "false",
+    ): Promise<number> => Bun.spawn([
       "bash", "scripts/check-credential-migration-inventory.sh",
     ], {
       cwd: process.cwd(),
@@ -918,6 +933,7 @@ esac
         GITHUB_REPOSITORY: "example/gitzette",
         FAKE_MODE: mode,
         REQUIRE_PRODUCTION_CREDENTIALS: requireProductionCredentials,
+        REQUIRE_NO_REPOSITORY_CREDENTIALS: requireNoRepositoryCredentials,
       },
       stdout: "pipe", stderr: "pipe",
     }).exited;
@@ -927,6 +943,10 @@ esac
     expect(await runInventory("production-complete", "true")).toBe(0);
     expect(await runInventory("ok", "true")).toBe(1);
     expect(await runInventory("ok", "invalid")).toBe(1);
+    expect(await runInventory("ok", "false", "invalid")).toBe(1);
+    expect(await runInventory("ok", "false", "true")).toBe(0);
+    expect(await runInventory("repository-secret", "false", "true")).toBe(1);
+    expect(await runInventory("repository-secret-api-error", "false", "true")).toBe(3);
     expect(await runInventory("environment-variable")).toBe(1);
     expect(await runInventory("environment-secret")).toBe(1);
     expect(await runInventory("variable-api-error")).toBe(3);

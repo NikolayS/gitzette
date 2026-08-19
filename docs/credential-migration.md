@@ -343,6 +343,7 @@ text matching is not the authorization proof.
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
    bash scripts/check-credential-migration-environment.sh
    REQUIRE_PRODUCTION_CREDENTIALS=true \
+   REQUIRE_NO_REPOSITORY_CREDENTIALS=true \
      bash scripts/check-credential-migration-inventory.sh
    bash scripts/check-production-environment.sh
    gh variable set CREDENTIAL_VERIFY_OPEN --body true
@@ -373,6 +374,32 @@ text matching is not the authorization proof.
    [[ "$verify_status" == 0 ]]
    ```
 
+   If verification fails, restore the repository rollback copies immediately so
+   the currently deployed workflow remains operable while the environment
+   failure is diagnosed:
+
+   ```bash
+   set -euo pipefail
+   [[ "$verify_status" != 0 ]]
+   rollback_account_id="$(jq -er .cloudflare_account_id <<<"$plaintext")"
+   rollback_api_token="$(jq -er .cloudflare_api_token <<<"$plaintext")"
+   printf '%s' "$rollback_account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID
+   printf '%s' "$rollback_api_token" | gh secret set CLOUDFLARE_API_TOKEN
+   unset rollback_account_id rollback_api_token
+   ```
+
+   After repairing and revalidating the environment values, delete those
+   rollback copies and re-prove their absence before any verification retry:
+
+   ```bash
+   set -euo pipefail
+   gh secret delete CLOUDFLARE_ACCOUNT_ID
+   gh secret delete CLOUDFLARE_API_TOKEN
+   REQUIRE_PRODUCTION_CREDENTIALS=true \
+   REQUIRE_NO_REPOSITORY_CREDENTIALS=true \
+     bash scripts/check-credential-migration-inventory.sh
+   ```
+
    Before Nik approves the production deployment, independently verify outside
    the workflow logs that the run is still pinned to current protected `main`,
    rerun both live environment checks, and record the guard/verification run
@@ -385,6 +412,7 @@ text matching is not the authorization proof.
      "$(gh api repos/NikolayS/gitzette/commits/main --jq .sha)"
    bash scripts/check-credential-migration-environment.sh
    REQUIRE_PRODUCTION_CREDENTIALS=true \
+   REQUIRE_NO_REPOSITORY_CREDENTIALS=true \
      bash scripts/check-credential-migration-inventory.sh
    bash scripts/check-production-environment.sh
    ```

@@ -10,8 +10,13 @@ root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && 
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 allowed_production='["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
 require_production_credentials="${REQUIRE_PRODUCTION_CREDENTIALS:-false}"
+require_no_repository_credentials="${REQUIRE_NO_REPOSITORY_CREDENTIALS:-false}"
 if [[ "$require_production_credentials" != true && "$require_production_credentials" != false ]]; then
   echo "REQUIRE_PRODUCTION_CREDENTIALS must be exactly true or false" >&2
+  exit 1
+fi
+if [[ "$require_no_repository_credentials" != true && "$require_no_repository_credentials" != false ]]; then
+  echo "REQUIRE_NO_REPOSITORY_CREDENTIALS must be exactly true or false" >&2
   exit 1
 fi
 error_file="$(mktemp)"
@@ -30,6 +35,17 @@ fi
 if [[ "$(jq -r 'length' <<<"$variables")" -ne 0 || "$(jq -r 'length' <<<"$secrets")" -ne 0 ]]; then
   echo "credential-migration environment must not define variables or secrets" >&2
   exit 1
+fi
+if [[ "$require_no_repository_credentials" == true ]]; then
+  if ! repository_secrets="$(gh api --paginate --slurp "repos/$repository/actions/secrets?per_page=100" 2>"$error_file" | jq -c 'map(.secrets) | add // []')"; then
+    echo "unable to read repository Actions secrets with the operator token:" >&2
+    sed 's/^/  /' "$error_file" >&2
+    exit 3
+  fi
+  if ! jq -e 'all(.[]; .name | startswith("CLOUDFLARE_") | not)' <<<"$repository_secrets" >/dev/null; then
+    echo "repository Cloudflare credential copies must be absent before environment verification" >&2
+    exit 1
+  fi
 fi
 if ! production_variables="$(gh api --paginate --slurp "repos/$repository/environments/production/variables?per_page=100" 2>"$error_file" | jq -c 'map(.variables) | add // []')"; then
   echo "unable to read production environment variables with the operator token:" >&2
