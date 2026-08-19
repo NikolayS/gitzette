@@ -76,8 +76,10 @@ jobs:
           .required_pull_request_reviews.require_last_push_approval == false and
           (.repository_rulesets | length) == 2 and
           .repository_rulesets[0].name == "main-samo-only-updates" and
+          .repository_rulesets[0].target == "branch" and
           .repository_rulesets[0].enforcement == "active" and
           .repository_rulesets[0].bypass_actors == [{"actor_id":280144521,"actor_type":"User","bypass_mode":"always"}] and
+          .repository_rulesets[0].conditions.ref_name == {"exclude":[],"include":["refs/heads/main"]} and
           .repository_rulesets[0].rules == [{"type":"creation"},{"type":"update","parameters":{"update_allows_fetch_and_merge":false}},{"type":"deletion"}] and
           .repository_rulesets[1].name == "release-tags-samo-only" and
           .repository_rulesets[1].target == "tag" and

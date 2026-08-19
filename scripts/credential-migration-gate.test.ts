@@ -162,12 +162,22 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc.indexOf("[[ \"$verify_status\" == 0 ]]")).toBeLessThan(
       migrationDoc.lastIndexOf("drop table credential_migration_transfer"),
     );
-    expect(migrationDoc).toContain(': "${POLICY_GUARD_RUN_ID:?set the exact preflight guard run ID}"');
+    expect(migrationDoc).toContain(': "${POLICY_GUARD_RUN_ID:?new preflight guard run was not observed}"');
     expect(migrationDoc).toContain(': "${RUN_ID:?set the exact export run ID}"');
-    expect(migrationDoc).toContain(': "${VERIFY_RUN_ID:?set the exact verification run ID}"');
+    expect(migrationDoc).toContain(': "${VERIFY_RUN_ID:?new verification run was not observed}"');
+    const installStep = migrationDoc.slice(migrationDoc.indexOf("5. Without printing"), migrationDoc.indexOf("6. From a clean checkout"));
+    const verifyStep = migrationDoc.slice(migrationDoc.indexOf("6. From a clean checkout"), migrationDoc.indexOf("7. After successful verification"));
+    expect(installStep).not.toContain("VERIFY_RUN_ID");
+    expect(verifyStep).toContain('previous_verify_run_id="$(gh run list');
+    expect(verifyStep).toContain('gh run watch "$VERIFY_RUN_ID"');
+    expect(migrationDoc).toContain('previous_guard_run_id="$(gh run list');
     expect(migrationDoc).toContain("created an empty transfer table");
     expect(migrationDoc).toContain("empty-table recovery dispatched once");
     expect(migrationDoc).toContain("sqlite_schema where type = \\u0027table\\u0027");
+    expect(migrationDoc.indexOf('shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"')).toBeLessThan(
+      migrationDoc.lastIndexOf('rmdir "$migration_dir"'),
+    );
+    expect(migrationDoc).toContain("credentials.bin select.json count.json drop.json prove-drop.json");
     expect(migrationDoc).toContain("switch-residue job is expected red during an open export switch");
     expect(migrationDoc).toContain("dedicated child Bash process");
     expect(migrationDoc).toContain("unset HISTFILE; set +o history");
@@ -467,7 +477,8 @@ fi
   });
 
   test("executes the required policy API readability gate fail closed", async () => {
-    const ci = Bun.YAML.parse(await Bun.file(".github/workflows/ci.yml").text()) as {
+    const ciSource = await Bun.file(".github/workflows/ci.yml").text();
+    const ci = Bun.YAML.parse(ciSource) as {
       jobs: Record<string, {
         "timeout-minutes"?: number;
         steps: Array<{ name?: string; run?: string }>;
@@ -483,6 +494,8 @@ fi
       required_status_checks: { checks: Array<{ context: string }> };
     };
     expect(protection.required_status_checks.checks.filter(({ context }) => context === jobName)).toHaveLength(1);
+    expect(ciSource).toContain('.repository_rulesets[0].target == "branch"');
+    expect(ciSource).toContain('.repository_rulesets[0].conditions.ref_name == {"exclude":[],"include":["refs/heads/main"]}');
 
     const root = await mkdtemp(join(tmpdir(), "gitzette-policy-api-readability-"));
     const gh = join(root, "gh");

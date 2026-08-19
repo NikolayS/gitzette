@@ -48,7 +48,12 @@ while IFS= read -r ruleset_payload; do
     exit 1
   fi
   normalized_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules} |
-    .bypass_actors |= sort_by(.actor_type, .actor_id) | .rules |= sort_by(.type)' <<<"$live_ruleset")"
+    .bypass_actors |= sort_by(.actor_type, .actor_id) |
+    .rules |= map(
+      if .type == "update" and (has("parameters") | not) then
+        .parameters = {update_allows_fetch_and_merge:false}
+      else . end
+    ) | .rules |= sort_by(.type)' <<<"$live_ruleset")"
   expected_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules} |
     .bypass_actors |= sort_by(.actor_type, .actor_id) | .rules |= sort_by(.type)' <<<"$ruleset_payload")"
   if [[ "$normalized_ruleset" != "$expected_ruleset" ]]; then

@@ -25,6 +25,10 @@ reordered_rulesets="$(jq -c 'reverse | map(.rules |= reverse)' <<<"$rulesets")"
 actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$reordered_rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
 [[ "$actual" == "$expected" ]] || { echo "equivalent reordered rulesets did not normalize to policy" >&2; exit 1; }
 
+api_normalized_rulesets="$(jq -c 'map(.rules |= map(if .type == "update" then del(.parameters) else . end))' <<<"$rulesets")"
+actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$api_normalized_rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
+[[ "$actual" == "$expected" ]] || { echo "GitHub-defaulted update rules did not normalize to policy" >&2; exit 1; }
+
 mutated="$(jq -c '.enforce_admins.enabled=false' <<<"$protection")"
 actual="$(jq -nSc --argjson protection "$mutated" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
 [[ "$actual" != "$expected" ]] || { echo "enforce_admins drift was not detected" >&2; exit 1; }
@@ -46,6 +50,7 @@ assert_drift missing-tag-ruleset "$protection" "$(jq -c 'del(.[1])' <<<"$ruleset
 assert_drift tag-user-widened "$protection" "$(jq -c '.[1].bypass_actors[0].actor_id=1' <<<"$rulesets")"
 assert_drift ruleset-disabled "$protection" "$(jq -c '.[0].enforcement="disabled"' <<<"$rulesets")"
 assert_drift update-rule-removed "$protection" "$(jq -c '.[0].rules=[]' <<<"$rulesets")"
+assert_drift update-rule-null-parameters "$protection" "$(jq -c '.[0].rules |= map(if .type == "update" then .parameters=null else . end)' <<<"$rulesets")"
 assert_drift main-deletion-rule-removed "$protection" "$(jq -c '.[0].rules |= map(select(.type != "deletion"))' <<<"$rulesets")"
 assert_drift main-creation-rule-removed "$protection" "$(jq -c '.[0].rules |= map(select(.type != "creation"))' <<<"$rulesets")"
 assert_drift ref-widened "$protection" "$(jq -c '.[0].conditions.ref_name.include=["~ALL"]' <<<"$rulesets")"

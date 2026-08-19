@@ -100,12 +100,27 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
-   : "${POLICY_GUARD_RUN_ID:?set the exact preflight guard run ID}"
    bash scripts/apply-production-environment.sh
    bash scripts/check-production-environment.sh
    bash scripts/apply-credential-migration-environment.sh
    bash scripts/check-credential-migration-inventory.sh
+   previous_guard_run_id="$(gh run list \
+     --workflow=credential-migration-policy-guard.yml --branch main \
+     --event workflow_dispatch --limit 1 \
+     --json databaseId --jq '.[0].databaseId // 0')"
    gh workflow run credential-migration-policy-guard.yml --ref main
+   POLICY_GUARD_RUN_ID=""
+   for _ in {1..20}; do
+     candidate="$(gh run list --workflow=credential-migration-policy-guard.yml \
+       --branch main --event workflow_dispatch \
+       --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+     if [[ "$candidate" -gt "$previous_guard_run_id" ]]; then
+       POLICY_GUARD_RUN_ID="$candidate"
+       break
+     fi
+     sleep 2
+   done
+   : "${POLICY_GUARD_RUN_ID:?new preflight guard run was not observed}"
    gh run watch "$POLICY_GUARD_RUN_ID" --exit-status
    ```
 
@@ -264,7 +279,6 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
-   : "${VERIFY_RUN_ID:?set the exact verification run ID}"
    environment_credentials_ready=false
    environment_secrets_before="$(gh api --paginate --slurp \
      'repos/NikolayS/gitzette/environments/production/secrets?per_page=100' |
@@ -325,9 +339,24 @@ text matching is not the authorization proof.
    bash scripts/check-credential-migration-inventory.sh
    bash scripts/check-production-environment.sh
    gh variable set CREDENTIAL_VERIFY_OPEN --body true
+   previous_verify_run_id="$(gh run list --workflow=migrate-production-credentials.yml \
+     --branch main --event workflow_dispatch --limit 1 \
+     --json databaseId --jq '.[0].databaseId // 0')"
    GH_TOKEN="$(gh auth token --user samo-agent)" \
      gh workflow run migrate-production-credentials.yml \
        --ref main -f operation=verify
+   VERIFY_RUN_ID=""
+   for _ in {1..20}; do
+     candidate="$(gh run list --workflow=migrate-production-credentials.yml \
+       --branch main --event workflow_dispatch \
+       --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+     if [[ "$candidate" -gt "$previous_verify_run_id" ]]; then
+       VERIFY_RUN_ID="$candidate"
+       break
+     fi
+     sleep 2
+   done
+   : "${VERIFY_RUN_ID:?new verification run was not observed}"
    set +e
    gh run watch "$VERIFY_RUN_ID" --exit-status
    verify_status=$?
@@ -395,18 +424,28 @@ text matching is not the authorization proof.
    ```bash
    set -euo pipefail
    jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
-   curl --fail --silent --show-error --retry 2 --retry-all-errors \
+   curl --fail --silent --show-error \
      --connect-timeout 10 --max-time 30 --config - \
      -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
      <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -e '.success == true and .result[0].success == true' >/dev/null
-   shred -u "$migration_dir/credentials.bin" "$migration_dir/select.json" \
-     "$migration_dir/drop.json"
-   rmdir "$migration_dir"
+     jq -e '.success == true and (.result | length == 1) and .result[0].success == true' >/dev/null
+   jq -n '{sql:"select count(*) as remaining from sqlite_schema where type = \u0027table\u0027 and name = \u0027credential_migration_transfer\u0027"}' \
+     >"$migration_dir/prove-drop.json"
+   curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
+     -H 'Content-Type: application/json' --data-binary "@$migration_dir/prove-drop.json" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
+     jq -e '.success == true and (.result | length == 1) and
+       .result[0].success == true and (.result[0].results | length == 1) and
+       .result[0].results[0].remaining == 0' >/dev/null
    shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"
    rm -f "$MIGRATION_KEY_DIR/production-migration-public.pem"
    unset plaintext ciphertext account_id api_token d1_token
+   for material in credentials.bin select.json count.json drop.json prove-drop.json; do
+     [[ ! -f "$migration_dir/$material" ]] || shred -u "$migration_dir/$material"
+   done
+   rmdir "$migration_dir"
    ```
 
 8. Through the exact-head review gate, delete
