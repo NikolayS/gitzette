@@ -22,6 +22,8 @@ Green CI alone is not a review. The separate `samo-agent` identity runs
 Tanya301/samorev on every exact head and publishes the immutable-creator verdict.
 Formal GitHub approvals are intentionally not a gate. Only the external
 `samo-agent` identity (ID `280144521`) may update `main`; repository Actions and
-the repository administrator are not bypass actors. See `docs/review-gate.md`.
+the repository administrator are not configured as bypass actors. An administrator
+can still change the ruleset itself, so rerun `scripts/check-branch-protection.sh`
+before every merge and release tag. See `docs/review-gate.md`.
 
 Before production activation, complete the canaries and mandatory post-deploy smoke test listed in `DISPATCH_SPEC.md`.

@@ -221,19 +221,35 @@ describe("one-shot credential migration boundary", () => {
     expect(parsedPolicyGuard.jobs["migration-switches"].permissions).toEqual({});
     const policyGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the fixed production ref policy"))?.run;
+    const productionRepositoryPinRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
+      name === "Require the canonical repository")?.run;
     const migrationGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the credential migration approval boundary"))?.run;
     const migrationSwitchRun = parsedPolicyGuard.jobs["migration-switches"].steps.find(({ name }) =>
       name?.startsWith("Fail if a credential migration switch remains open"))?.run;
+    const migrationRepositoryPinRun = parsedPolicyGuard.jobs["migration-switches"].steps.find(({ name }) =>
+      name === "Require the canonical repository")?.run;
+    expect(productionRepositoryPinRun).toBeDefined();
     expect(policyGuardRun).toBeDefined();
     expect(migrationGuardRun).toBeDefined();
     expect(migrationSwitchRun).toBeDefined();
+    expect(migrationRepositoryPinRun).toBeDefined();
     const policyGuardRoot = await mkdtemp(join(tmpdir(), "gitzette-policy-guard-run-"));
     const fakeBash = join(policyGuardRoot, "bash");
     await Bun.write(fakeBash, `#!/bin/sh
 exit "\${FAKE_CHECKER_STATUS:-0}"
 `);
     await Bun.spawn(["chmod", "+x", fakeBash]).exited;
+    const executeRepositoryPin = (run: string | undefined, repository: string): Promise<number> =>
+      Bun.spawn(["/bin/bash", "-c", run ?? "exit 99"], {
+        cwd: process.cwd(),
+        env: { ...process.env, REPOSITORY: repository },
+        stdout: "pipe", stderr: "pipe",
+      }).exited;
+    for (const run of [productionRepositoryPinRun, migrationRepositoryPinRun]) {
+      expect(await executeRepositoryPin(run, "NikolayS/gitzette")).toBe(0);
+      expect(await executeRepositoryPin(run, "attacker/gitzette")).toBe(1);
+    }
     const executePolicyGuard = (checkerStatus: number): Promise<number> => Bun.spawn([
       "/bin/bash", "-c", policyGuardRun ?? "exit 99",
     ], {
@@ -359,6 +375,7 @@ fi
     expect(await execute(authorizeRun, { EXPORT_OPEN: "True" })).toBe(1);
     expect(await execute(authorizeRun, { EXPORT_OPEN: "true " })).toBe(1);
     expect(await execute(authorizeRun, { FAKE_ACTOR_ID: "1" })).toBe(1);
+    expect(await execute(authorizeRun, { GITHUB_SHA: "stale" })).toBe(1);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: undefined })).toBe(1);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: "True" })).toBe(1);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: "true " })).toBe(1);
@@ -368,6 +385,7 @@ fi
     expect(await execute(revalidateRun, { FAKE_APPROVAL_ENV: "other" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_APPROVAL_STATE: "rejected" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_APPROVAL_EMPTY: "true" })).toBe(1);
+    expect(await execute(revalidateRun, { DISPATCH_SHA: "stale" })).toBe(1);
     const curlRecord = join(gateRoot, "curl-record");
     expect(await execute(revalidateRun, { FAKE_CURL_RECORD: curlRecord })).toBe(0);
     const curlArgs = await Bun.file(`${curlRecord}.args`).text();
@@ -376,7 +394,7 @@ fi
     expect(curlArgs).toContain("https://api.github.com/repos/example/gitzette/actions/runs/77");
     expect(curlArgs).toContain("https://api.github.com/repos/example/gitzette/actions/runs/77/approvals");
     expect(curlArgs).not.toContain("fake");
-    expect(curlStdin.match(/header = "Authorization: Bearer fake"/g)?.length).toBe(2);
+    expect(curlStdin.match(/header = "Authorization: Bearer fake"/g)?.length).toBe(3);
     expect(await execute(revalidateRun, { FAKE_CURL_FAIL: "true" })).not.toBe(0);
     const verify = { OPERATION: "verify", DISPATCH_REF: "refs/heads/main", VERIFY_OPEN: "true", FAKE_APPROVAL_ENV: "production" };
     expect(await execute(authorizeRun, verify)).toBe(0);
