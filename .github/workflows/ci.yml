@@ -8,10 +8,33 @@ on:
     branches: [main]
 
 jobs:
-  typecheck:
+  policy-api-readability:
     permissions:
       actions: read
-      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Prove policy guard API readability
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/environments/production" \
+            --jq 'has("can_admins_bypass")' | grep -qx true
+          gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=1" >/dev/null
+          environments="$(gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/environments?per_page=100" \
+            --jq 'map(.environments) | add // []')"
+          if jq -e 'any(.[]; .name == "credential-migration")' <<<"$environments" >/dev/null; then
+            migration_environment="$(gh api \
+              "repos/$GITHUB_REPOSITORY/environments/credential-migration")"
+            jq -e 'has("can_admins_bypass")' <<<"$migration_environment" >/dev/null
+            if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies \
+              <<<"$migration_environment")" == true ]]; then
+              gh api "repos/$GITHUB_REPOSITORY/environments/credential-migration/deployment-branch-policies?per_page=1" >/dev/null
+            fi
+          fi
+
+  typecheck:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -65,27 +88,6 @@ jobs:
           config/main-branch-protection.json
       - name: Verify generated Worker binding types
         run: bun run check:worker-types
-      - name: Prove policy guard API readability
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/environments/production" \
-            --jq 'has("can_admins_bypass")' | grep -qx true
-          gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=1" >/dev/null
-          set +e
-          migration_environment="$(bash scripts/get-github-environment.sh "$GITHUB_REPOSITORY" credential-migration)"
-          migration_status=$?
-          set -e
-          if [[ "$migration_status" -eq 0 ]]; then
-            jq -e 'has("can_admins_bypass")' <<<"$migration_environment" >/dev/null
-            if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies <<<"$migration_environment")" == true ]]; then
-              gh api "repos/$GITHUB_REPOSITORY/environments/credential-migration/deployment-branch-policies?per_page=1" >/dev/null
-            fi
-          elif [[ "$migration_status" -ne 4 ]]; then
-            echo "credential-migration environment API is unreadable" >&2
-            exit "$migration_status"
-          fi
       - run: bun run test:all
       - run: shellcheck scripts/*.sh
       - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9

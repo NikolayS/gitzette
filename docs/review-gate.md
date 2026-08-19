@@ -158,7 +158,20 @@ environment has been removed; #67 verifies that separate teardown, removes the
 temporary `main` branch policy, and restores the `v*`-only production baseline.
 The D1
 transfer table remains as a durable consumed-once marker until repository
-credential copies are gone.
+credential copies are gone and stored-value verification succeeds.
+
+Nik explicitly accepts one bootstrap residual risk: immutable user ID
+`280144521` both publishes the external samorev verdict and performs the only
+permitted `main` update, so compromise of that external credential would
+collapse those two controls into one principal. Formal GitHub approval is not
+reintroduced as ceremony. The compensating controls are that the credential is
+absent from repository and environment secrets, repository Actions cannot use
+it, exact-head CI and the protected-base publisher remain mandatory, the
+administrator performs the readiness and live-policy audits, and Nik remains
+the distinct non-bypassable production approver. The repository-scoped
+Cloudflare-secret exposure is closed immediately after this bootstrap merges:
+apply both environments first, export once, delete repository copies before
+stored-value verification, and merge #67 immediately after verification.
 
 ## Artifact cleanup recovery
 

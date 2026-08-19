@@ -252,13 +252,6 @@ text matching is not the authorization proof.
    remaining_repository_cloudflare_secrets="$(gh secret list --json name --jq \
      '[.[].name | select(startswith("CLOUDFLARE_"))] | length')"
    [[ "$remaining_repository_cloudflare_secrets" == 0 ]]
-   jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
-   curl --fail --silent --show-error --retry 2 --retry-all-errors \
-     --connect-timeout 10 --max-time 30 --config - \
-     -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
-     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
-     <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -e '.success == true and .result[0].success == true' >/dev/null
    ```
 
    Enumerate every `secrets.CLOUDFLARE_*` reference under `.github/workflows`.
@@ -356,6 +349,13 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
+   jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
+   curl --fail --silent --show-error --retry 2 --retry-all-errors \
+     --connect-timeout 10 --max-time 30 --config - \
+     -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
+     jq -e '.success == true and .result[0].success == true' >/dev/null
    shred -u "$migration_dir/credentials.bin" "$migration_dir/select.json" \
      "$migration_dir/drop.json"
    rmdir "$migration_dir"

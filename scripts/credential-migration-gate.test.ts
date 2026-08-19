@@ -150,7 +150,7 @@ describe("one-shot credential migration boundary", () => {
       expect(gate).toContain("if [[ -f config/credential-migration-environment.json ]]");
     }
     expect(migrationDoc).toContain("On any abort or operator");
-    expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
+    expect(migrationDoc.indexOf("[[ \"$verify_status\" == 0 ]]")).toBeLessThan(
       migrationDoc.indexOf("drop table credential_migration_transfer"),
     );
     expect(migrationDoc).toContain("switch-residue job is expected red during an open export switch");
@@ -195,8 +195,11 @@ describe("one-shot credential migration boundary", () => {
       name?.startsWith("Audit the fixed production ref policy"))?.run;
     const migrationGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the credential migration approval boundary"))?.run;
+    const migrationSwitchRun = parsedPolicyGuard.jobs["migration-switches"].steps.find(({ name }) =>
+      name?.startsWith("Fail if a credential migration switch remains open"))?.run;
     expect(policyGuardRun).toBeDefined();
     expect(migrationGuardRun).toBeDefined();
+    expect(migrationSwitchRun).toBeDefined();
     const policyGuardRoot = await mkdtemp(join(tmpdir(), "gitzette-policy-guard-run-"));
     const fakeBash = join(policyGuardRoot, "bash");
     await Bun.write(fakeBash, `#!/bin/sh
@@ -225,6 +228,17 @@ exit "\${FAKE_CHECKER_STATUS:-0}"
     expect(await executeMigrationGuard(1)).toBe(1);
     expect(await executeMigrationGuard(3)).toBe(3);
     expect(await executeMigrationGuard(4)).toBe(4);
+    const executeMigrationSwitchGuard = (exportOpen: string, verifyOpen: string): Promise<number> =>
+      Bun.spawn(["/bin/bash", "-c", migrationSwitchRun ?? "exit 99"], {
+        cwd: process.cwd(),
+        env: { ...process.env, EXPORT_OPEN: exportOpen, VERIFY_OPEN: verifyOpen },
+        stdout: "pipe", stderr: "pipe",
+      }).exited;
+    expect(await executeMigrationSwitchGuard("", "")).toBe(0);
+    expect(await executeMigrationSwitchGuard("true", "")).toBe(1);
+    expect(await executeMigrationSwitchGuard("false", "")).toBe(1);
+    expect(await executeMigrationSwitchGuard("", "true")).toBe(1);
+    expect(await executeMigrationSwitchGuard("", "false")).toBe(1);
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");

@@ -79,6 +79,10 @@ describe("deploy review revalidation", () => {
     expect(documentation).toContain("GitHub Actions and repository administrators are\nnot bypass actors");
     expect(documentation).toContain("Administrator policy authorization is explicit");
     expect(documentation).toContain("intentionally removed formal GitHub\npull-request approval as evidence");
+    expect(documentation).toContain("Nik explicitly accepts one bootstrap residual risk");
+    const agentNotes = await Bun.file("CLAUDE.md").text();
+    expect(agentNotes).not.toContain("admin-only update ruleset");
+    expect(agentNotes).toContain("Only the external\n`samo-agent` identity (ID `280144521`) may update `main`");
     expect(documentation).toContain("release-tags-samo-only");
     expect(documentation).toContain('tag_sha="$(gh api');
     expect(documentation).toContain('[[ "$tag_sha" == "$main_sha" ]]');
