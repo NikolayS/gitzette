@@ -62,9 +62,19 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/environments/production" \
             --jq 'has("can_admins_bypass")' | grep -qx true
           gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=1" >/dev/null
-          gh api "repos/$GITHUB_REPOSITORY/environments/credential-migration" \
-            --jq 'has("can_admins_bypass")' | grep -qx true
-          gh api "repos/$GITHUB_REPOSITORY/environments/credential-migration/deployment-branch-policies?per_page=1" >/dev/null
+          set +e
+          migration_environment="$(bash scripts/get-github-environment.sh "$GITHUB_REPOSITORY" credential-migration)"
+          migration_status=$?
+          set -e
+          if [[ "$migration_status" -eq 0 ]]; then
+            jq -e 'has("can_admins_bypass")' <<<"$migration_environment" >/dev/null
+            if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies <<<"$migration_environment")" == true ]]; then
+              gh api "repos/$GITHUB_REPOSITORY/environments/credential-migration/deployment-branch-policies?per_page=1" >/dev/null
+            fi
+          elif [[ "$migration_status" -ne 4 ]]; then
+            echo "credential-migration environment API is unreadable" >&2
+            exit "$migration_status"
+          fi
       - run: bun run test:all
       - run: bash scripts/evaluate-samorev-status.test.sh
       - run: bash scripts/normalize-branch-protection.test.sh

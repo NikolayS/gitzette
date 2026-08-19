@@ -138,6 +138,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("Production is temporarily widened");
     expect(migrationDoc).toContain("#67 restores the `v*`-only policy");
     expect(migrationDoc).toContain("#67 removes the exclusion after dropping the");
+    expect(migrationDoc).toContain("readability block from `.github/workflows/ci.yml`");
     for (const schemaGate of [
       "scripts/check-production-applied-schema.sh",
       "scripts/check-production-drift.sh",
@@ -371,6 +372,7 @@ fi
     });
     expect(exportRun).not.toContain('--arg api_token "$CLOUDFLARE_API_TOKEN"');
     expect(exportRun).not.toContain('--arg account_id "$CLOUDFLARE_ACCOUNT_ID"');
+    expect(exportRun).not.toContain("--retry");
     const d1Request = JSON.parse(await Bun.file(join(throwawayRoot, "gitzette-credential-migration", "d1-request.json")).text());
     expect(Object.keys(d1Request)).toEqual(["batch"]);
     expect(d1Request.batch).toHaveLength(2);

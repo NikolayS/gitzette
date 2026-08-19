@@ -12,9 +12,10 @@ describe("deploy review revalidation", () => {
     const branchPolicy = JSON.parse(await Bun.file("config/main-branch-protection.json").text());
     const applyBranchPolicy = await Bun.file("scripts/apply-branch-protection.sh").text();
     const reviewerWrapper = await Bun.file("scripts/run-samorev-review.sh").text();
+    const tagActorGate = "scripts/check-release-tag-actor.sh";
     expect(workflow).toContain('bash scripts/check-release-review-evidence.sh "$reviewed_sha"');
     expect(workflow).toContain("TAG_PUSHER_ID: ${{ github.actor_id }}");
-    expect(workflow).toContain('[ "$TAG_PUSHER_ID" != "280144521" ]');
+    expect(workflow).toContain('bash scripts/check-release-tag-actor.sh "$TAG_PUSHER_ID"');
     expect(workflow).not.toContain('/reviews\")');
     expect(workflow).not.toContain('.state == "APPROVED"');
     expect(gate).toContain('actions/workflows/ci.yml/runs?event=pull_request&head_sha=$reviewed_sha');
@@ -26,6 +27,7 @@ describe("deploy review revalidation", () => {
     expect(gate).toContain('.target_url == $publisher_url');
     expect(gate).toContain("sort_by(.created_at, .id) | last");
     expect(gate).toContain('.creator.id == 280144521');
+    expect(gate).toContain("gh api --paginate --slurp");
     expect(gate).not.toContain('.creator.login == "samo-agent"');
     expect(codeowners.trim()).toBe("* @samo-agent");
     expect(branchPolicy.repository_rulesets).toEqual([{
@@ -58,6 +60,14 @@ describe("deploy review revalidation", () => {
     expect(documentation).toContain("every changed enforcement script under\n`scripts/check-*.sh`");
     expect(documentation).toContain("Actions bot's immutable ID, not `280144521`");
     expect(documentation).toContain("GitHub Actions is not a bypass actor");
+    const runTagActorGate = (actor?: string): Promise<number> => Bun.spawn([
+      "bash", tagActorGate, ...(actor === undefined ? [] : [actor]),
+    ], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" }).exited;
+    expect(await runTagActorGate("280144521")).toBe(0);
+    expect(await runTagActorGate("1345402")).toBe(1);
+    expect(await runTagActorGate("41898282")).toBe(1);
+    expect(await runTagActorGate("")).toBe(1);
+    expect(await runTagActorGate()).toBe(1);
     const reviewGate = workflow.slice(workflow.indexOf("  review-gate:"), workflow.indexOf("\n  deploy:"));
     const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
     expect(reviewGate).toContain("actions: read");
@@ -115,9 +125,9 @@ case "$endpoint" in
     target=https://github.com/example/gitzette/actions/runs/2
     [[ "$mode" != wrong-publisher-target ]] || target=https://github.com/example/gitzette/actions/runs/1
     created_at=2026-01-03T00:00:00Z; [[ "$mode" != predated-verdict ]] || created_at=2026-01-01T00:00:00Z
-    jq -nc --arg state "$latest_state" --argjson actor "$latest_id" --arg login "$latest_login" --arg target "$target" --arg created_at "$created_at" '[
+    jq -nc --arg state "$latest_state" --argjson actor "$latest_id" --arg login "$latest_login" --arg target "$target" --arg created_at "$created_at" '[[
       {id:1,context:"samorev",state:"success",created_at:"2026-01-01T00:00:00Z",target_url:"https://github.com/example/gitzette/actions/runs/1",creator:{id:280144521,login:"samo-agent"}},
-      {id:2,context:"samorev",state:$state,created_at:$created_at,target_url:$target,creator:{id:$actor,login:$login}}]'
+      {id:2,context:"samorev",state:$state,created_at:$created_at,target_url:$target,creator:{id:$actor,login:$login}}]]'
     ;;
   *) exit 91 ;;
 esac

@@ -157,6 +157,13 @@ text matching is not the authorization proof.
    table as a durable consumed-once marker. A second export cannot recreate
    that table. Keep repository secrets as rollback copies.
 
+   The export POST is deliberately never retried. If its job is red because the
+   response was lost, do not dispatch another export. Close the switch, run the
+   read-only query below for that exact `RUN_ID`, and continue this step when
+   the row exists and decrypts correctly. If the table or exact row is absent,
+   stop with repository rollback copies intact and investigate; never replay
+   the one-shot batch.
+
    ```bash
    set -euo pipefail
    gh variable delete CREDENTIAL_EXPORT_OPEN
@@ -338,7 +345,8 @@ text matching is not the authorization proof.
    `main` branch entry from
    `config/production-environment.json`, apply the restored `v*`-only policy,
    remove the `credential_migration_transfer` exclusions from all three
-   production schema gates, and audit the ordinary exact-schema policy before
+   production schema gates, remove the transient credential-migration
+   readability block from `.github/workflows/ci.yml`, and audit the ordinary exact-schema policy before
    any later release. Run and record the final green guard
    before deleting its workflow; after merge, prove the two
    workflow files and temporary configs/scripts are absent from `main` and the

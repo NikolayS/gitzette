@@ -62,10 +62,13 @@ only RepositoryRole 5 (repository administrator) to update `main`, so a
 same-repository Actions token cannot turn forged contexts into a merge. The
 administrator remains subject to classic technical gates and resolved
 conversations. Repository auto-merge is disabled and audited; only Nik's
-explicit merge can use the administrator bypass. GitHub's repository-rules API defines actor ID 5 as the
-repository-admin role; the pre-apply inventory requires the only admin to be
-NikolayS (`1345402`), and the post-apply response must report that applying
-identity's `current_user_can_bypass` as `always`. Merge does not authorize a release:
+explicit merge can use the administrator bypass. The policy uses GitHub's
+built-in RepositoryRole ID 5 for repository administrators; the pre-apply
+inventory requires the only admin to be NikolayS (`1345402`). After mutation,
+the apply script re-GETs the ruleset and requires the admin's
+`current_user_can_bypass` to be `always`, then queries the same ruleset with the
+non-admin `samo-agent` token and requires `current_user_can_bypass` to be
+`never`. Merge does not authorize a release:
 the tag workflow revalidates the external exact-head evidence, and its
 deployment cannot read production credentials without a new approval from Nik
 in the non-bypassable `production` environment. Repository Actions cannot mint
@@ -107,16 +110,9 @@ environment, with `refs/heads/main` separately pinned by `authorize-export`.
 Protected `main` is currently the only admitted export ref; adding another
 protected branch would expand the environment and requires a fresh review. It
 does not narrow the existing repository-secret exposure, which is why #67 must
-close the window immediately after verification. Follow
-`docs/credential-migration.md`; #67 deletes
-`.github/workflows/migrate-production-credentials.yml`,
-`.github/workflows/credential-migration-policy-guard.yml`, the temporary
-credential-migration config, `scripts/apply-credential-migration-environment.sh`,
-`scripts/check-credential-migration-environment.sh`,
-`scripts/get-github-environment.sh`,
-`scripts/credential-migration-gate.test.ts`,
-the live `credential-migration` environment, and `CREDENTIAL_EXPORT_OPEN` plus
-`CREDENTIAL_VERIFY_OPEN` in the same recovery cycle. After its stored-value verification
+close the window immediately after verification. The canonical, mechanically
+checkable #67 teardown list is step 8 of `docs/credential-migration.md`; this
+document deliberately does not duplicate it. After its stored-value verification
 and repository-copy deletion, deployment credentials are available only to the
 protected `production` environment; tag-triggered deploys require that
 environment's approval. Release tags must be pushed by immutable `samo-agent`
@@ -286,7 +282,9 @@ reapply the legacy approval rule. Audit production policy before migration:
 
 ```bash
 bash scripts/check-branch-protection.sh
-bash scripts/check-reviewer-credential-isolation.sh
+samo_token="$(gh auth token --user samo-agent)"
+GH_TOKEN="$samo_token" bash scripts/check-branch-protection-nonadmin.sh
+GH_TOKEN="$samo_token" bash scripts/check-reviewer-credential-isolation.sh
 bash scripts/check-production-environment.sh
 ```
 

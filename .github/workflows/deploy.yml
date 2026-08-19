@@ -26,10 +26,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG_PUSHER_ID: ${{ github.actor_id }}
         run: |
-          if [ "$TAG_PUSHER_ID" != "280144521" ]; then
-            echo "release tags must be pushed by samo-agent so Nik can approve production" >&2
-            exit 1
-          fi
+          bash scripts/check-release-tag-actor.sh "$TAG_PUSHER_ID"
           git fetch --no-tags origin main
           main_sha="$(git rev-parse origin/main)"
           if [ "$GITHUB_SHA" != "$main_sha" ]; then

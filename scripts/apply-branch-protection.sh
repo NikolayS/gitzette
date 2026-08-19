@@ -39,8 +39,10 @@ else
   ruleset_endpoint="repos/$repository/rulesets"
   ruleset_method=POST
 fi
-live_ruleset="$(jq '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload" |
+ruleset_mutation="$(jq '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload" |
   gh api --method "$ruleset_method" "$ruleset_endpoint" --input -)"
+ruleset_id="$(jq -er .id <<<"$ruleset_mutation")"
+live_ruleset="$(gh api "repos/$repository/rulesets/$ruleset_id")"
 if [[ "$(jq -r .current_user_can_bypass <<<"$live_ruleset")" != always ]]; then
   echo "the applying repository administrator does not have the expected ruleset bypass" >&2
   exit 1
@@ -51,6 +53,12 @@ if [[ "$normalized_ruleset" != "$expected_ruleset" ]]; then
   echo "main update-restriction ruleset did not apply exactly" >&2
   exit 1
 fi
+
+# GitHub's built-in RepositoryRole ID 5 is documented as admin. Prove the
+# effective boundary too: the write-role samo-agent identity must not bypass it.
+samo_token="$(env -u GH_TOKEN gh auth token --user samo-agent)"
+GH_TOKEN="$samo_token" GITHUB_REPOSITORY="$repository" \
+  "$root/scripts/check-branch-protection-nonadmin.sh"
 
 jq '.actions_workflow_permissions' "$policy" | gh api --method PUT \
   "repos/$repository/actions/permissions/workflow" --input - --silent

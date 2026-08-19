@@ -51,7 +51,7 @@ if ! jq -e --arg sha "$reviewed_sha" --arg repository "$repository" '
   exit 1
 fi
 
-statuses="$(gh api "repos/$repository/commits/$reviewed_sha/statuses?per_page=100")"
+statuses="$(gh api --paginate --slurp "repos/$repository/commits/$reviewed_sha/statuses?per_page=100" | jq -c 'add // []')"
 publisher_url="$(jq -er .html_url <<<"$gate_run")"
 publisher_started_at="$(jq -er .run_started_at <<<"$gate_run")"
 if ! jq -e --arg publisher_url "$publisher_url" --arg publisher_started_at "$publisher_started_at" '
