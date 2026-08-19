@@ -22,7 +22,7 @@ jobs:
         run: |
           # GitHub's Azure mirror can stall indefinitely; prefer the HTTPS Ubuntu archive when this runner file exists.
           if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-            sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
+            sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
             if grep -q 'azure.archive.ubuntu.com' /etc/apt/apt-mirrors.txt; then
               echo "Azure Ubuntu mirror rewrite did not take effect" >&2
               exit 1
@@ -59,7 +59,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/environments/production" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/environments/production" \
+            --jq 'has("can_admins_bypass")' | grep -qx true
           gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=1" >/dev/null
       - run: bun run test:all
       - run: bash scripts/evaluate-samorev-status.test.sh

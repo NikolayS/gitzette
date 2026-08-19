@@ -80,9 +80,10 @@ text matching is not the authorization proof.
    disable **Allow administrators to bypass configured protection rules** in
    Settings -> Environments -> `credential-migration`, then rerun the apply
    command. This UI-only action is expected after first creating the
-   environment and is required before export. Production is never widened during
-   this migration: reviewed `main` is permanently admitted for the one-shot
-   verifier, and every production job still requires Nik's environment approval.
+   environment and is required before export. Production is temporarily widened
+   from `v*` tags to reviewed `main` plus `v*` for this bootstrap so the one-shot
+   verifier can run. Every production job still requires Nik's environment
+   approval, and #67 restores the `v*`-only policy during teardown.
    Both apply scripts refuse to mutate an existing environment while that
    bypass is enabled. After first creation each apply command re-reads the
    environment and hard-fails if the API reports bypass enabled. Nik must disable
@@ -264,9 +265,9 @@ text matching is not the authorization proof.
    bash scripts/check-production-environment.sh
    ```
 
-   Production is not widened, so cancellation cannot strand a broader deploy
-   policy. On any abort or operator shell interruption, close the verification
-   switch and re-audit immediately:
+   The temporary `main` admission remains bounded by Nik's production approval;
+   cancellation does not bypass that approval. On any abort or operator shell
+   interruption, close the verification switch and re-audit immediately:
 
    ```bash
    gh variable delete CREDENTIAL_VERIFY_OPEN
@@ -274,8 +275,9 @@ text matching is not the authorization proof.
    ```
 
    A best-effort scheduled guard also runs approximately every five minutes on
-   GitHub's scheduler. Its production-policy job always checks the same fixed
-   `main` plus `v*` policy; therefore policy drift is never an expected result.
+   GitHub's scheduler. Its production-policy job checks both the temporary fixed
+   `main` plus `v*` policy and the Nik-only credential-migration approval
+   boundary; policy drift is never an expected result.
    Its separate
    switch-residue job is expected red during an open export switch or the
    legitimate production approval wait.

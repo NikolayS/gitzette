@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { createHash, createPublicKey, generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -56,8 +57,8 @@ describe("one-shot credential migration boundary", () => {
     expect(parsed.jobs["verify-production-credentials"].if).toBe("${{ inputs.operation == 'verify' }}");
     expect(parsed.jobs["verify-production-credentials"].environment).toBe("production");
     expect(parsed.jobs["authorize-export"].permissions).toEqual({ actions: "read", contents: "read" });
-    expect(workflow).toContain("only the earliest credential export run may continue");
-    expect(workflow).toContain("display_title == \"credential migration: export\"");
+    expect(workflow).not.toContain("earliest credential export run");
+    expect(workflow).not.toContain("display_title == \"credential migration: export\"");
     for (const name of ["export-encrypted-credentials", "verify-production-credentials"]) {
       const jobRun = parsed.jobs[name].steps.map(({ run }) => run ?? "").join("\n");
       expect(jobRun).toContain('triggering_actor_id="$(curl');
@@ -134,7 +135,8 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("remaining_repository_cloudflare_secrets");
     expect(migrationDoc).toContain("GitHub can silently fall back");
     expect(migrationDoc).toContain("GitHub pins the workflow\n   run to the immutable `main` SHA at dispatch");
-    expect(migrationDoc).toContain("Production is not widened");
+    expect(migrationDoc).toContain("Production is temporarily widened");
+    expect(migrationDoc).toContain("#67 restores the `v*`-only policy");
     expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
       migrationDoc.indexOf("drop table credential_migration_transfer"),
@@ -158,9 +160,11 @@ describe("one-shot credential migration boundary", () => {
     };
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
     expect(policyGuard).toContain("bash scripts/check-production-environment.sh");
+    expect(policyGuard).toContain("bash scripts/check-credential-migration-environment.sh");
     expect(policyGuard).toContain("CRITICAL: production no longer admits exactly protected main and release tags");
     expect(policyGuard).toContain("GUARD UNREADABLE: production environment API evidence could not be retrieved");
     expect(policyGuard).toContain("CRITICAL: production environment is missing");
+    expect(policyGuard).toContain("CRITICAL: credential-migration no longer requires Nik-only approval with self-review blocked");
     expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" ]]');
     expect(policyGuard).not.toContain("github.event.repository.fork");
     expect(policyGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
@@ -228,14 +232,6 @@ if [[ "$arguments" == *'/approvals'* ]]; then
   if [[ "\${FAKE_APPROVAL_EMPTY:-false}" == true ]]; then printf '[]\\n'; else
     printf '[{"state":"%s","user":{"id":%s},"environments":[{"name":"%s"}]}]\\n' "\${FAKE_APPROVAL_STATE:-approved}" "\${FAKE_APPROVER_ID:-1345402}" "\${FAKE_APPROVAL_ENV:-credential-migration}"
   fi
-elif [[ "$arguments" == *'/actions/workflows/migrate-production-credentials.yml/runs?event=workflow_dispatch'* ]]; then
-  if [[ "\${FAKE_EARLIER_EXPORT:-false}" == true ]]; then
-    printf '%s\\n' '{"total_count":2,"workflow_runs":[{"id":76,"event":"workflow_dispatch","display_title":"credential migration: export"},{"id":77,"event":"workflow_dispatch","display_title":"credential migration: export"}]}'
-  elif [[ "\${FAKE_INCOMPLETE_RUNS:-false}" == true ]]; then
-    printf '%s\\n' '{"total_count":2,"workflow_runs":[{"id":77,"event":"workflow_dispatch","display_title":"credential migration: export"}]}'
-  else
-    printf '%s\\n' '{"total_count":1,"workflow_runs":[{"id":77,"event":"workflow_dispatch","display_title":"credential migration: export"}]}'
-  fi
 elif [[ "$arguments" == *'/actions/runs/'* ]]; then
   printf '{"triggering_actor":{"id":%s}}\\n' "\${FAKE_ACTOR_ID:-280144521}"
 elif [[ "$arguments" == *'/commits/main'* ]]; then
@@ -277,8 +273,6 @@ fi
     expect(await execute(authorizeRun, { EXPORT_OPEN: "True" })).toBe(1);
     expect(await execute(authorizeRun, { EXPORT_OPEN: "true " })).toBe(1);
     expect(await execute(authorizeRun, { FAKE_ACTOR_ID: "1" })).toBe(1);
-    expect(await execute(authorizeRun, { FAKE_EARLIER_EXPORT: "true" })).toBe(1);
-    expect(await execute(authorizeRun, { FAKE_INCOMPLETE_RUNS: "true" })).not.toBe(0);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: undefined })).toBe(1);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: "True" })).toBe(1);
     expect(await execute(revalidateRun, { MIGRATION_OPEN: "true " })).toBe(1);
@@ -358,8 +352,24 @@ fi
     expect(d1Request.batch[0].sql).toContain("create table credential_migration_transfer");
     expect(d1Request.batch[0].sql).not.toContain("if not exists");
     expect(d1Request.batch[1].sql).toContain("insert into credential_migration_transfer");
+    expect(d1Request.batch[1].sql).toContain("datetime('now')");
     expect(d1Request.batch[1].params[0]).toBe("77");
     expect(d1Request.batch[1].params[1]).toBe(Buffer.from(await Bun.file(encryptedPath).arrayBuffer()).toString("base64"));
+    const transferDb = new Database(":memory:");
+    for (const statement of d1Request.batch) {
+      transferDb.prepare(statement.sql).run(...(statement.params ?? []));
+    }
+    expect(transferDb.query("select run_id, ciphertext, created_at from credential_migration_transfer").get()).toEqual({
+      run_id: "77",
+      ciphertext: d1Request.batch[1].params[1],
+      created_at: expect.any(String),
+    });
+    expect(() => {
+      for (const statement of d1Request.batch) {
+        transferDb.prepare(statement.sql).run(...(statement.params ?? []));
+      }
+    }).toThrow();
+    transferDb.close();
     expect(await Bun.spawn(["bash", "-c", executableExport], {
       env: { ...exportEnv, CLOUDFLARE_API_TOKEN: "" }, stdout: "pipe", stderr: "pipe",
     }).exited).toBe(1);
