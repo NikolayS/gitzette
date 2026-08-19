@@ -70,13 +70,23 @@ describe("one-shot credential migration boundary", () => {
       can_admins_bypass: boolean;
       branch_policies: Array<{ name: string; type: string }>;
     };
+    const migrationProductionPolicy = JSON.parse(await Bun.file("config/production-environment-migration.json").text()) as {
+      can_admins_bypass: boolean;
+      branch_policies: Array<{ name: string; type: string }>;
+    };
     expect(productionPolicy.can_admins_bypass).toBe(false);
-    expect(productionPolicy.branch_policies).toEqual([
+    expect(productionPolicy.branch_policies).toEqual([{ name: "v*", type: "tag" }]);
+    expect(migrationProductionPolicy.can_admins_bypass).toBe(false);
+    expect(migrationProductionPolicy.branch_policies).toEqual([
       { name: "v*", type: "tag" },
       { name: "credential-migration-verify", type: "tag" },
     ]);
-    expect(await Bun.file("scripts/apply-production-environment.sh").text()).toContain("can_admins_bypass");
-    expect(await Bun.file("scripts/check-production-environment.sh").text()).toContain("can_admins_bypass: $environment.can_admins_bypass");
+    const applyProduction = await Bun.file("scripts/apply-production-environment.sh").text();
+    const checkProduction = await Bun.file("scripts/check-production-environment.sh").text();
+    expect(applyProduction).toContain("can_admins_bypass");
+    expect(applyProduction).toContain('check-production-environment.sh" "$mode"');
+    expect(checkProduction).toContain("can_admins_bypass: $environment.can_admins_bypass");
+    expect(checkProduction).toContain("admitted refs: $policy_names");
 
     const encoded = workflow.match(/^\s*RSA_PUBLIC_KEY_PEM_B64:\s*(\S+)$/m)?.[1];
     expect(encoded).toBeDefined();
@@ -89,9 +99,28 @@ describe("one-shot credential migration boundary", () => {
     const documentedFingerprints = migrationDoc.match(/[0-9a-f]{64}/g) ?? [];
     expect(documentedFingerprints.length).toBeGreaterThan(0);
     expect([...new Set(documentedFingerprints)]).toEqual([fingerprint]);
-    expect(migrationDoc).toContain("-v2 aes-256-cbc");
+    expect(migrationDoc).toContain("set -euo pipefail");
+    expect(migrationDoc).toContain("-v2 aes-256-cbc -v2prf hmacWithSHA256 -iter 600000");
+    expect(migrationDoc.indexOf('[[ "$actual_fingerprint" != "$expected_fingerprint" ]]')).toBeLessThan(
+      migrationDoc.indexOf('shred -u "$private_key"'),
+    );
     expect(migrationDoc).toContain("$MIGRATION_KEY_DIR/production-migration-private.pem");
     expect(migrationDoc).not.toContain("/home/tars/");
+    expect(migrationDoc).toContain("token_count=\"$(grep -c");
+    expect(migrationDoc).not.toContain("export CLOUDFLARE_API_TOKEN");
+
+    const deploy = await Bun.file(".github/workflows/deploy.yml").text();
+    expect(deploy).toContain("tags:\n      - 'v*'");
+    expect(deploy).not.toContain("workflow_dispatch");
+    const productionConsumers: string[] = [];
+    for await (const name of new Bun.Glob("*.yml").scan(".github/workflows")) {
+      const path = `.github/workflows/${name}`;
+      if ((await Bun.file(path).text()).includes("environment: production")) productionConsumers.push(path);
+    }
+    expect(productionConsumers.sort()).toEqual([
+      ".github/workflows/deploy.yml",
+      ".github/workflows/migrate-production-credentials.yml",
+    ]);
 
     const authorizeRun = parsed.jobs["authorize-export"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
     const revalidateRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Revalidate"))?.run;
@@ -239,6 +268,51 @@ fi
     expect(await Bun.spawn(["bash", "-c", exportRun ?? "exit 99"], {
       env: exportEnv, stdout: "pipe", stderr: "pipe",
     }).exited).toBe(1);
+  });
+
+  test("makes temporary production-tag widening explicit and stale widening fail loud", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gitzette-production-policy-mode-"));
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    const gh = join(bin, "gh");
+    await Bun.write(gh, `#!/usr/bin/env bash
+set -euo pipefail
+endpoint="\${*: -1}"
+case "$endpoint" in
+  repos/example/gitzette/environments/production)
+    printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+    ;;
+  *deployment-branch-policies*)
+    if [[ "\${FAKE_LIVE_POLICY:-default}" == migration ]]; then
+      printf '%s\\n' '[{"branch_policies":[{"name":"v*","type":"tag"},{"name":"credential-migration-verify","type":"tag"}]}]'
+    else
+      printf '%s\\n' '[{"branch_policies":[{"name":"v*","type":"tag"}]}]'
+    fi
+    ;;
+  *) exit 91 ;;
+esac
+`);
+    await Bun.spawn(["chmod", "+x", gh]).exited;
+    const run = async (mode: string, live: string): Promise<{ code: number; stdout: string; stderr: string }> => {
+      const child = Bun.spawn(["bash", "scripts/check-production-environment.sh", mode], {
+        cwd: process.cwd(),
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_LIVE_POLICY: live },
+        stdout: "pipe", stderr: "pipe",
+      });
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      ]);
+      return { code, stdout, stderr };
+    };
+    const normal = await run("default", "default");
+    expect(normal.code).toBe(0);
+    expect(normal.stdout).toContain("admitted refs: v*");
+    expect((await run("default", "migration")).code).toBe(1);
+    const migration = await run("migration", "migration");
+    expect(migration.code).toBe(0);
+    expect(migration.stdout).toContain("admitted refs: v*, credential-migration-verify");
+    expect((await run("migration", "default")).code).toBe(1);
+    expect((await run("attacker", "default")).code).toBe(2);
   });
 
   test("executes the reviewed environment policy against live-response shapes", async () => {

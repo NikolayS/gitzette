@@ -11,6 +11,7 @@
     "custom_branch_policies": true
   },
   "branch_policies": [
-    { "name": "v*", "type": "tag" }
+    { "name": "v*", "type": "tag" },
+    { "name": "credential-migration-verify", "type": "tag" }
   ]
 }

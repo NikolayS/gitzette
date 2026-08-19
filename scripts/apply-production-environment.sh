@@ -7,7 +7,12 @@ if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
-policy="$root/config/production-environment.json"
+mode="${1:-default}"
+case "$mode" in
+  default) policy="$root/config/production-environment.json" ;;
+  migration) policy="$root/config/production-environment-migration.json" ;;
+  *) echo "usage: $0 [default|migration]" >&2; exit 2 ;;
+esac
 
 jq '{wait_timer,can_admins_bypass,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' "$policy" |
   gh api --method PUT "repos/$repository/environments/production" --input - --silent
@@ -25,4 +30,4 @@ while IFS=$'\t' read -r name type; do
   fi
 done < <(jq -r '.branch_policies[] | [.name,.type] | @tsv' "$policy")
 
-"$root/scripts/check-production-environment.sh"
+"$root/scripts/check-production-environment.sh" "$mode"

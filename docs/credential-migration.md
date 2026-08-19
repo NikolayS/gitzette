@@ -19,17 +19,24 @@ session after service restoration.
    plaintext input only after the encrypted copy's fingerprint is verified.
 
    ```bash
+   set -euo pipefail
    export MIGRATION_KEY_DIR="${MIGRATION_KEY_DIR:?set a private directory}"
    install -d -m 0700 "$MIGRATION_KEY_DIR"
    private_key="$MIGRATION_KEY_DIR/production-migration-private.pem"
    encrypted_key="$MIGRATION_KEY_DIR/production-migration-private.encrypted.pem"
    test -s "$private_key"
-   openssl pkcs8 -topk8 -v2 aes-256-cbc -in "$private_key" -out "$encrypted_key"
+   openssl pkcs8 -topk8 -v2 aes-256-cbc -v2prf hmacWithSHA256 -iter 600000 \
+     -in "$private_key" -out "$encrypted_key"
    chmod 600 "$encrypted_key"
    openssl pkey -in "$encrypted_key" \
      -pubout -out "$MIGRATION_KEY_DIR/production-migration-public.pem"
-   openssl pkey -in "$encrypted_key" \
-     -pubout -outform DER | sha256sum
+   expected_fingerprint=7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc
+   actual_fingerprint="$(openssl pkey -in "$encrypted_key" \
+     -pubout -outform DER | sha256sum | awk '{print $1}')"
+   if [[ "$actual_fingerprint" != "$expected_fingerprint" ]]; then
+     echo "encrypted migration key fingerprint mismatch" >&2
+     exit 1
+   fi
    shred -u "$private_key"
    mv "$encrypted_key" "$private_key"
    ```
@@ -38,13 +45,17 @@ session after service restoration.
    `7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc`.
 
 1. From a clean checkout of protected `main`, apply and verify both reviewed
-   environments. `production` temporarily admits the exact non-release tag
+   environments. Migration mode temporarily admits the exact non-release tag
    `credential-migration-verify`; no out-of-band policy widening is needed.
 
    ```bash
    bash scripts/apply-credential-migration-environment.sh
-   bash scripts/apply-production-environment.sh
+   bash scripts/apply-production-environment.sh migration
    ```
+
+   The default production policy remains `v*` only. Running
+   `bash scripts/check-production-environment.sh` without `migration` therefore
+   fails while the temporary tag is admitted and makes stale widening loud.
 
 2. Open the independently removable switch and dispatch exactly one export as
    immutable runner ID `280144521` (`samo-agent`). The workflow concurrency
@@ -75,7 +86,11 @@ session after service restoration.
 
    ```bash
    set -euo pipefail
-   export CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' /private/operator/token.env)"
+   operator_token_file="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
+   token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$operator_token_file" || true)"
+   [[ "$token_count" == 1 ]]
+   d1_token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$operator_token_file")"
+   [[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
    account_id="a3265e0d0db71fdece29365819452f00"
    database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
    migration_dir="$MIGRATION_KEY_DIR/run-RUN_ID-1"
@@ -88,7 +103,7 @@ session after service restoration.
      --connect-timeout 10 --max-time 30 --config - \
      -H 'Content-Type: application/json' --data-binary "@$migration_dir/select.json" \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
-     <<<"header = \"Authorization: Bearer $CLOUDFLARE_API_TOKEN\"" |
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
      jq -er '.result[0].results[0].ciphertext')"
    printf '%s' "$ciphertext" | base64 --decode >"$migration_dir/credentials.bin"
    plaintext="$(openssl pkeyutl -decrypt \
@@ -104,7 +119,7 @@ session after service restoration.
      --connect-timeout 10 --max-time 30 --config - \
      -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
-     <<<"header = \"Authorization: Bearer $CLOUDFLARE_API_TOKEN\"" |
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
      jq -e '.success == true and .result[0].success == true' >/dev/null
    gh api --method DELETE repos/NikolayS/gitzette/actions/runs/RUN_ID/logs
    ```
@@ -132,7 +147,10 @@ session after service restoration.
    dispatch stored-value verification as `samo-agent`. The workflow checks the
    tag name and re-resolves protected `main` both before and after Nik's
    production approval. It fails if `main` moved. This tag does not match the
-   release workflow's `v*` trigger.
+   release workflow's `v*` trigger. The tag itself is not trusted as an
+   identity boundary: the verifier's two protected-`main` comparisons are.
+   `deploy.yml` is the only other production consumer and cannot start from
+   this fixed tag.
 
    ```bash
    git fetch origin main
@@ -145,6 +163,7 @@ session after service restoration.
    gh run watch VERIFY_RUN_ID --exit-status
    git push origin :refs/tags/credential-migration-verify
    git tag -d credential-migration-verify
+   bash scripts/apply-production-environment.sh default
    bash scripts/check-production-environment.sh
    ```
 
@@ -165,7 +184,7 @@ session after service restoration.
    rmdir "$migration_dir"
    shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"
    rm -f "$MIGRATION_KEY_DIR/production-migration-public.pem"
-   unset plaintext ciphertext account_id api_token CLOUDFLARE_API_TOKEN
+   unset plaintext ciphertext account_id api_token d1_token
    ```
 
 8. Through the exact-head review gate, delete this workflow, its temporary

@@ -37,14 +37,17 @@ cache scope with a read-only token, no repository secrets, and no persisted Git
 credential. The `pull_request_target` publisher executes only protected-main
 code. Until the one-shot recovery completes, the Cloudflare credentials are
 repository-scoped and therefore potentially readable by any same-repository
-workflow job. The bootstrap admits only the reviewed
-`.github/workflows/migrate-production-credentials.yml` reader behind
-the temporary Nik-only, self-review-blocked, main-only `credential-migration`
-environment. Follow `docs/credential-migration.md`; #67 deletes that workflow
-and environment in the same recovery cycle. After its stored-value verification
+workflow job. The bootstrap adds exactly one new intentional reader,
+`.github/workflows/migrate-production-credentials.yml`, gated by the temporary
+Nik-only, self-review-blocked, main-only `credential-migration` environment. It
+does not narrow the existing repository-secret exposure, which is why #67 must
+close the window immediately after verification. Follow
+`docs/credential-migration.md`; #67 deletes that workflow and environment in
+the same recovery cycle. After its stored-value verification
 and repository-copy deletion, deployment credentials are available only to the
 protected `production` environment; tag-triggered deploys require that
 environment's approval.
+
 The exporter writes only RSA-encrypted ciphertext to a transient table in the
 private D1 database; no public Actions artifact is created. Stored-value
 verification uses the exact non-release tag `credential-migration-verify`,
