@@ -7,20 +7,29 @@ merge or release gate.
 
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
-remains meaningful. Classic branch protection cannot bind a status to its
+remains meaningful. `dismiss_stale_reviews`, `dismissal_restrictions`, and
+`bypass_pull_request_allowances` are retained as fail-closed drift anchors, not
+as active approval controls. Classic branch protection cannot bind a status to its
 creator: any repository workflow with `statuses: write` runs as the shared
 Actions app. The protected-main publisher itself validates the external
 `samo-agent` status's immutable user ID and freshness before publishing its
 result, and deployment revalidates the latest statuses. Before polling, the
 base-controlled publisher parses changed workflows as YAML and rejects any
-base-to-head broadening of `statuses: write`, `checks: write`, or `write-all` at
-workflow or job scope. Its tests cover aliases/tags/folded values, large files,
-deletions, empty workflow diffs, and unchanged existing privilege. This blocks
+merge-base-to-head broadening of `statuses: write`, `checks: write`, or
+`write-all` across trigger, workflow, and job scope. Its tests cover
+aliases/tags/folded values, large files, deletions, empty workflow diffs,
+head-controlled trigger additions, and unchanged existing privilege. This blocks
 a PR from adding a new self-publishing workflow without permanently locking the
 publisher workflow against behavior-only maintenance. The gate still trusts
 repository administrator credentials, installed Apps, and the identity-checked
 samorev verdict to review behavior changes that retain an existing permission
 set.
+
+Classic branch protection enforces `samorev` by context name only because the
+external user status has no bindable GitHub App ID. The immutable creator check
+is performed by the protected-main poller, not by branch protection itself; the
+poller's workflow, inputs, and permission/trigger boundary must therefore never
+become PR-controlled. Deployment repeats the immutable creator check.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,

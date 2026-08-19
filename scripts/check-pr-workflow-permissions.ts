@@ -6,6 +6,12 @@ function isRecord(value: unknown): value is Document {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function parseWorkflow(source: string): Document {
+  const parsed = Bun.YAML.parse(source);
+  if (!isRecord(parsed)) throw new Error("workflow must be a YAML mapping");
+  return parsed;
+}
+
 function permissionsFrom(value: unknown, location: string): Set<string> {
   if (value === undefined || value === null || value === "read-all") return new Set();
   if (value === "write-all") return new Set(protectedScopes.map((scope) => `${location}:${scope}`));
@@ -22,8 +28,7 @@ function permissionsFrom(value: unknown, location: string): Set<string> {
 }
 
 export function workflowWritePermissions(source: string): Set<string> {
-  const parsed = Bun.YAML.parse(source);
-  if (!isRecord(parsed)) throw new Error("workflow must be a YAML mapping");
+  const parsed = parseWorkflow(source);
   const result = permissionsFrom(parsed.permissions, "workflow");
   if (parsed.jobs !== undefined && !isRecord(parsed.jobs)) throw new Error("workflow jobs must be a mapping");
   if (isRecord(parsed.jobs)) {
@@ -31,6 +36,23 @@ export function workflowWritePermissions(source: string): Set<string> {
       if (!isRecord(job)) throw new Error("workflow job must be a mapping");
       for (const scope of permissionsFrom(job.permissions, `job:${name}`)) result.add(scope);
     }
+  }
+  return result;
+}
+
+function workflowTriggers(source: string): Set<string> {
+  const on = parseWorkflow(source).on;
+  if (typeof on === "string") return new Set([on]);
+  if (Array.isArray(on) && on.every((trigger) => typeof trigger === "string")) return new Set(on);
+  if (isRecord(on)) return new Set(Object.keys(on));
+  throw new Error("workflow on trigger must be a string, array, or mapping");
+}
+
+function workflowPrivileges(source: string): Set<string> {
+  const permissions = workflowWritePermissions(source);
+  const result = new Set<string>();
+  for (const trigger of workflowTriggers(source)) {
+    for (const permission of permissions) result.add(`${trigger}|${permission}`);
   }
   return result;
 }
@@ -45,8 +67,10 @@ function runGit(cwd: string, args: string[], allowFailure = false): string | nul
 }
 
 function workflowFiles(cwd: string, baseSha: string, headSha: string): string[] {
+  const mergeBase = runGit(cwd, ["merge-base", baseSha, headSha]);
+  if (!mergeBase) throw new Error("could not resolve PR merge base");
   const output = runGit(cwd, [
-    "diff", "--name-only", "-z", baseSha, headSha, "--",
+    "diff", "--name-only", "-z", mergeBase.trim(), headSha, "--",
     ".github/workflows/*.yml", ".github/workflows/*.yaml",
   ]) ?? "";
   return output.split("\0").filter(Boolean);
@@ -57,10 +81,11 @@ function workflowAt(cwd: string, sha: string, path: string): string | null {
   return runGit(cwd, ["show", `${sha}:${path}`]);
 }
 
-function permissionIsCovered(permission: string, basePermissions: Set<string>): boolean {
-  if (basePermissions.has(permission)) return true;
+function privilegeIsCovered(privilege: string, basePrivileges: Set<string>): boolean {
+  if (basePrivileges.has(privilege)) return true;
+  const [trigger, permission] = privilege.split("|");
   const parts = permission.split(":");
-  return parts[0] === "job" && basePermissions.has(`workflow:${parts.at(-1)}`);
+  return parts[0] === "job" && basePrivileges.has(`${trigger}|workflow:${parts.at(-1)}`);
 }
 
 export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: string): void {
@@ -70,9 +95,9 @@ export function checkWorkflowChanges(cwd: string, baseSha: string, headSha: stri
     const headSource = workflowAt(cwd, headSha, path);
     if (headSource === null) continue;
     const baseSource = workflowAt(cwd, baseSha, path);
-    const basePermissions = baseSource === null ? new Set<string>() : workflowWritePermissions(baseSource);
-    const headPermissions = workflowWritePermissions(headSource);
-    const broadened = [...headPermissions].filter((scope) => !permissionIsCovered(scope, basePermissions));
+    const basePrivileges = baseSource === null ? new Set<string>() : workflowPrivileges(baseSource);
+    const headPrivileges = workflowPrivileges(headSource);
+    const broadened = [...headPrivileges].filter((scope) => !privilegeIsCovered(scope, basePrivileges));
     if (broadened.length > 0) {
       throw new Error(`PR broadens privileged workflow permissions in ${path}: ${broadened.join(", ")}`);
     }

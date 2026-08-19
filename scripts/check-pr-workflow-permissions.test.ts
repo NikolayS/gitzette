@@ -48,7 +48,7 @@ describe("base-controlled workflow permission boundary", () => {
     git(cwd, "config", "user.name", "test");
     await mkdir(join(cwd, ".github/workflows"), { recursive: true });
     await Bun.write(join(cwd, "README.md"), "base\n");
-    await Bun.write(join(cwd, ".github/workflows/ci.yml"), "permissions: {contents: read}\njobs: {}\n");
+    await Bun.write(join(cwd, ".github/workflows/ci.yml"), "on: pull_request\npermissions: {contents: read}\njobs: {}\n");
     const base = await commit(cwd, "base");
 
     await Bun.write(join(cwd, "README.md"), "no workflow change\n");
@@ -59,7 +59,7 @@ describe("base-controlled workflow permission boundary", () => {
     const deleted = await commit(cwd, "deleted workflow");
     expect(() => checkWorkflowChanges(cwd, noWorkflow, deleted)).not.toThrow();
 
-    const large = `permissions: {statuses: write}\njobs: {}\n# ${"x".repeat(70_000)}\n`;
+    const large = `on: pull_request_target\npermissions: {statuses: write}\njobs: {}\n# ${"x".repeat(70_000)}\n`;
     await Bun.write(join(cwd, ".github/workflows/large.yml"), large);
     const privileged = await commit(cwd, "large privileged workflow");
     expect(() => checkWorkflowChanges(cwd, deleted, privileged)).toThrow("statuses");
@@ -70,19 +70,26 @@ describe("base-controlled workflow permission boundary", () => {
 
     await Bun.write(
       join(cwd, ".github/workflows/large.yml"),
-      `permissions: {statuses: write, checks: write}\njobs: {}\n# ${"x".repeat(70_000)}\n`,
+      large.replace("on: pull_request_target", "on: [pull_request_target, push]"),
+    );
+    const broadenedTrigger = await commit(cwd, "broaden trigger");
+    expect(() => checkWorkflowChanges(cwd, unchangedPermissions, broadenedTrigger)).toThrow("push");
+
+    await Bun.write(
+      join(cwd, ".github/workflows/large.yml"),
+      `on: pull_request_target\npermissions: {statuses: write, checks: write}\njobs: {}\n# ${"x".repeat(70_000)}\n`,
     );
     const broadened = await commit(cwd, "broaden privilege");
     expect(() => checkWorkflowChanges(cwd, unchangedPermissions, broadened)).toThrow("checks");
 
     await Bun.write(
       join(cwd, ".github/workflows/scoped.yml"),
-      "permissions: {}\njobs:\n  test:\n    permissions: {statuses: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
+      "on: pull_request_target\npermissions: {}\njobs:\n  test:\n    permissions: {statuses: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
     );
     const jobScoped = await commit(cwd, "job-scoped privilege");
     await Bun.write(
       join(cwd, ".github/workflows/scoped.yml"),
-      "permissions: {statuses: write}\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n",
+      "on: pull_request_target\npermissions: {statuses: write}\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n",
     );
     const workflowScoped = await commit(cwd, "workflow-scoped privilege");
     expect(() => checkWorkflowChanges(cwd, jobScoped, workflowScoped)).toThrow("workflow:statuses");
