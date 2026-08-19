@@ -22,15 +22,13 @@ if [[ "$bootstrap_policy_enabled" != "$bootstrap_workflow_present" ]]; then
   exit 1
 fi
 migration_variable_endpoint="repos/$repository/actions/variables/CREDENTIAL_MIGRATION_OPEN"
-if [[ "$bootstrap_workflow_present" == true ]]; then
-  if ! migration_variable="$(gh api "$migration_variable_endpoint" 2>/dev/null)" ||
-     [[ "$(jq -r '.value // ""' <<<"$migration_variable")" != true ]]; then
-    echo "CREDENTIAL_MIGRATION_OPEN=true is required only while the one-shot migration workflow is present" >&2
+migration_variable_open=false
+if migration_variable="$(gh api "$migration_variable_endpoint" 2>/dev/null)"; then
+  if [[ "$(jq -r '.value // ""' <<<"$migration_variable")" != true ]]; then
+    echo "CREDENTIAL_MIGRATION_OPEN must be absent or exactly true" >&2
     exit 1
   fi
-elif gh api "$migration_variable_endpoint" >/dev/null 2>&1; then
-  echo "CREDENTIAL_MIGRATION_OPEN must be deleted after the one-shot migration workflow is removed" >&2
-  exit 1
+  migration_variable_open=true
 fi
 expected="$(jq -Sc 'del(.environment_secret_names,.forbidden_repository_secret_names) | .reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 if ! environment="$(gh api "repos/$repository/environments/production" 2>/dev/null)"; then
@@ -65,6 +63,15 @@ fi
 repository_secret_names="$(gh api --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add | map(.name)')"
 forbidden_repository_secret_names="$(jq -c '.forbidden_repository_secret_names' "$policy")"
 repository_credentials_present="$(jq -r --argjson forbidden "$forbidden_repository_secret_names" 'any(.[]; . as $name | any($forbidden[]; . == $name))' <<<"$repository_secret_names")"
+if [[ "$repository_credentials_present" == true && "$bootstrap_workflow_present" == true ]]; then
+  if [[ "$migration_variable_open" != true ]]; then
+    echo "CREDENTIAL_MIGRATION_OPEN=true is required while repository credentials await migration" >&2
+    exit 1
+  fi
+elif [[ "$migration_variable_open" == true ]]; then
+  echo "CREDENTIAL_MIGRATION_OPEN must be deleted after repository credentials are migrated" >&2
+  exit 1
+fi
 if [[ "$bootstrap_workflow_present" == true && "$repository_credentials_present" == false ]] &&
    gh api "repos/$repository/contents/.github/workflows/migrate-production-credentials.yml?ref=main" >/dev/null 2>&1; then
   echo "credential migration is complete; remove its workflow and temporary main environment policy in the next reviewed PR" >&2

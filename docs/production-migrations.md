@@ -70,6 +70,27 @@ reviewed PR immediately after the blocked release, then rerun the live audit.
 If Nik is unavailable, releases stop; there is no emergency bypass through
 repository secrets or an Actions actor.
 
+## Credential-scope cutover checklist
+
+This bootstrap is intentionally fail-closed. Run these steps in order:
+
+1. Set repository variable `CREDENTIAL_MIGRATION_OPEN=true`.
+2. As `samo-agent` ID `280144521`, dispatch
+   `migrate-production-credentials.yml` from protected `main`.
+3. As Nik ID `1345402`, authorize the pending `production` environment job.
+4. Decrypt the emitted ciphertext locally with the operator-held private key,
+   then create `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as
+   `production` environment secrets.
+5. Delete both repository-scoped Cloudflare secret copies.
+6. Delete repository variable `CREDENTIAL_MIGRATION_OPEN` immediately.
+7. Merge the reviewed cleanup PR that deletes the migration workflow and removes
+   the temporary `main` environment branch policy, then rerun the live audit.
+
+`scripts/check-production-environment.sh` is expected to fail from step 1 until
+step 7 completes: before step 5 it rejects repository-scoped production
+credentials; after step 5 it requires the open variable and export workflow to
+be removed. Do not weaken the check to make the transitional state green.
+
 ## Captured baseline provenance
 
 `fixtures/production-baseline-2026-08-15.sql` is a canonical SQL reconstruction

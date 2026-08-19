@@ -38,7 +38,7 @@ case "$endpoint" in
     fi
     ;;
   *actions/variables/CREDENTIAL_MIGRATION_OPEN)
-    [[ "${FAKE_MIGRATION_OPEN:-true}" == true ]] || exit 1
+    [[ "${FAKE_MIGRATION_OPEN:-false}" == true ]] || exit 1
     printf '%s\n' '{"name":"CREDENTIAL_MIGRATION_OPEN","value":"true"}'
     ;;
   *contents/.github/workflows/migrate-production-credentials.yml*)
@@ -71,9 +71,9 @@ run_case 1 ok wrong-reviewer
 
 actual=0
 CDPATH="$test_root" PATH="$test_root/bin:$PATH" GITHUB_REPOSITORY=example/gitzette \
-  FAKE_SECRET_MODE=ok FAKE_POLICY_MODE=ok FAKE_MIGRATION_OPEN=false \
+  FAKE_SECRET_MODE=ok FAKE_POLICY_MODE=ok FAKE_MIGRATION_OPEN=true \
   bash "$root/scripts/check-production-environment.sh" >/dev/null 2>&1 || actual=$?
-[[ "$actual" -eq 1 ]] || { echo "closed migration variable did not disable bootstrap" >&2; exit 1; }
+[[ "$actual" -eq 1 ]] || { echo "open migration variable survived completed credential migration" >&2; exit 1; }
 
 actual=0
 CDPATH="$test_root" PATH="$test_root/bin:$PATH" GITHUB_REPOSITORY=example/gitzette \

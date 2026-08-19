@@ -56,6 +56,8 @@ describe("deploy review revalidation", () => {
     const workflow = await Bun.file(migrationPath).text();
     const policy = JSON.parse(await Bun.file("config/production-environment.json").text()) as {
       branch_policies: Array<{ name: string; type: string }>;
+      prevent_self_review: boolean;
+      reviewers: Array<{ id: number }>;
     };
     expect(policy.branch_policies.some(({ name, type }) => name === "main" && type === "branch"))
       .toBe(await Bun.file(migrationPath).exists());
@@ -64,6 +66,9 @@ describe("deploy review revalidation", () => {
     expect(workflow).not.toContain("pull_request_target:");
     expect(workflow).not.toContain("push:");
     expect(workflow).toContain("if: github.event.sender.id == 280144521");
+    expect(policy.prevent_self_review).toBe(true);
+    expect(policy.reviewers.map(({ id }) => id)).toEqual([1345402]);
+    expect(policy.reviewers.some(({ id }) => id === 280144521)).toBe(false);
     expect(workflow).toContain("vars.CREDENTIAL_MIGRATION_OPEN == 'true'");
     expect(workflow).not.toContain("inputs:");
     expect(workflow).not.toContain("${{ inputs.");

@@ -19,32 +19,46 @@ allowlist, and the separate owner-only production environment. The normalization
 regression suite mutates every status context/app binding and `enforce_admins`
 individually and requires the live audit to detect each drift.
 
+The PR-head workflow audit is a compensating userspace merge control, not the
+non-overwritable release boundary. It rejects every write-valued permission,
+including mapping entries for any scope, string-form `permissions: write-all`,
+workflow- and job-level overrides, and write permissions on jobs that call
+reusable workflows with `uses:`. A reusable callee cannot elevate beyond its
+caller's token, and the caller is still audited. The only immutable-path
+exceptions are the protected `samorev-gate.yml` status publisher and the
+existing `claude.yml` OIDC job; any content change to either privileged workflow
+is rejected. Tests cover all these forms. Production authorization remains the
+owner-only environment boundary because same-repository Actions share one app
+identity and cannot make a merge status intrinsically non-overwritable.
+
 The non-null zero-approval review policy still forces every change through a
 pull request, so the protected-main publisher runs and conversation resolution
 remains meaningful. `dismiss_stale_reviews`, `dismissal_restrictions`, and
 `bypass_pull_request_allowances` are retained as fail-closed drift anchors, not
-as active approval controls. Classic branch protection cannot bind a status to its
+as active approval controls. They are inert at zero approvals; freshness is
+enforced solely by exact-head SHA status binding and a new verdict after every
+head change. Classic branch protection cannot bind a status to its
 creator: any repository workflow with `statuses: write` runs as the shared
 Actions app. The protected-main publisher itself validates the external
 `samo-agent` status's immutable user ID and freshness before publishing its
 result, and deployment revalidates the latest statuses. Before polling, the
 base-controlled publisher fetches the exact PR ref without executing it, parses
-every head workflow as YAML, and permits protected write authority only in the
-base-controlled `pull_request_target` publisher. It also rejects any content
-change to an already privileged workflow and any merge-base-to-head broadening
-of `statuses: write`, `checks: write`, or `write-all` across trigger, workflow,
-and job scope. Its tests cover
+every head workflow as YAML, and permits write authority only in the two pinned
+privileged workflows described above. It rejects any content change to either
+one and any merge-base-to-head broadening of any `write` permission or
+`write-all` across trigger, workflow, and job scope. Its tests cover
 aliases/tags/folded values, large files, deletions, empty workflow diffs,
-head-controlled trigger additions, existing privileged content changes, job-bound
-privilege relocation, and missing permission blocks. Missing workflow and job
-permissions grant nothing on the base side but are conservatively treated as
-protected writes on the head side. This prevents an implicit base default from
+head-controlled trigger additions, existing privileged content changes,
+job-bound privilege relocation, reusable-workflow callers, and missing
+permission blocks. Missing workflow and job permissions grant nothing on the
+base side but are conservatively treated as `write-all` on the head side. This
+prevents an implicit base default from
 authorizing an explicit PR write and does not depend on the repository default
-remaining read-only. A repository-
-level test pins `samorev-gate.yml` as the only workflow with `statuses: write`
-or `checks: write`; the runtime audit independently enforces that same absolute
-allowlist on every PR head. Because the privileged workflow cannot be changed by
-a normal PR, a new step cannot inherit grandfathered write authority.
+remaining read-only. A repository-level test pins the exact write sets:
+`samorev-gate.yml` has only `statuses: write`, and the existing `claude.yml` job
+has only `id-token: write`. The runtime audit independently enforces that
+absolute allowlist on every PR head. Because neither privileged workflow can be
+changed by a normal PR, a new step cannot inherit grandfathered write authority.
 
 Classic branch protection enforces `samorev` by context name only because the
 external user status has no bindable GitHub App ID. The immutable creator check
@@ -98,6 +112,10 @@ This environment review is a human owner release authorization, not a formal
 GitHub pull-request approval. Run it only after a
 terminal-clean exact-head review and readiness check; same-repository Actions
 cannot approve their own environment deployment or read its secrets first.
+The `samo-agent` credential is operator-held outside GitHub Actions and must
+never be configured as a repository or environment secret. Making Nik the
+migration dispatcher would deadlock this boundary: `prevent_self_review` would
+then forbid the sole reviewer from authorizing the export job.
 
 The initial scope migration uses
 `.github/workflows/migrate-production-credentials.yml` once, under that same

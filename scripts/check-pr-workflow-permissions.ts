@@ -1,7 +1,5 @@
 type Document = Record<string, unknown>;
 
-const protectedScopes = ["checks", "statuses"] as const;
-
 function isRecord(value: unknown): value is Document {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -14,13 +12,12 @@ function parseWorkflow(source: string): Document {
 
 function permissionsFrom(value: unknown, location: string): Set<string> {
   if (value === undefined || value === null || value === "read-all") return new Set();
-  if (value === "write-all") return new Set(protectedScopes.map((scope) => `${location}:${scope}`));
+  if (value === "write-all") return new Set([`${location}:write-all`]);
   if (!isRecord(value)) throw new Error("permissions must be a mapping, read-all, or write-all");
   const result = new Set<string>();
-  for (const scope of protectedScopes) {
-    const access = value[scope];
+  for (const [scope, access] of Object.entries(value)) {
     if (access === "write") result.add(`${location}:${scope}`);
-    else if (access !== undefined && access !== "read" && access !== "none") {
+    else if (access !== "read" && access !== "none") {
       throw new Error(`${scope} permission must be read, write, or none`);
     }
   }
@@ -41,8 +38,8 @@ function effectiveProtectedPermissions(
       const location = includeJobNames ? `job:${name}` : "job";
       if (conservativeMissing && !workflowPermissionsDefined && (job.permissions === undefined || job.permissions === null)) {
         // Repository defaults can drift. Missing workflow and job permissions
-        // are conservatively treated as both protected writes.
-        permissions.push(...protectedScopes.map((scope) => `${location}:${scope}`));
+        // are conservatively treated as write-all.
+        permissions.push(`${location}:write-all`);
       } else {
         permissions.push(...permissionsFrom(job.permissions, location));
       }
@@ -116,7 +113,10 @@ function auditHeadPublishers(cwd: string, headSha: string): void {
     const triggers = [...workflowTriggers(source)].sort();
     const trustedPublisher = path === ".github/workflows/samorev-gate.yml" &&
       writes.join(",") === "workflow:statuses" && triggers.join(",") === "pull_request_target";
-    if (!trustedPublisher) {
+    const trustedClaudeOidc = path === ".github/workflows/claude.yml" &&
+      writes.join(",") === "job:id-token" &&
+      triggers.join(",") === "issue_comment,issues,pull_request_review,workflow_dispatch";
+    if (!trustedPublisher && !trustedClaudeOidc) {
       throw new Error(`untrusted workflow has protected write authority in ${path}: ${writes.join(", ")}`);
     }
   }
@@ -129,7 +129,12 @@ function privilegeIsCovered(
 ): boolean {
   const [trigger, permission] = privilege.split("|");
   const parts = permission.split(":");
-  if (parts[0] === "job" && basePrivileges.has(`${trigger}|workflow:${parts.at(-1)}`)) return true;
+  if (basePrivileges.has(`${trigger}|workflow:write-all`)) return true;
+  if (parts[0] === "job" && (
+    basePrivileges.has(`${trigger}|workflow:${parts.at(-1)}`) ||
+    basePrivileges.has(`${trigger}|job:${parts[1]}:write-all`) ||
+    basePrivileges.has(`${trigger}|job:write-all`)
+  )) return true;
   return (basePrivileges.get(privilege) ?? 0) >= count;
 }
 

@@ -31,7 +31,10 @@ describe("base-controlled workflow permission boundary", () => {
       const permissions = [...workflowWritePermissions(source)].sort();
       if (permissions.length > 0) privileged[name] = permissions;
     }
-    expect(privileged).toEqual({ "samorev-gate.yml": ["workflow:statuses"] });
+    expect(privileged).toEqual({
+      "claude.yml": ["job:id-token"],
+      "samorev-gate.yml": ["workflow:statuses"],
+    });
   });
 
   test("resolves YAML spellings and aliases", () => {
@@ -40,18 +43,25 @@ describe("base-controlled workflow permission boundary", () => {
       ["permissions:\n  statuses: >-\n    write\njobs: {}\n", ["workflow:statuses"]],
       ["name: &access write\npermissions: {statuses: *access}\njobs: {}\n", ["workflow:statuses"]],
       ["permissions: {statuses: !!str write}\njobs: {}\n", ["workflow:statuses"]],
-      ["permissions: write-all\njobs: {}\n", ["workflow:checks", "workflow:statuses"]],
+      ["permissions: write-all\njobs: {}\n", ["workflow:write-all"]],
       [
         "permissions: {}\njobs:\n  test:\n    permissions: {checks: write}\n    runs-on: ubuntu-latest\n    steps: []\n",
         ["job:checks"],
       ],
       [
         "on: pull_request\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n",
-        ["job:checks", "job:statuses"],
+        ["job:write-all"],
       ],
       [
         "on: pull_request\njobs:\n  test:\n    permissions: {contents: read}\n    runs-on: ubuntu-latest\n    steps: []\n",
         [],
+      ],
+      ["permissions: {contents: write}\njobs: {}\n", ["workflow:contents"]],
+      ["permissions: {actions: write}\njobs: {}\n", ["workflow:actions"]],
+      ["permissions: {id-token: write}\njobs: {}\n", ["workflow:id-token"]],
+      [
+        "permissions: {}\njobs:\n  call:\n    permissions: {contents: write}\n    uses: owner/repo/.github/workflows/reusable.yml@main\n",
+        ["job:contents"],
       ],
     ];
     for (const [source, expected] of cases) {
@@ -131,7 +141,7 @@ describe("base-controlled workflow permission boundary", () => {
       "on: pull_request\njobs:\n  attacker:\n    runs-on: ubuntu-latest\n    steps: []\n",
     );
     const implicitDefault = await commit(cwd, "implicit default");
-    expect(() => checkWorkflowChanges(cwd, renamedJob, implicitDefault)).toThrow("job:attacker:checks");
+    expect(() => checkWorkflowChanges(cwd, renamedJob, implicitDefault)).toThrow("job:attacker:write-all");
 
     await Bun.write(
       join(cwd, ".github/workflows/implicit.yml"),
