@@ -7,6 +7,14 @@ is still sensitive: download it immediately, delete it and the run logs after
 decryption, and destroy the migration private key after the environment secrets
 have been verified.
 
+This repository is public, so the encrypted artifact is publicly downloadable
+until deletion. Retention is only a one-day backstop: the operator deletes the
+artifact within minutes of download. Anyone may harvest the ciphertext, and
+its confidentiality permanently depends on the RSA-4096 private key never
+leaking. A purely local export was rejected because GitHub never reveals an
+existing repository secret to a local or environment approver; only an Actions
+job can consume it.
+
 Rotating instead of exporting would be preferable, but it is not available to
 this automated recovery: GitHub does not reveal existing secret values, and the
 only operator-held Cloudflare token available to the recovery runtime is
@@ -37,6 +45,11 @@ destroying the sole currently deploy-capable credential before that handoff.
    bash scripts/apply-credential-migration-environment.sh
    ```
 
+   The apply script sends `can_admins_bypass: false` and the checker reads it
+   back from GitHub. This exact API path was verified live on 2026-08-19; the
+   resulting environment reported `false`, sole reviewer ID `1345402`, and
+   `prevent_self_review: true`.
+
 2. Set the independently removable switch, then dispatch as immutable runner
    ID `280144521` (`samo-agent`):
 
@@ -49,7 +62,7 @@ destroying the sole currently deploy-capable credential before that handoff.
 3. Before Nik approves the pending `credential-migration` deployment, verify
    all of the following: the ref is exactly `refs/heads/main`; the run head SHA
    equals the reviewed current `main` tip; original dispatcher ID is
-   `280144521`; it is not a rerun; and the reviewed public-key fingerprint is
+   `280144521`; `run_attempt` is exactly `1`; and the reviewed public-key fingerprint is
    `7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc`.
    Independently derive that fingerprint from the operator key:
 
@@ -61,8 +74,9 @@ destroying the sole currently deploy-capable credential before that handoff.
 4. Download the exact run's one-day artifact and decrypt locally:
 
    ```bash
-   migration_dir="$(mktemp -d)"
-   gh run download RUN_ID --name encrypted-credentials-RUN_ID --dir "$migration_dir"
+   migration_dir=/home/tars/.secrets/gitzette-migration-RUN_ID-1
+   install -d -m 0700 "$migration_dir"
+   gh run download RUN_ID --name encrypted-credentials-RUN_ID-1 --dir "$migration_dir"
    plaintext="$(openssl pkeyutl -decrypt \
      -inkey /home/tars/.secrets/gitzette-production-migration-private.pem \
      -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
@@ -83,9 +97,9 @@ destroying the sole currently deploy-capable credential before that handoff.
    gh secret list --env production
    account_id="$(jq -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
    api_token="$(jq -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
-   curl --fail --silent --show-error \
-     -H "Authorization: Bearer $api_token" \
-     "https://api.cloudflare.com/client/v4/accounts/$account_id/workers/services/gitzette" |
+   curl --fail --silent --show-error --config - \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/workers/services/gitzette" \
+     <<<"header = \"Authorization: Bearer $api_token\"" |
      jq -e '.success == true' >/dev/null
    unset plaintext account_id api_token
    gh secret delete CLOUDFLARE_ACCOUNT_ID
@@ -103,8 +117,9 @@ destroying the sole currently deploy-capable credential before that handoff.
    the production preflight.
 
    ```bash
+   migration_dir=/home/tars/.secrets/gitzette-migration-RUN_ID-1
    artifact_id="$(gh api repos/NikolayS/gitzette/actions/runs/RUN_ID/artifacts \
-     --jq '.artifacts[] | select(.name == "encrypted-credentials-RUN_ID") | .id')"
+     --jq '.artifacts[] | select(.name == "encrypted-credentials-RUN_ID-1") | .id')"
    gh api --method DELETE "repos/NikolayS/gitzette/actions/artifacts/$artifact_id"
    gh api --method DELETE repos/NikolayS/gitzette/actions/runs/RUN_ID/logs
    gh variable delete CREDENTIAL_MIGRATION_OPEN
@@ -121,6 +136,9 @@ destroying the sole currently deploy-capable credential before that handoff.
    temporary environment config/scripts, and the live `credential-migration`
    environment. The normal `production` environment remains restricted to
    release tags throughout this procedure.
+   The temporary apply/check scripts intentionally duplicate the established
+   production environment reconciler only for this bounded bootstrap; #67
+   deletes the duplicate in the same cycle, before normal development resumes.
 
 8. After service restoration, rotate the exported Cloudflare API token through
    a dashboard-authorized session and replace the `production` environment

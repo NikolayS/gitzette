@@ -13,7 +13,7 @@ if ! environment="$(gh api "repos/$repository/environments/credential-migration"
   echo "credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh" >&2
   exit 1
 fi
-policies="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add')"
+policies="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
 expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
 actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$policies" '{
   wait_timer: ([ $environment.protection_rules[] | select(.type == "wait_timer") | .wait_timer ][0] // 0),

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash, createPublicKey } from "node:crypto";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,11 +13,15 @@ describe("one-shot credential migration boundary", () => {
       reviewers: Array<{ id: number }>;
       branch_policies: Array<{ name: string; type: string }>;
     };
-    const parsed = Bun.YAML.parse(workflow) as { on: Record<string, unknown> };
+    const parsed = Bun.YAML.parse(workflow) as {
+      on: Record<string, unknown>;
+      jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }>;
+    };
     expect(Object.keys(parsed.on)).toEqual(["workflow_dispatch"]);
     expect(workflow).toContain('[[ "$DISPATCHER_ID" != "280144521" ]]');
     expect(workflow).toContain('[[ "$TRIGGERING_ACTOR" != "samo-agent" ]]');
     expect(workflow).toContain('[[ "$DISPATCH_REF" != "refs/heads/main" ]]');
+    expect(workflow).toContain('[[ "$RUN_ATTEMPT" != "1" ]]');
     expect(workflow.match(/MIGRATION_OPEN: \$\{\{ vars\.CREDENTIAL_MIGRATION_OPEN \}\}/g)?.length).toBe(2);
     expect(workflow).toContain('triggering_actor_id="$(curl');
     expect(workflow).toContain('[[ "$triggering_actor_id" != "280144521" ]]');
@@ -27,6 +32,7 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
     expect(workflow).toContain("rsa_mgf1_md:sha256");
     expect(workflow).toContain("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
+    expect(workflow).toContain("name: encrypted-credentials-${{ github.run_id }}-${{ github.run_attempt }}");
     expect(workflow).toContain("retention-days: 1");
     expect(workflow).not.toContain("encrypted_credentials=");
     expect(workflow).not.toContain("set -x");
@@ -37,6 +43,52 @@ describe("one-shot credential migration boundary", () => {
     expect(policy.prevent_self_review).toBe(true);
     expect(policy.reviewers.map(({ id }) => id)).toEqual([1345402]);
     expect(policy.branch_policies).toEqual([{ name: "main", type: "branch" }]);
+
+    const encoded = workflow.match(/^\s*RSA_PUBLIC_KEY_PEM_B64:\s*(\S+)$/m)?.[1];
+    expect(encoded).toBeDefined();
+    const publicKey = createPublicKey(Buffer.from(encoded ?? "", "base64"));
+    const fingerprint = createHash("sha256")
+      .update(publicKey.export({ type: "spki", format: "der" }))
+      .digest("hex");
+    expect(fingerprint).toBe("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
+
+    const authorizeRun = parsed.jobs["authorize-export"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
+    const revalidateRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Revalidate"))?.run;
+    expect(authorizeRun).toBeDefined();
+    expect(revalidateRun).toBeDefined();
+    const gateRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-gate-"));
+    const gateBin = join(gateRoot, "bin");
+    await mkdir(gateBin);
+    const curl = join(gateBin, "curl");
+    await Bun.write(curl, "#!/usr/bin/env bash\nset -euo pipefail\nprintf '{\"id\":%s}\\n' \"${FAKE_ACTOR_ID:-280144521}\"\n");
+    await Bun.spawn(["chmod", "+x", curl]).exited;
+    const execute = async (run: string | undefined, overrides: Record<string, string | undefined> = {}): Promise<number> => {
+      const env: Record<string, string> = {
+        ...process.env,
+        PATH: `${gateBin}:${process.env.PATH}`,
+        DISPATCHER_ID: "280144521",
+        TRIGGERING_ACTOR: "samo-agent",
+        DISPATCH_REF: "refs/heads/main",
+        RUN_ATTEMPT: "1",
+        MIGRATION_OPEN: "true",
+        GH_TOKEN: "fake",
+      };
+      for (const [name, value] of Object.entries(overrides)) {
+        if (value === undefined) delete env[name]; else env[name] = value;
+      }
+      return Bun.spawn(["bash", "-c", run ?? "exit 99"], { env, stdout: "pipe", stderr: "pipe" }).exited;
+    };
+    for (const run of [authorizeRun, revalidateRun]) {
+      expect(await execute(run)).toBe(0);
+      expect(await execute(run, { DISPATCHER_ID: "1" })).toBe(1);
+      expect(await execute(run, { TRIGGERING_ACTOR: "attacker" })).toBe(1);
+      expect(await execute(run, { DISPATCH_REF: "refs/heads/other" })).toBe(1);
+      expect(await execute(run, { RUN_ATTEMPT: "2" })).toBe(1);
+      expect(await execute(run, { MIGRATION_OPEN: undefined })).toBe(1);
+      expect(await execute(run, { MIGRATION_OPEN: "True" })).toBe(1);
+      expect(await execute(run, { MIGRATION_OPEN: "true " })).toBe(1);
+    }
+    expect(await execute(revalidateRun, { FAKE_ACTOR_ID: "1" })).toBe(1);
   });
 
   test("executes the reviewed environment policy against live-response shapes", async () => {
