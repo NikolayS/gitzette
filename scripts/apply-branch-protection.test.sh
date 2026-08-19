@@ -13,6 +13,10 @@ if [[ "${1:-}" == auth ]]; then
   printf 'fake-samo-token\n'
   exit 0
 fi
+if [[ "$*" == 'api user --jq .id' ]]; then
+  if [[ "$mode" == nonadmin-wrong-token ]]; then printf '1\n'; else printf '280144521\n'; fi
+  exit 0
+fi
 endpoint=''
 for argument in "$@"; do
   [[ "$argument" == repos/* || "$argument" == https://api.github.com/repos/* ]] && endpoint="$argument"
@@ -161,9 +165,10 @@ run_nonadmin_failure() {
     exit 1
   fi
 }
-for mode in nonadmin-admin nonadmin-wrong-id nonadmin-zero nonadmin-multiple nonadmin-main-denied nonadmin-tag-denied; do
+for mode in nonadmin-admin nonadmin-wrong-id nonadmin-wrong-token nonadmin-zero nonadmin-multiple nonadmin-main-denied nonadmin-tag-denied; do
   run_nonadmin_failure "$mode"
 done
+assert_file_contains "$test_dir/nonadmin-wrong-token.err" 'GH_TOKEN is not the samo-agent identity'
 
 one_record="$test_dir/one"
 GITHUB_REPOSITORY=example/gitzette FAKE_MODE=one FAKE_RECORD="$one_record" \

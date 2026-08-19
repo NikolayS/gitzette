@@ -109,12 +109,15 @@ text matching is not the authorization proof.
    ```
 
    This preflight dispatch must be green before the scheduled guard is relied
-   on; API-read failures exit separately from policy drift. Green proves the
-   fixed production policy and that neither migration switch resolves to a
-   nonempty value. The scheduled guard deliberately checks only environment
-   policy endpoints readable by `GITHUB_TOKEN`; the adjacent inventory command
-   uses the operator's administrator token to prove the migration environment
-   has no variables or secrets. It
+   on; API-read failures exit separately from policy drift. The green guard
+   proves the fixed production policy and that neither repository-scoped
+   migration switch is nonempty. The adjacent inventory command uses the
+   operator's administrator token to prove the credential-migration environment
+   has no variables or secrets, the production environment has no variables
+   that can shadow the verification switch, and its secrets stay within the
+   reviewed Cloudflare allowlist. Together these checks prove neither migration
+   switch resolves to a nonempty value. The scheduled guard deliberately checks
+   only environment policy endpoints readable by `GITHUB_TOKEN`; it
    does not claim that the intentionally installed bootstrap workflow or
    migration environment has already been removed.
 

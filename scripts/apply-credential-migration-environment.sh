@@ -43,7 +43,7 @@ elif [[ "$environment_status" -eq 4 ]]; then
 else
   echo "unable to inspect credential-migration environment before apply:" >&2
   sed 's/^/  /' "$error_file" >&2
-  exit 1
+  exit 3
 fi
 # GitHub exposes can_admins_bypass in GET responses but does not accept it in
 # this PUT body. The checker below enforces the operator-controlled UI setting.

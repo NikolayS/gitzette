@@ -10,6 +10,10 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository="${GITHUB_REPOSITORY:-NikolayS/gitzette}"
 expected_id=280144521
+if [[ "$(gh api user --jq .id)" != "$expected_id" ]]; then
+  echo "GH_TOKEN is not the samo-agent identity (immutable ID 280144521)" >&2
+  exit 1
+fi
 permission="$(gh api "repos/$repository/collaborators/samo-agent/permission")"
 if [[ "$(jq -er .user.id <<<"$permission")" != "$expected_id" ||
       "$(jq -er .permission <<<"$permission")" == admin ]]; then

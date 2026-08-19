@@ -338,6 +338,10 @@ fi
     expect(await execute(revalidateRun, { FAKE_CURL_FAIL: "true" })).not.toBe(0);
     const verify = { OPERATION: "verify", DISPATCH_REF: "refs/heads/main", VERIFY_OPEN: "true", FAKE_APPROVAL_ENV: "production" };
     expect(await execute(authorizeRun, verify)).toBe(0);
+    expect(await execute(authorizeRun, { ...verify, VERIFY_OPEN: undefined })).toBe(1);
+    expect(await execute(authorizeRun, { ...verify, VERIFY_OPEN: "True" })).toBe(1);
+    expect(await execute(authorizeRun, { ...verify, VERIFY_OPEN: "true " })).toBe(1);
+    expect(await execute(authorizeRun, { ...verify, EXPORT_OPEN: "false" })).toBe(0);
     expect(await execute(authorizeRun, { ...verify, GITHUB_SHA: "stale" })).toBe(1);
     expect(await execute(verifyApprovalRun, verify)).toBe(0);
     expect(await execute(verifyApprovalRun, { ...verify, FAKE_APPROVAL_ENV: "other" })).toBe(1);
@@ -644,6 +648,16 @@ case "$endpoint" in
     elif [[ "\${FAKE_MODE:-ok}" == environment-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"SHADOW"}]}]'
     else printf '%s\\n' '[{"secrets":[]}]'; fi
     ;;
+  *production/variables*)
+    if [[ "\${FAKE_MODE:-ok}" == production-variable-api-error ]]; then echo 'production variable API failed' >&2; exit 1
+    elif [[ "\${FAKE_MODE:-ok}" == production-variable ]]; then printf '%s\\n' '[{"variables":[{"name":"CREDENTIAL_VERIFY_OPEN","value":"true"}]}]'
+    else printf '%s\\n' '[{"variables":[]}]'; fi
+    ;;
+  *production/secrets*)
+    if [[ "\${FAKE_MODE:-ok}" == production-secret-api-error ]]; then echo 'production secret API failed' >&2; exit 1
+    elif [[ "\${FAKE_MODE:-ok}" == production-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"SHADOW"}]}]'
+    else printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]'; fi
+    ;;
   *) exit 91 ;;
 esac
 `);
@@ -679,6 +693,10 @@ esac
     expect(await runInventory("environment-secret")).toBe(1);
     expect(await runInventory("variable-api-error")).toBe(3);
     expect(await runInventory("secret-api-error")).toBe(3);
+    expect(await runInventory("production-variable")).toBe(1);
+    expect(await runInventory("production-secret")).toBe(1);
+    expect(await runInventory("production-variable-api-error")).toBe(3);
+    expect(await runInventory("production-secret-api-error")).toBe(3);
     const bypassFailure = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "admin-bypass" },
@@ -733,6 +751,10 @@ if [[ "$method" == DELETE ]]; then printf '%s\\n' "$endpoint" >>"$FAKE_RECORD/de
 if [[ "$method" == POST ]]; then printf '%s\\n' "$*" >>"$FAKE_RECORD/post.log"; exit 0; fi
 case "$endpoint" in
   repos/example/gitzette/environments/credential-migration)
+    if [[ "\${FAKE_MODE:-correct}" == unreadable && ! -f "$FAKE_RECORD/installed" ]]; then
+      echo 'credential migration API unavailable' >&2
+      exit 1
+    fi
     if [[ "\${FAKE_MODE:-correct}" == missing && ! -f "$FAKE_RECORD/installed" ]]; then
       [[ "$*" != *--include* ]] || printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Not Found"}\n'
       echo 'gh: Not Found (HTTP 404)' >&2
@@ -793,6 +815,10 @@ esac
     const bypass = join(root, "bypass");
     expect(await run("bypass", bypass)).toBe(1);
     expect(await Bun.file(join(bypass, "put.json")).exists()).toBe(false);
+
+    const unreadable = join(root, "unreadable");
+    expect(await run("unreadable", unreadable)).toBe(3);
+    expect(await Bun.file(join(unreadable, "put.json")).exists()).toBe(false);
 
     const missing = join(root, "missing");
     await mkdir(missing);
