@@ -18,7 +18,7 @@ if ! environment="$(gh api "repos/$repository/environments/credential-migration"
     echo "unable to read credential-migration environment; apply only after resolving this API error:" >&2
   fi
   sed 's/^/  /' "$error_file" >&2
-  exit 1
+  exit 3
 fi
 if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies "$policy")" == true ]]; then
   policies="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"

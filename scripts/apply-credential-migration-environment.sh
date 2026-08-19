@@ -13,8 +13,16 @@ environment=credential-migration
 
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
-if gh api "repos/$repository/environments/$environment" --silent 2>"$error_file"; then
-  live="$(gh api --paginate --slurp "repos/$repository/environments/$environment/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+if live_environment="$(gh api "repos/$repository/environments/$environment" 2>"$error_file")"; then
+  if [[ "$(jq -r .can_admins_bypass <<<"$live_environment")" != false ]]; then
+    echo 'disable "Allow administrators to bypass configured protection rules" for environment credential-migration in Settings -> Environments before applying' >&2
+    exit 1
+  fi
+  if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies <<<"$live_environment")" == true ]]; then
+    live="$(gh api --paginate --slurp "repos/$repository/environments/$environment/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+  else
+    live='[]'
+  fi
 elif grep -Eq 'HTTP 404([^0-9]|$)' "$error_file"; then
   live='[]'
 else

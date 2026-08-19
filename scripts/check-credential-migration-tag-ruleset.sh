@@ -10,16 +10,20 @@ root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && 
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 policy="$root/config/credential-migration-tag-ruleset.json"
 name="$(jq -er .name "$policy")"
-matches="$(gh api --paginate --slurp "repos/$repository/rulesets?per_page=100" |
-  jq -c --arg name "$name" '[map(.) | add // [] | .[] | select(.name == $name)]')"
+matches="$(gh api --paginate --slurp "repos/$repository/rulesets?per_page=100&includes_parents=false" |
+  jq -c --arg name "$name" '[map(.) | add // [] | .[] |
+    select(.name == $name and .source_type == "Repository")]')"
 if [[ "$(jq -r length <<<"$matches")" != 1 ]]; then
-  echo "expected exactly one active credential migration tag ruleset" >&2
+  echo "expected exactly one repository-scoped credential migration tag ruleset" >&2
   exit 1
 fi
 ruleset_id="$(jq -er '.[0].id' <<<"$matches")"
 live="$(gh api "repos/$repository/rulesets/$ruleset_id")"
-expected="$(jq -Sc . "$policy")"
-actual="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$live")"
+normalizer='.bypass_actors |= sort_by(.actor_type,.actor_id) |
+  .conditions.ref_name.include |= sort | .conditions.ref_name.exclude |= sort |
+  .rules |= sort_by(.type)'
+expected="$(jq -Sc "$normalizer" "$policy")"
+actual="$(jq -Sc "{name,target,enforcement,bypass_actors,conditions,rules} | $normalizer" <<<"$live")"
 if [[ "$actual" != "$expected" ]]; then
   echo "credential migration tag ruleset differs from reviewed policy" >&2
   echo "expected: $expected" >&2

@@ -36,11 +36,6 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
-    expect(workflow).toContain("    needs: authorize-export");
-    expect(workflow).toContain("    environment: credential-migration");
-    expect(workflow).toContain("  verify-production-credentials:");
-    expect(workflow).toContain("    if: ${{ inputs.operation == 'verify' }}");
-    expect(workflow).toContain("    environment: production");
     expect(workflow).toContain("both production environment credentials must be present");
     expect(workflow).toContain("both Cloudflare repository secrets must be present");
     expect(workflow).toContain("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
@@ -55,8 +50,10 @@ describe("one-shot credential migration boundary", () => {
     for (const channel of forbiddenDisclosureChannels) expect(workflow).not.toContain(channel);
     expect(workflow).toContain("permissions: {}");
     expect(parsed.jobs["export-encrypted-credentials"].needs).toBe("authorize-export");
+    expect(parsed.jobs["export-encrypted-credentials"].if).toBe("${{ inputs.operation == 'export' }}");
     expect(parsed.jobs["export-encrypted-credentials"].environment).toBe("credential-migration");
     expect(parsed.jobs["verify-production-credentials"].needs).toBe("authorize-export");
+    expect(parsed.jobs["verify-production-credentials"].if).toBe("${{ inputs.operation == 'verify' }}");
     expect(parsed.jobs["verify-production-credentials"].environment).toBe("production");
     expect(parsed.jobs["authorize-export"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(workflow).toContain("only the earliest credential export run may continue");
@@ -88,6 +85,14 @@ describe("one-shot credential migration boundary", () => {
       { name: "v*", type: "tag" },
       { name: "credential-migration-verify", type: "tag" },
     ]);
+    for (const rulesetScript of [
+      "scripts/apply-credential-migration-tag-ruleset.sh",
+      "scripts/check-credential-migration-tag-ruleset.sh",
+    ]) {
+      const source = await Bun.file(rulesetScript).text();
+      expect(source).toContain("includes_parents=false");
+      expect(source).toContain('source_type == "Repository"');
+    }
     const applyProduction = await Bun.file("scripts/apply-production-environment.sh").text();
     const checkProduction = await Bun.file("scripts/check-production-environment.sh").text();
     expect(applyProduction).not.toContain("{wait_timer,can_admins_bypass");
@@ -139,7 +144,7 @@ describe("one-shot credential migration boundary", () => {
     );
     expect(migrationDoc).toContain("trap cleanup_verification_policy EXIT");
     expect(migrationDoc).toContain("trap - EXIT");
-    expect(migrationDoc).toContain("first recovery action");
+    expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("gh secret delete CLOUDFLARE_ACCOUNT_ID")).toBeLessThan(
       migrationDoc.indexOf("drop table credential_migration_transfer"),
     );
@@ -152,10 +157,14 @@ describe("one-shot credential migration boundary", () => {
     ]) expect(migrationDoc).toContain(teardownItem);
 
     const policyGuard = await Bun.file(".github/workflows/credential-migration-policy-guard.yml").text();
-    const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as { on: { schedule: Array<{ cron: string }> } };
+    const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {
+      on: { schedule: Array<{ cron: string }> };
+      permissions: Record<string, string>;
+    };
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
     expect(policyGuard).toContain("bash scripts/check-production-environment.sh default");
     expect(policyGuard).toContain("github.repository == 'NikolayS/gitzette'");
+    expect(parsedPolicyGuard.permissions).toEqual({ actions: "read", contents: "read", deployments: "read" });
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
@@ -351,7 +360,10 @@ case "$endpoint" in
     jq -nc --argjson bypass "$bypass" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}},{type:"User",reviewer:{id:280144521,login:"samo-agent"}}]}],deployment_branch_policy:{protected_branches:false,custom_branch_policies:true}}'
     ;;
   *deployment-branch-policies*)
-    if [[ "\${FAKE_LIVE_POLICY:-default}" == migration ]]; then
+    if [[ "\${FAKE_LIVE_POLICY:-default}" == api-error ]]; then
+      echo "fake branch policy API failure" >&2
+      exit 1
+    elif [[ "\${FAKE_LIVE_POLICY:-default}" == migration ]]; then
       printf '%s\\n' '[{"branch_policies":[{"name":"v*","type":"tag"},{"name":"credential-migration-verify","type":"tag"}]}]'
     elif [[ "\${FAKE_LIVE_POLICY:-default}" == empty ]]; then
       printf '%s\\n' '[{"branch_policies":[]}]'
@@ -360,7 +372,7 @@ case "$endpoint" in
     fi
     ;;
   *rulesets/55) jq -c '. + {id:55}' config/credential-migration-tag-ruleset.json ;;
-  *rulesets*) printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag"}]]' ;;
+  *rulesets*) printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag","source_type":"Repository"}]]' ;;
   *) exit 91 ;;
 esac
 `);
@@ -388,12 +400,15 @@ esac
     const empty = await run("default", "empty");
     expect(empty.code).toBe(1);
     expect(empty.stderr).toContain('"branch_policies":[]');
+    const policyApiFailure = await run("default", "api-error");
+    expect(policyApiFailure.code).toBe(3);
+    expect(policyApiFailure.stderr).toContain("unable to read production deployment branch policies");
     const apiFailure = await run("default", "default", "auth");
-    expect(apiFailure.code).toBe(1);
+    expect(apiFailure.code).toBe(3);
     expect(apiFailure.stderr).toContain("unable to read production environment");
     expect(apiFailure.stderr).toContain("fake production API failure");
     const missing = await run("default", "default", "missing");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(3);
     expect(missing.stderr).toContain("production environment is missing; run scripts/apply-production-environment.sh default");
     expect(missing.stderr).toContain("HTTP 404");
     const bypass = await run("default", "default", "bypass");
@@ -419,12 +434,13 @@ for argument in "$@"; do
   [[ "$argument" != type=* ]] || type="\${argument#type=}"
 done
 case "$method:$endpoint" in
-  PUT:repos/example/gitzette/environments/production) cat >"$FAKE_STATE.put" ;;
+  PUT:repos/example/gitzette/environments/production) printf x >>"$FAKE_STATE.put-count"; cat >"$FAKE_STATE.put" ;;
   GET:repos/example/gitzette/environments/production)
-    printf '%s\\n' '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","prevent_self_review":true,"reviewers":[{"type":"User","reviewer":{"id":1345402,"login":"NikolayS"}},{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+    bypass=false; [[ "\${FAKE_ADMIN_BYPASS:-false}" != true ]] || bypass=true
+    jq -nc --argjson bypass "$bypass" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}},{type:"User",reviewer:{id:280144521,login:"samo-agent"}}]}],deployment_branch_policy:{protected_branches:false,custom_branch_policies:true}}'
     ;;
   GET:repos/example/gitzette/rulesets/55) jq -c '. + {id:55}' config/credential-migration-tag-ruleset.json ;;
-  GET:repos/example/gitzette/rulesets*) printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag"}]]' ;;
+  GET:repos/example/gitzette/rulesets*) printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag","source_type":"Repository"}]]' ;;
   GET:*deployment-branch-policies*) jq -c '[{branch_policies:.}]' "$FAKE_STATE" ;;
   POST:*deployment-branch-policies*)
     next_id="$(jq '[.[].id] | max + 1' "$FAKE_STATE")"
@@ -440,11 +456,11 @@ case "$method:$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (mode: string): Promise<number> => Bun.spawn([
+    const run = async (mode: string, adminBypass = false): Promise<number> => Bun.spawn([
       "bash", "scripts/apply-production-environment.sh", mode,
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state, FAKE_ADMIN_BYPASS: String(adminBypass) },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await run("migration")).toBe(0);
@@ -454,6 +470,9 @@ esac
     ]);
     expect(await run("default")).toBe(0);
     expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name)).toEqual(["v*"]);
+    expect(await Bun.file(`${state}.put-count`).text()).toBe("xx");
+    expect(await run("default", true)).toBe(1);
+    expect(await Bun.file(`${state}.put-count`).text()).toBe("xx");
   });
 
   test("executes the reviewed environment policy against live-response shapes", async () => {
@@ -521,8 +540,8 @@ esac
     expect(await run("admin-bypass")).toBe(1);
     expect(await run("environment-variable")).toBe(1);
     expect(await run("environment-secret")).toBe(1);
-    expect(await run("missing")).toBe(1);
-    expect(await run("auth")).toBe(1);
+    expect(await run("missing")).toBe(3);
+    expect(await run("auth")).toBe(3);
     const bypassFailure = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "admin-bypass" },
@@ -538,7 +557,7 @@ esac
       stdout: "pipe", stderr: "pipe",
     });
     const authStderr = await new Response(authFailure.stderr).text();
-    expect(await authFailure.exited).toBe(1);
+    expect(await authFailure.exited).toBe(3);
     expect(authStderr).toContain("unable to read credential-migration environment");
     expect(authStderr).toContain("fake API failure");
     const missing = Bun.spawn(["bash", "scripts/check-credential-migration-environment.sh"], {
@@ -547,7 +566,7 @@ esac
       stdout: "pipe", stderr: "pipe",
     });
     const missingStderr = await new Response(missing.stderr).text();
-    expect(await missing.exited).toBe(1);
+    expect(await missing.exited).toBe(3);
     expect(missingStderr).toContain("credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh");
     expect(missingStderr).toContain("HTTP 404");
 
@@ -575,15 +594,17 @@ case "$method:$endpoint" in
   GET:*rulesets/55)
     if [[ "\${FAKE_MODE:-correct}" == drift ]]; then
       jq -c '.enforcement="disabled" | . + {id:55}' config/credential-migration-tag-ruleset.json
+    elif [[ "\${FAKE_MODE:-correct}" == reordered ]]; then
+      jq -c '.rules |= reverse | . + {id:55}' config/credential-migration-tag-ruleset.json
     else
       jq -c '. + {id:55}' config/credential-migration-tag-ruleset.json
     fi
     ;;
   GET:*rulesets*)
     if [[ "\${FAKE_MODE:-correct}" == duplicate ]]; then
-      printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag"},{"id":56,"name":"credential-migration-verify-tag"}]]'
-    elif [[ "$installed" == true || "\${FAKE_MODE:-correct}" == correct ]]; then
-      printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag"}]]'
+      printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag","source_type":"Repository"},{"id":56,"name":"credential-migration-verify-tag","source_type":"Repository"}]]'
+    elif [[ "$installed" == true || "\${FAKE_MODE:-correct}" != missing ]]; then
+      printf '%s\\n' '[[{"id":55,"name":"credential-migration-verify-tag","source_type":"Repository"}]]'
     else
       printf '%s\\n' '[[]]'
     fi
@@ -607,6 +628,8 @@ esac
     };
     const correct = join(root, "correct");
     expect(await run("scripts/check-credential-migration-tag-ruleset.sh", "correct", correct)).toBe(0);
+    const reordered = join(root, "reordered");
+    expect(await run("scripts/check-credential-migration-tag-ruleset.sh", "reordered", reordered)).toBe(0);
     const drift = join(root, "drift");
     expect(await run("scripts/check-credential-migration-tag-ruleset.sh", "drift", drift)).toBe(1);
     const duplicate = join(root, "duplicate");
@@ -642,8 +665,12 @@ case "$endpoint" in
       echo 'gh: Not Found (HTTP 404)' >&2
       exit 1
     fi
-    bypass=false; [[ "\${FAKE_MODE:-correct}" != missing ]] || bypass=true
-    jq -nc --argjson bypass "$bypass" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}}]}],deployment_branch_policy:{protected_branches:true,custom_branch_policies:false}}'
+    bypass=false; [[ "\${FAKE_MODE:-correct}" != missing && "\${FAKE_MODE:-correct}" != bypass ]] || bypass=true
+    protected=true; custom=false
+    if [[ ! -f "$FAKE_RECORD/installed" && ( "\${FAKE_MODE:-correct}" == stale || "\${FAKE_MODE:-correct}" == duplicate ) ]]; then
+      protected=false; custom=true
+    fi
+    jq -nc --argjson bypass "$bypass" --argjson protected "$protected" --argjson custom "$custom" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}}]}],deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}}'
     ;;
   *deployment-branch-policies*)
     count_file="$FAKE_RECORD/policy-count"; count=0; [[ ! -f "$count_file" ]] || count="$(<"$count_file")"; count=$((count + 1)); printf '%s' "$count" >"$count_file"
@@ -688,6 +715,10 @@ esac
     expect(await Bun.file(join(duplicate, "delete.log")).text()).toContain("deployment-branch-policies/10");
     expect(await Bun.file(join(duplicate, "delete.log")).text()).toContain("deployment-branch-policies/11");
     expect(await Bun.file(join(duplicate, "post.log")).exists()).toBe(false);
+
+    const bypass = join(root, "bypass");
+    expect(await run("bypass", bypass)).toBe(1);
+    expect(await Bun.file(join(bypass, "put.json")).exists()).toBe(false);
 
     const missing = join(root, "missing");
     await mkdir(missing);

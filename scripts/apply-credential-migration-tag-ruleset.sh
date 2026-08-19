@@ -10,8 +10,9 @@ root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && 
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 policy="$root/config/credential-migration-tag-ruleset.json"
 name="$(jq -er .name "$policy")"
-matches="$(gh api --paginate --slurp "repos/$repository/rulesets?per_page=100" |
-  jq -c --arg name "$name" '[map(.) | add // [] | .[] | select(.name == $name)]')"
+matches="$(gh api --paginate --slurp "repos/$repository/rulesets?per_page=100&includes_parents=false" |
+  jq -c --arg name "$name" '[map(.) | add // [] | .[] |
+    select(.name == $name and .source_type == "Repository")]')"
 case "$(jq -r length <<<"$matches")" in
   0) gh api --method POST "repos/$repository/rulesets" --input "$policy" --silent ;;
   1)

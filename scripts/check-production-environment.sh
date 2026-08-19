@@ -25,9 +25,13 @@ if ! environment="$(gh api "repos/$repository/environments/production" 2>"$error
     echo "unable to read production environment; apply only after resolving this API error:" >&2
   fi
   sed 's/^/  /' "$error_file" >&2
-  exit 1
+  exit 3
 fi
-policies="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
+if ! policies="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" 2>"$error_file" | jq -c 'map(.branch_policies) | add // []')"; then
+  echo "unable to read production deployment branch policies:" >&2
+  sed 's/^/  /' "$error_file" >&2
+  exit 3
+fi
 actual="$(jq -nSc --argjson environment "$environment" --argjson policies "$policies" '{
   wait_timer: ([ $environment.protection_rules[] | select(.type == "wait_timer") | .wait_timer ][0] // 0),
   can_admins_bypass: $environment.can_admins_bypass,

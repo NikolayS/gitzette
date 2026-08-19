@@ -39,7 +39,10 @@ code. Until the one-shot recovery completes, the Cloudflare credentials are
 repository-scoped and therefore potentially readable by any same-repository
 workflow job. The bootstrap adds exactly one new intentional reader,
 `.github/workflows/migrate-production-credentials.yml`, gated by the temporary
-Nik-only, self-review-blocked, main-only `credential-migration` environment. It
+Nik-only, self-review-blocked, protected-branch-only `credential-migration`
+environment, with `refs/heads/main` separately pinned by `authorize-export`.
+Protected `main` is currently the only admitted export ref; adding another
+protected branch would widen the environment and requires a fresh review. It
 does not narrow the existing repository-secret exposure, which is why #67 must
 close the window immediately after verification. Follow
 `docs/credential-migration.md`; #67 deletes
@@ -61,9 +64,10 @@ production is temporarily widened to
 `config/production-environment-migration.json`; an exit trap restores the
 default `v*`-only policy, and `scripts/check-production-environment.sh default`
 fails loud if that widening lingers. A protected-main scheduled workflow runs
-that check every five minutes during the bootstrap window. It is expected red
+that check approximately every five minutes on GitHub's best-effort scheduler
+during the bootstrap window. It is expected red
 only while the production verification run is waiting; the runbook requires an
-explicit green dispatch after cleanup. The fixed tag is protected by an active
+explicit green dispatch after cleanup, which is the authoritative signal. The fixed tag is protected by an active
 Nik-only create/update/delete ruleset, and the D1 transfer table remains as a
 durable consumed-once marker until repository credential copies are gone.
 

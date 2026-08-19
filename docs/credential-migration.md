@@ -67,12 +67,19 @@ session after service restoration.
    Settings -> Environments -> `credential-migration`, then rerun the apply
    command. This UI-only action is expected after first creating the
    environment and is required before export. Do not widen production yet.
+   Both apply scripts refuse to mutate an existing environment while that
+   bypass is enabled.
 
    ```bash
    bash scripts/check-production-environment.sh default
    bash scripts/apply-credential-migration-tag-ruleset.sh
    bash scripts/apply-credential-migration-environment.sh
+   gh workflow run credential-migration-policy-guard.yml --ref main
+   gh run watch POLICY_GUARD_RUN_ID --exit-status
    ```
+
+   This preflight dispatch must be green before the scheduled guard is relied
+   on; API-read failures exit separately from policy drift.
 
    The default production policy remains `v*` only. Running
    `bash scripts/check-production-environment.sh` without `migration` later
@@ -239,17 +246,22 @@ session after service restoration.
    bash scripts/check-credential-migration-tag-ruleset.sh
    ```
 
-   If the operator shell is interrupted, the first recovery action is:
+   The exit trap is installed before production is widened, and repeated
+   default-policy application is tested and idempotent. On any abort or operator
+   shell interruption, run both recovery commands immediately:
 
    ```bash
    bash scripts/apply-production-environment.sh default
+   bash scripts/check-production-environment.sh default
    ```
 
-   A five-minute scheduled guard also runs
+   A best-effort scheduled guard also runs approximately every five minutes on
+   GitHub's scheduler. It runs
    `scripts/check-production-environment.sh default` from protected `main` and
    is expected to be red during the legitimate production approval wait. After
    cleanup, explicitly dispatch that guard and require it to turn green; a red
-   result after the verify run is no longer waiting is lingering widening.
+   result after the verify run is no longer waiting is lingering widening. The
+   explicit post-cleanup dispatch, not schedule timing, is authoritative.
 
    On verification failure, restore repository rollback scope before debugging:
 
