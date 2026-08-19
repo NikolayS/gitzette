@@ -14,6 +14,14 @@ function selectorSelectsFile(selector: TestSelector, absoluteName: string): bool
 }
 
 describe("TypeScript project coverage", () => {
+  test("CI bounds and retries image runtime installation", async () => {
+    const workflow = await Bun.file(".github/workflows/ci.yml").text();
+    expect(workflow).toContain("for attempt in 1 2");
+    expect(workflow.match(/timeout --foreground --kill-after=10s 300s apt-get/g)?.length).toBe(2);
+    expect(workflow).toContain("timeout --foreground --kill-after=10s 60s dpkg --configure -a");
+    expect(workflow).toContain("ImageMagick installation failed after two bounded attempts");
+  });
+
   test("the runner project typechecks every runner test file", () => {
     const configPath = resolve("runner/tsconfig.json");
     const loaded = ts.readConfigFile(configPath, ts.sys.readFile);
