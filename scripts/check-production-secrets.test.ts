@@ -19,6 +19,7 @@ type SecretCheckOptions = {
   adversarialCdPath?: boolean;
   includeToken?: boolean;
   invocation?: WrapperInvocation;
+  missingSibling?: "check-production-secrets.ts" | "require-wrangler.sh";
   mode?: FakeWranglerMode;
 };
 
@@ -30,6 +31,7 @@ async function runRawSecretCheck(
     adversarialCdPath = false,
     includeToken = true,
     invocation = "bash-absolute",
+    missingSibling,
     mode = "success",
   } = options;
   const root = await mkdtemp(join(tmpdir(), "gitzette-secret-check-"));
@@ -37,6 +39,7 @@ async function runRawSecretCheck(
   await mkdir(join(root, "scripts"), { recursive: true });
   await mkdir(join(root, "node_modules", ".bin"), { recursive: true });
   for (const file of ["check-production-secrets.sh", "check-production-secrets.ts", "require-wrangler.sh"]) {
+    if (file === missingSibling) continue;
     await Bun.write(join(root, "scripts", file), Bun.file(join(repoRoot, "scripts", file)));
   }
   await chmod(join(root, "scripts", "check-production-secrets.sh"), 0o755);
@@ -206,6 +209,19 @@ describe("production secret preflight", () => {
     expect(result.fakeInvoked).toBe(false);
   });
 
+  test("rejects wrapper copies missing either checked-in sibling", async () => {
+    for (const missingSibling of ["require-wrangler.sh", "check-production-secrets.ts"] as const) {
+      const result = await runRawSecretCheck("[]", { missingSibling });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        `cannot find ${missingSibling} under resolved script directory`,
+      );
+      expect(result.stderr).toContain("execute the checked-in script by a supported path");
+      expect(result.stdout).toBe("");
+      expect(result.fakeInvoked).toBe(false);
+    }
+  });
+
   test("runs directly through the shebang from the CI working directory", async () => {
     const secretList = JSON.stringify(expectedProductionSecrets.map(name => ({ name })));
     for (const invocation of ["direct-absolute", "direct-relative"] as const) {
@@ -237,7 +253,11 @@ describe("production secret preflight", () => {
 
   test("fails loudly when the deploy gate is sourced", async () => {
     const wrapper = join(repoRoot, "scripts", "check-production-secrets.sh");
-    const child = Bun.spawn(["bash", "-c", `source "$1"`, "--", wrapper], {
+    const bash = Bun.which("bash");
+    expect(bash).not.toBeNull();
+    const child = Bun.spawn([bash!, "-c", `source "$1"`, "--", wrapper], {
+      cwd: tmpdir(),
+      env: { HOME: tmpdir(), PATH: `${dirname(bash!)}:${dirname(process.execPath)}` },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -253,7 +273,11 @@ describe("production secret preflight", () => {
 
   test("fails loudly when piped to bash instead of executed by path", async () => {
     const wrapper = join(repoRoot, "scripts", "check-production-secrets.sh");
-    const child = Bun.spawn(["bash", "-c", `bash < "$1"`, "--", wrapper], {
+    const bash = Bun.which("bash");
+    expect(bash).not.toBeNull();
+    const child = Bun.spawn([bash!, "-c", `"$0" < "$1"`, bash!, wrapper], {
+      cwd: tmpdir(),
+      env: { HOME: tmpdir(), PATH: `${dirname(bash!)}:${dirname(process.execPath)}` },
       stdout: "pipe",
       stderr: "pipe",
     });

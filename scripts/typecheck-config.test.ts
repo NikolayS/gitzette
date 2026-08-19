@@ -35,13 +35,15 @@ describe("TypeScript project coverage", () => {
     };
     const runnerCommand = packageJson.scripts?.["test:runner"];
     expect(runnerCommand).toBeDefined();
-    const testCommand = runnerCommand?.split(/\s*&&\s*/)
-      .find(command => /^bun\s+test(?:\s|$)/.test(command.trim()));
-    expect(testCommand).toBeDefined();
-    const tokens = testCommand?.trim().match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"])*"|'[^']*')+/g) ?? [];
-    expect(tokens.slice(0, 2)).toEqual(["bun", "test"]);
     const unquote = (token: string) => token.replace(/^(['"])([\s\S]*)\1$/, "$2").replace(/\\(.)/g, "$1");
-    const expandedArguments = tokens.slice(2).map(unquote);
+    const testCommands = runnerCommand?.split(/\s*(?:&&|\|\||;)\s*/)
+      .filter(command => /^bun\s+test(?:\s|$)/.test(command.trim())) ?? [];
+    expect(testCommands.length).toBeGreaterThan(0);
+    const expandedArguments = testCommands.flatMap((command) => {
+      const tokens = command.trim().match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"])*"|'[^']*')+/g) ?? [];
+      expect(tokens.slice(0, 2)).toEqual(["bun", "test"]);
+      return tokens.slice(2).map(unquote);
+    });
     expect(expandedArguments.some(argument => argument === "-t"
       || argument === "--only"
       || argument.startsWith("--test-name-pattern"))).toBe(false);
