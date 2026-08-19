@@ -14,6 +14,12 @@ if ! status="$(jq -ce '
 fi
 
 state="$(jq -r '.state // empty' <<<"$status")"
+creator_id="$(jq -r '.creator.id // empty' <<<"$status")"
+actions_bot_id="41898282"
+if [[ -n "$state" && "$creator_id" != "$actions_bot_id" ]]; then
+  echo "samorev-gate status has unexpected creator: $creator_id" >&2
+  exit 3
+fi
 case "$state" in
   success)
     exit 0

@@ -12,11 +12,15 @@ creator: any repository workflow with `statuses: write` runs as the shared
 Actions app. The protected-main publisher itself validates the external
 `samo-agent` status's immutable user ID and freshness before publishing its
 result, and deployment revalidates the latest statuses. Before polling, the
-base-controlled publisher rejects any PR that changes a workflow whose head
-version requests `statuses: write` or `checks: write`; the regression gate is
-`scripts/check-pr-workflow-permissions.test.sh`. This blocks a PR-head workflow
-from laundering self-published verdicts through the shared Actions app. The
-gate still trusts repository administrator credentials and installed Apps.
+base-controlled publisher parses changed workflows as YAML and rejects any
+base-to-head broadening of `statuses: write`, `checks: write`, or `write-all` at
+workflow or job scope. Its tests cover aliases/tags/folded values, large files,
+deletions, empty workflow diffs, and unchanged existing privilege. This blocks
+a PR from adding a new self-publishing workflow without permanently locking the
+publisher workflow against behavior-only maintenance. The gate still trusts
+repository administrator credentials, installed Apps, and the identity-checked
+samorev verdict to review behavior changes that retain an existing permission
+set.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
@@ -33,6 +37,18 @@ publishes pending immediately, retries transient API/malformed-response failures
 three times, and waits up to 30 minutes. A later verdict needs a failed-job
 rerun. Strict protection means updating the branch creates a new head and
 requires another complete review.
+
+The ordinary `typecheck` job is defined by PR-head `ci.yml`, so its Actions app
+identity is not a human or independent-code identity boundary. A PR can change
+that job without requesting write permissions. The independent `samo-agent`
+full-delta verdict is therefore the substantive review boundary; `typecheck`
+remains a mandatory exact-head execution signal, and deploy revalidates both.
+
+Broadening a workflow's protected write set requires a three-PR recovery: first
+land a narrowly scoped, exact-head-reviewed exception in the base parser; then
+land the permission change under that protected-main exception; finally remove
+the exception and re-audit branch protection. Never disable protection or make
+the permission and its exception effective in the same head.
 
 The ordinary `pull_request` CI workflow runs all PR-controlled code in the PR
 cache scope with a read-only token, no repository secrets, and no persisted Git

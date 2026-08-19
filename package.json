@@ -11,9 +11,10 @@
     "check:worker-types": "./node_modules/.bin/wrangler types --check",
     "test": "bun test",
     "test:runner": "bunx tsc -p runner/tsconfig.json --noEmit && bunx tsc -p tsconfig.test.json --noEmit && bun test runner scripts/*.test.ts",
+    "test:shell": "bash scripts/evaluate-samorev-status.test.sh && bash scripts/evaluate-samorev-gate-status.test.sh && bash scripts/normalize-branch-protection.test.sh && bash scripts/poll-samorev-gate.test.sh",
     "test:e2e": "bash scripts/e2e.sh",
     "test:schema": "bash scripts/check-schema.sh",
-    "test:all": "bunx tsc --noEmit && bun run test:runner && bun test src && bash scripts/check-production-baseline.sh && bun run test:schema && bash scripts/e2e.sh"
+    "test:all": "bunx tsc --noEmit && bun run test:runner && bun test src && bun run test:shell && bash scripts/check-production-baseline.sh && bun run test:schema && bash scripts/e2e.sh"
   },
   "dependencies": {
     "hono": "^4.13.2"

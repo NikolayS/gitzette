@@ -15,9 +15,11 @@ assert_exit() {
 }
 
 assert_exit 2 '[]'
-assert_exit 2 '[{"context":"samorev-gate","state":"pending","created_at":"2026-08-19T00:00:00Z","id":1}]'
-assert_exit 1 '[{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:00:00Z","id":1},{"context":"samorev-gate","state":"failure","created_at":"2026-08-19T00:01:00Z","id":2}]'
-assert_exit 0 '[{"context":"samorev-gate","state":"failure","created_at":"2026-08-19T00:00:00Z","id":1},{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:01:00Z","id":2}]'
+assert_exit 2 '[{"context":"samorev-gate","state":"pending","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":41898282}}]'
+assert_exit 1 '[{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":41898282}},{"context":"samorev-gate","state":"failure","created_at":"2026-08-19T00:01:00Z","id":2,"creator":{"id":41898282}}]'
+assert_exit 0 '[{"context":"samorev-gate","state":"failure","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":41898282}},{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:01:00Z","id":2,"creator":{"id":41898282}}]'
+assert_exit 3 '[{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:00:00Z","id":1,"creator":{"id":1}}]'
+assert_exit 3 '[{"context":"samorev-gate","state":"success","created_at":"2026-08-19T00:00:00Z","id":1}]'
 assert_exit 4 'not-json'
 assert_exit 4 '{}'
 
