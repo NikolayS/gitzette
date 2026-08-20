@@ -72,7 +72,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-publish pending "samo-agent is reviewing the exact PR head"
 log_file="$(mktemp)"
 review_rc=0
 SAMOREV_IGNORED_GITHUB_CHECK_RUN_IDS="$publisher_check_run_id" \
@@ -81,6 +80,15 @@ SAMOREV_IGNORED_GITHUB_CHECK_APP_ID=15368 \
   bun "$SAMOREV_HOME/src/cli.ts" review "$pr_url" --blocking --fetch \
   >"$log_file" 2>&1 || review_rc=$?
 cat "$log_file"
+
+current_head="$(gh pr view "$pr_number" --repo "$repository" --json headRefOid --jq .headRefOid)"
+if [[ "$current_head" != "$head_sha" ]]; then
+  publish error "PR head changed during samorev review"
+  terminal_published=true
+  rm -f "$log_file"
+  trap - EXIT
+  exit 1
+fi
 
 if [[ "$review_rc" -eq 0 ]]; then
   publish success "terminal-clean exact-head samorev passed"

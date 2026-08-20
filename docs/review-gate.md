@@ -27,9 +27,11 @@ context is not an approved break-glass path: it would weaken the reviewed gate
 while the credential window is open. Record the outage, keep #67 ready, and
 rerun CI plus `scripts/check-branch-protection.sh` when the API is readable.
 
-The external runner uses the separate `samo-agent` credential. It publishes
-`samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
-and replaces the status with `success`, `failure`, or `error`. The
+The external runner uses the separate `samo-agent` credential. It runs a
+blocking Tanya301/samorev review, re-resolves the PR head after the reviewer
+exits, and only then publishes `samorev: success`, `failure`, or `error` against
+the unchanged exact head. Avoiding a pre-review self-status also prevents the
+reviewer from counting its own pending context as failed CI. The
 `pull_request_target` publisher is loaded from protected `main`; it never checks
 out or executes PR-head code. It accepts only a final status created after the
 current gate run began and published by immutable user ID `280144521`
@@ -128,7 +130,10 @@ pre-merge audit.
 
 Immediately before approving a `production` deployment, Nik independently
 proves that the lightweight release tag still targets the protected `main` tip;
-workflow logs are not evidence:
+workflow logs are not evidence. The tag-triggered workflow is loaded from the
+tagged tree and therefore provides no protection independent of the
+`release-tags-samo-only` ruleset. Before approval, Nik must publish the command
+result and both SHAs in the external release-readiness record:
 
 ```bash
 tag="vX.Y.Z"
@@ -335,7 +340,7 @@ the `samo-agent` token and run
 
 ## Full-delta review proof
 
-PR #65 is one fail-closed cutover because its migrations, Worker lease routes,
+PR #68 is one fail-closed cutover because its migrations, Worker lease routes,
 host runner, and exact-head release gates have no independently deployable
 intermediate state. The runner and weekly scheduler remain disabled, so merging
 the coherent cutover does not activate generation. Splitting it would either
@@ -362,9 +367,10 @@ controls; none is an independently activatable feature.
 
 Every push invalidates the prior verdict. The reviewer is invoked
 with the PR URL and `--fetch`, so it receives the complete base-to-exact-head
-delta; it is never invoked on `HEAD^..HEAD`. The posted report records the exact
-head, total changed files/diff bytes, and CI result. A clean exit is followed by
-an exact-head status and a fresh successful protected-base publisher run. The current review has
+delta; it is never invoked on `HEAD^..HEAD`. The posted report records the total
+changed files/diff bytes and CI result, while the resulting GitHub status is
+attached to the exact head. A clean exit is followed by a fresh successful
+protected-base publisher run. The current review has
 already demonstrated full-delta coverage by finding interactions across D1
 migrations, Worker scheduling/publication, the host runner, TypeScript project
 configuration, and operational documentation in different fix rounds.
@@ -375,21 +381,17 @@ result with `schema.sql`, exercises Worker+D1+R2 E2E, and typechecks Worker,
 scripts, runner source, and every runner test. `scripts/typecheck-config.test.ts`
 fails if a runner test falls out of that TypeScript project.
 
-The current full-delta re-review ledger makes both changed and unchanged
-attention explicit. Every row reran `bun run test:all`, E2E, typechecks,
-actionlint, shellcheck, the high audit, and the secret scan before the linked
-`--fetch` review:
-
-| Exact head | Focus of that fix cycle | Unchanged subsets re-verified by the full gate | Full-delta report |
-| --- | --- | --- | --- |
-| `30b0be6` | structured OAuth outage signals and strict D1 response parsing | migrations, queue/publication, scheduler, renderer, and deploy gate | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5333994431) |
-| `806ae6a` | credential scrub, cleanup activation, OAuth persistence, disclosure | runner inference/lease core, migration chain, publication transaction, and review foundation | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5334155893) |
-| `c62ecea` | baseline derivation, post-retry visibility, prompt sandbox, scope extraction | migrations, Worker queue/lease/publication, host runner runtime, and protected review state machine | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5334329357) |
-| `0a78b55` | fail-closed suppression types and durable artifact cleanup retry | Worker routes, runner isolation, migration chain, deploy permissions, and base-controlled review state machine | [report](https://github.com/NikolayS/gitzette/pull/65#issuecomment-5334570243) |
-
-Each report records the complete base-to-head byte count, not only the focus
-column. A later fix head invalidates the prior row and must add a new exact-head
-report before readiness review.
+The exact-head full-delta ledger is external to the reviewed commit. An
+in-repository row cannot name its own commit SHA and report URL without changing
+that SHA, so treating a versioned table as readiness evidence is a recursive,
+stale-by-construction gate. The canonical ledger is the sequence of
+`samo-agent` reports and readiness comments on PR #68. The terminal status is
+attached to the live head, while the report records the complete base-to-head
+byte count; a later push invalidates both. Before merge, the external readiness
+comment records the exact SHA and report URL, the green CI and protected-base
+publisher run URLs, and the full local gate result.
+`scripts/check-release-review-evidence.sh` then binds the immutable status target
+to that publisher run and exact head.
 
 The merge base and current protected `main` are both
 `1aca7074f59b193466697a0290a11bd44bffed6e`. At that base, the

@@ -54,6 +54,10 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
     expect(workflow.match(/BOOTSTRAP_EXPIRES_AT: 2026-08-27T00:00:00Z/g)).toHaveLength(3);
     expect(workflow).toContain("both production environment credentials must be present");
+    expect(workflow).toContain("secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID");
+    expect(workflow).toContain("secrets.PRODUCTION_CLOUDFLARE_API_TOKEN");
+    expect(workflow.match(/secrets\.PRODUCTION_CLOUDFLARE_ACCOUNT_ID/g)).toHaveLength(1);
+    expect(workflow.match(/secrets\.PRODUCTION_CLOUDFLARE_API_TOKEN/g)).toHaveLength(1);
     expect(workflow).toContain("both Cloudflare repository secrets must be present");
     expect(workflow).toContain("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
     expect(workflow).toContain("rsa_mgf1_md:sha256");
@@ -212,7 +216,7 @@ describe("one-shot credential migration boundary", () => {
     expect(recoveryCloseOffset).toBeLessThan(recoveryConclusionOffset);
     expect(recoveryInventoryOffset).toBeGreaterThan(recoveryCloseOffset);
     expect(recoveryInventoryOffset).toBeLessThan(recoveryConclusionOffset);
-    expect(migrationDoc).toContain("GitHub can silently fall back");
+    expect(migrationDoc).toContain("repository-secret fallback structurally impossible");
     expect(migrationDoc).toContain("GitHub pins the workflow\n   run to the immutable `main` SHA at dispatch");
     expect(migrationDoc).toContain("Production is temporarily widened");
     expect(migrationDoc).toContain("migration-policy` is expected red with exit 4");
@@ -463,6 +467,11 @@ exit 8
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
     expect(deploy).not.toContain("workflow_dispatch");
+    expect(deploy).not.toContain("${{ secrets.CLOUDFLARE_");
+    expect(deploy.match(/secrets\.PRODUCTION_CLOUDFLARE_ACCOUNT_ID/g)).toHaveLength(5);
+    expect(deploy.match(/secrets\.PRODUCTION_CLOUDFLARE_API_TOKEN/g)).toHaveLength(5);
+    expect(migrationDoc).toContain("gh secret set PRODUCTION_CLOUDFLARE_ACCOUNT_ID --env production");
+    expect(migrationDoc).toContain("gh secret set PRODUCTION_CLOUDFLARE_API_TOKEN --env production");
     const productionConsumers: string[] = [];
     const repositoryCredentialConsumers: string[] = [];
     const reusableWorkflowCredentialConsumers: string[] = [];
@@ -486,7 +495,7 @@ exit 8
         if (environment === "production") productionConsumers.push(path);
         const reusableWorkflowCredentialConsumer = job.uses !== undefined && job.secrets !== undefined;
         if (reusableWorkflowCredentialConsumer) reusableWorkflowCredentialConsumers.push(`${path}:${jobName}`);
-        if (JSON.stringify(job).includes("secrets.CLOUDFLARE_") || reusableWorkflowCredentialConsumer) {
+        if (/secrets\.(?:PRODUCTION_)?CLOUDFLARE_/.test(JSON.stringify(job)) || reusableWorkflowCredentialConsumer) {
           const repositoryExporter = path === ".github/workflows/migrate-production-credentials.yml" &&
             jobName === "export-encrypted-credentials";
           expect(
@@ -1237,13 +1246,14 @@ case "$endpoint" in
   *production/secrets*)
     if [[ "\${FAKE_MODE:-ok}" == production-secret-api-error ]]; then echo 'production secret API failed' >&2; exit 1
     elif [[ "\${FAKE_MODE:-ok}" == production-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"SHADOW"}]}]'
-    elif [[ "\${FAKE_MODE:-ok}" == production-complete ]]; then printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_API_TOKEN"},{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]'
-    elif [[ "\${FAKE_MODE:-ok}" == production-incomplete ]]; then printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]'
+    elif [[ "\${FAKE_MODE:-ok}" == production-complete ]]; then printf '%s\\n' '[{"secrets":[{"name":"PRODUCTION_CLOUDFLARE_API_TOKEN"},{"name":"PRODUCTION_CLOUDFLARE_ACCOUNT_ID"}]}]'
+    elif [[ "\${FAKE_MODE:-ok}" == production-incomplete ]]; then printf '%s\\n' '[{"secrets":[{"name":"PRODUCTION_CLOUDFLARE_ACCOUNT_ID"}]}]'
     else printf '%s\\n' '[{"secrets":[]}]'; fi
     ;;
   *actions/secrets*)
     if [[ "\${FAKE_MODE:-ok}" == repository-secret-api-error ]]; then echo 'repository secret API failed' >&2; exit 1
     elif [[ "\${FAKE_MODE:-ok}" == repository-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"CLOUDFLARE_API_TOKEN"}]}]'
+    elif [[ "\${FAKE_MODE:-ok}" == production-repository-secret ]]; then printf '%s\\n' '[{"secrets":[{"name":"PRODUCTION_CLOUDFLARE_API_TOKEN"}]}]'
     else printf '%s\\n' '[{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN"}]}]'; fi
     ;;
   *) exit 91 ;;
@@ -1296,6 +1306,7 @@ esac
     expect(await runInventory("ok", "false", "invalid")).toBe(1);
     expect(await runInventory("ok", "false", "true")).toBe(0);
     expect(await runInventory("repository-secret", "false", "true")).toBe(1);
+    expect(await runInventory("production-repository-secret", "false", "true")).toBe(1);
     expect(await runInventory("repository-secret-api-error", "false", "true")).toBe(3);
     expect(await runInventory("environment-variable")).toBe(1);
     expect(await runInventory("environment-secret")).toBe(1);

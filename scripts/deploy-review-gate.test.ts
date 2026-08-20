@@ -353,9 +353,9 @@ case "$endpoint" in
     elif [[ "\${FAKE_MODE:-ok}" == production-empty ]]; then
       printf '[{"secrets":[]}]\n'
     elif [[ "\${FAKE_MODE:-ok}" == production-incomplete ]]; then
-      printf '[{"secrets":[{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]\n'
+      printf '[{"secrets":[{"name":"PRODUCTION_CLOUDFLARE_ACCOUNT_ID"}]}]\n'
     else
-      printf '[{"secrets":[{"name":"CLOUDFLARE_API_TOKEN"},{"name":"CLOUDFLARE_ACCOUNT_ID"}]}]\n'
+      printf '[{"secrets":[{"name":"PRODUCTION_CLOUDFLARE_API_TOKEN"},{"name":"PRODUCTION_CLOUDFLARE_ACCOUNT_ID"}]}]\n'
     fi
     ;;
   *credential-migration/secrets*)

@@ -8,7 +8,7 @@ set -euo pipefail
 
 root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
-allowed_cloudflare='["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
+allowed_cloudflare='["PRODUCTION_CLOUDFLARE_ACCOUNT_ID","PRODUCTION_CLOUDFLARE_API_TOKEN"]'
 require_production_credentials="${REQUIRE_PRODUCTION_CREDENTIALS:-false}"
 if [[ "$require_production_credentials" != true && "$require_production_credentials" != false ]]; then
   echo "REQUIRE_PRODUCTION_CREDENTIALS must be exactly true or false" >&2

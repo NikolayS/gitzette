@@ -500,13 +500,13 @@ text matching is not the authorization proof.
      echo "exported account ID is not the reviewed Worker account" >&2
      exit 1
    }
-   printf '%s' "$exported_account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID --env production
-   printf '%s' "$api_token" | gh secret set CLOUDFLARE_API_TOKEN --env production
+   printf '%s' "$exported_account_id" | gh secret set PRODUCTION_CLOUDFLARE_ACCOUNT_ID --env production
+   printf '%s' "$api_token" | gh secret set PRODUCTION_CLOUDFLARE_API_TOKEN --env production
    environment_secrets="$(gh api --paginate --slurp \
      'repos/NikolayS/gitzette/environments/production/secrets?per_page=100' |
      jq -c 'map(.secrets) | add // []')"
    jq -e --argjson before "$environment_secrets_before" '
-     ([.[].name] | sort) == ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
+     ([.[].name] | sort) == ["PRODUCTION_CLOUDFLARE_ACCOUNT_ID","PRODUCTION_CLOUDFLARE_API_TOKEN"] and
      all(.[]; . as $current |
        ($before | map(select(.name == $current.name)) | .[0].updated_at // "") <
        $current.updated_at)' <<<"$environment_secrets" >/dev/null
@@ -521,15 +521,15 @@ text matching is not the authorization proof.
    [[ "$remaining_repository_cloudflare_secrets" == 0 ]]
    ```
 
-   Enumerate every `secrets.CLOUDFLARE_*` reference under `.github/workflows`.
-   `deploy.yml` and the verifier must use `environment: production`; only the
-   one-shot exporter may use repository credentials.
-
-   Repository copies must be absent before stored-value verification; otherwise
-   GitHub can silently fall back from a missing environment secret to the same
-   repository secret. If verification later fails, restore repository copies
-   from `$plaintext` immediately. Delete the
-   repository copies again before any verification retry.
+   Enumerate every Cloudflare secret reference under `.github/workflows`.
+   `deploy.yml` and the verifier must read only the distinct
+   `PRODUCTION_CLOUDFLARE_*` names under `environment: production`; only the
+   one-shot exporter may read the repository-scoped `CLOUDFLARE_*` names. The
+   distinct names make repository-secret fallback structurally impossible: a
+   missing production copy resolves empty and fails closed. Repository copies
+   must still be absent before stored-value verification. If verification later
+   fails, restore repository copies from `$plaintext` immediately, then delete
+   them again before any verification retry.
 
 6. From a clean checkout exactly synchronized to protected `main`, run
    stored-value verification as `samo-agent`. GitHub pins the workflow

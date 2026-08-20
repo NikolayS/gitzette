@@ -33,7 +33,12 @@ if [[ "${1:-}" == api && "${2:-}" == user ]]; then
   exit 0
 fi
 if [[ "${1:-}" == pr ]]; then
-  printf '{"headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","url":"https://github.com/example/gitzette/pull/68"}\n'
+  if [[ "$*" == *'--jq .headRefOid'* ]]; then
+    [[ "$mode" != head-change ]] || { printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'; exit 0; }
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+  else
+    printf '{"headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","url":"https://github.com/example/gitzette/pull/68"}\n'
+  fi
   exit 0
 fi
 if [[ "${1:-}" == run ]]; then
@@ -121,6 +126,10 @@ run_case() {
       echo "$mode published the wrong terminal status" >&2
       exit 1
     }
+    [[ "$(wc -l <"$record" | tr -d ' ')" == 1 ]] || {
+      echo "$mode published a self-observable pre-review status" >&2
+      exit 1
+    }
   elif [[ -s "$record" ]]; then
     echo "$mode published before the publisher boundary passed" >&2
     exit 1
@@ -137,5 +146,6 @@ done
 run_case success 0 success
 run_case report 1 failure
 run_case crash 1 error
+run_case head-change 1 error
 
 echo "samorev reviewer wrapper boundary and terminal mapping tests passed"
