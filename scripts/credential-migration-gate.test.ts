@@ -112,6 +112,8 @@ describe("one-shot credential migration boundary", () => {
       .digest("hex");
     expect(fingerprint).toBe("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
     const migrationDoc = await Bun.file("docs/credential-migration.md").text();
+    const productionMigrationDoc = await Bun.file("docs/production-migrations.md").text();
+    const readme = await Bun.file("README.md").text();
     const documentedFingerprints = migrationDoc.match(/[0-9a-f]{64}/g) ?? [];
     expect(documentedFingerprints.length).toBeGreaterThan(0);
     expect([...new Set(documentedFingerprints)]).toEqual([fingerprint]);
@@ -157,6 +159,11 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("GitHub can silently fall back");
     expect(migrationDoc).toContain("GitHub pins the workflow\n   run to the immutable `main` SHA at dispatch");
     expect(migrationDoc).toContain("Production is temporarily widened");
+    expect(migrationDoc).toContain("migration-policy` is expected red with exit 4");
+    expect(migrationDoc).toContain("D1 `/query` contract accepts either a single");
+    expect(productionMigrationDoc).toContain("CREDENTIAL_MIGRATION_IN_PROGRESS=true");
+    expect(migrationDoc).toContain("prefix every manual `bun run db:migrate`");
+    expect(readme).toContain("CREDENTIAL_MIGRATION_IN_PROGRESS=true bun run db:migrate");
     expect(migrationDoc).toContain("#67 restores the `v*`-only policy");
     expect(migrationDoc).toContain("#67 removes the exclusion after dropping the");
     expect(migrationDoc).toContain("readability block from `.github/workflows/ci.yml`");
@@ -196,6 +203,9 @@ describe("one-shot credential migration boundary", () => {
     expect(installStep).not.toContain("VERIFY_RUN_ID");
     expect(verifyStep).toContain('previous_verify_run_id="$(gh run list');
     expect(verifyStep).toContain('gh run watch "$VERIFY_RUN_ID"');
+    expect(verifyStep.indexOf(': "${plaintext:?re-run the post-decryption restore block')).toBeLessThan(
+      verifyStep.indexOf("gh variable set CREDENTIAL_VERIFY_OPEN"),
+    );
     expect(verifyStep.indexOf('if [[ "$verify_status" != 0 ]]')).toBeLessThan(
       verifyStep.indexOf("gh variable delete CREDENTIAL_VERIFY_OPEN"),
     );

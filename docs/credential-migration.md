@@ -170,15 +170,21 @@ text matching is not the authorization proof.
    does not claim that the intentionally installed bootstrap workflow or
    migration environment has already been removed.
 
-   From merge until both environment apply commands succeed, the scheduled
-   guard's `production-policy` job is expected red: production policy is stale
-   until `scripts/apply-production-environment.sh` succeeds, and the temporary
-   environment is absent with exit 4 until its apply succeeds. This bounded
-   merge-to-reapply interval is the only expected red `production-policy`
-   window; afterward, red is drift.
+   From merge until `scripts/apply-production-environment.sh` succeeds, the
+   scheduled guard's `production-policy` job is expected red because production
+   policy is stale. Separately, `migration-policy` is expected red with exit 4
+   only until `scripts/apply-credential-migration-environment.sh` creates and
+   configures the temporary environment. These are the only bounded expected-red
+   windows for those jobs; afterward, red in either job is drift.
 
    After both applies, production policy does not change during export or
    verification; any checker failure is therefore real drift.
+
+   Throughout this temporary window, prefix every manual `bun run db:migrate`,
+   `bun run db:bootstrap`, or direct `scripts/bootstrap-production-db.sh`
+   invocation with `CREDENTIAL_MIGRATION_IN_PROGRESS=true`. Without that exact
+   value, the ordinary schema gates correctly reject the temporary transfer
+   table as drift.
 
 2. Open the independently removable switch and dispatch exactly one export as
    immutable runner ID `280144521` (`samo-agent`). Workflow concurrency only
@@ -235,6 +241,13 @@ text matching is not the authorization proof.
    reopens the switch, and dispatches exactly one new run for a fresh Nik
    approval. Any absent table, unexpected row, or nonzero count other than one
    remains a hard stop with repository rollback copies intact.
+
+   The reviewed Cloudflare D1 `/query` contract accepts either a single
+   `{sql, params}` object or a `{batch}` array of query objects. The exporter uses
+   the documented `{batch}` form and requires one successful result per entry,
+   including `result[1].meta.changes == 1` for the guarded insert. Contract
+   reviewed 2026-08-19 against
+   <https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/>.
 
    ```bash
    set -euo pipefail
@@ -374,6 +387,7 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
+   : "${plaintext:?re-run the post-decryption restore block from retained ciphertext first}"
    git fetch origin main
    test "$(git rev-parse origin/main)" = "$(git rev-parse main)"
    bash scripts/check-credential-migration-environment.sh
@@ -537,6 +551,8 @@ text matching is not the authorization proof.
    `config/production-environment.json`, apply the restored `v*`-only policy,
    remove `CREDENTIAL_MIGRATION_IN_PROGRESS` from `deploy.yml` so all three
    production schema gates again require the transfer table to be absent,
+   remove the temporary manual-migration notices from `README.md` and
+   `docs/production-migrations.md`,
    remove the transient credential-migration
    readability block from `.github/workflows/ci.yml`, and audit the ordinary exact-schema policy before
    any later release. Run and record the final green guard

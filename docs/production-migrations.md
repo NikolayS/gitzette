@@ -46,6 +46,14 @@ the committed fixture and migration chain; they do not inspect or mutate live
 D1. All production schema checks are read-only. Only Wrangler's migration apply
 step mutates production.
 
+During the temporary credential migration window, prefix any manual
+`bun run db:migrate`, `bun run db:bootstrap`, or direct
+`scripts/bootstrap-production-db.sh` invocation with
+`CREDENTIAL_MIGRATION_IN_PROGRESS=true`. This admits only the reviewed
+`credential_migration_transfer` table after proving it is absent or contains at
+most one row. Step 8 of `docs/credential-migration.md` removes this temporary
+instruction and the exclusion with #67.
+
 ## Captured baseline provenance
 
 `fixtures/production-baseline-2026-08-15.sql` is a canonical SQL reconstruction

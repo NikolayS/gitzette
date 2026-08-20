@@ -151,7 +151,10 @@ environment's approval. Release tags must be pushed by immutable `samo-agent`
 ID `280144521`, leaving Nik as the distinct sole production approver; a tag
 pushed by Nik or repository Actions fails before deployment.
 Failed Deploy runs must also be rerun by `samo-agent`; a rerun triggered by Nik
-fails early because production prevents the triggering actor from self-review.
+fails early because `scripts/check-release-tag-actor.sh` requires both
+`github.actor_id` and the API-resolved `triggering_actor.id` to equal immutable
+`samo-agent` ID `280144521`. Production `prevent_self_review` remains a separate
+approval-time control.
 
 The exporter writes only RSA-encrypted ciphertext to a transient table in the
 private D1 database; no public Actions artifact is created. Stored-value
