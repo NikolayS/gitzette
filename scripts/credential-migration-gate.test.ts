@@ -8,6 +8,21 @@ import { join } from "node:path";
 describe("one-shot credential migration boundary", () => {
   test("pins dispatcher, approvals, encryption, and private transfer storage", async () => {
     const workflow = await Bun.file(".github/workflows/migrate-production-credentials.yml").text();
+    const deadlineSources: Array<[string, number]> = [
+      [".github/workflows/migrate-production-credentials.yml", 3],
+      [".github/workflows/credential-migration-policy-guard.yml", 1],
+      ["scripts/apply-production-environment.sh", 1],
+      ["scripts/check-production-environment.sh", 1],
+      ["scripts/credential-migration-schema-exclusion.sh", 2],
+    ];
+    const deadlineValues: string[] = [];
+    for (const [path, expectedCount] of deadlineSources) {
+      const source = await Bun.file(path).text();
+      const values = [...source.matchAll(/20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ/g)].map(([value]) => value);
+      expect(values).toHaveLength(expectedCount);
+      deadlineValues.push(...values);
+    }
+    expect([...new Set(deadlineValues)]).toEqual(["2026-08-27T00:00:00Z"]);
     const policy = JSON.parse(await Bun.file("config/credential-migration-environment.json").text()) as {
       can_admins_bypass: boolean;
       prevent_self_review: boolean;
@@ -170,7 +185,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("D1 `/query` contract accepts either a single");
     expect(productionMigrationDoc).toContain("CREDENTIAL_MIGRATION_IN_PROGRESS=true");
     expect(productionMigrationDoc).toContain("expires at `2026-08-27T00:00:00Z`");
-    expect(productionMigrationDoc).toContain("explicit expiry diagnostic and refuses the exclusion");
+    expect(productionMigrationDoc).toContain("explicit expiry diagnostic and supplies no exclusion");
     expect(migrationDoc).toContain("prefix every manual `bun run db:migrate`");
     expect(readme).not.toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
     expect(productionMigrationDoc).toContain("bootstrap still requires a completely empty database");
@@ -194,7 +209,7 @@ describe("one-shot credential migration boundary", () => {
     expect(schemaExclusion).toContain(". >= 0 and . <= 1");
     expect(schemaExclusion).toContain("type<>'table'");
     expect(schemaExclusion).toContain("ordinary strict schema");
-    expect(schemaExclusion).toContain("refusing the temporary exclusion");
+    expect(schemaExclusion).toContain("using the ordinary strict schema comparison");
     expect(schemaExclusion).toContain("credential_migration_transfer");
     expect(workflow).not.toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
     const deployWorkflow = await Bun.file(".github/workflows/deploy.yml").text();
@@ -255,6 +270,8 @@ describe("one-shot credential migration boundary", () => {
       "scripts/check-production-drift.sh",
       "scripts/check-production-applied-schema.sh",
       "scripts/check-production-schema.sh",
+      "scripts/apply-production-environment.sh",
+      "scripts/check-production-environment.sh",
       "CREDENTIAL_MIGRATION_IN_PROGRESS",
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);
@@ -280,7 +297,7 @@ describe("one-shot credential migration boundary", () => {
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {
       on: { schedule: Array<{ cron: string }> };
       permissions: Record<string, string>;
-      jobs: Record<string, { permissions: Record<string, string>; steps: Array<{ name?: string; run?: string }> }>;
+      jobs: Record<string, { permissions: Record<string, string>; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, unknown> }> }>;
     };
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
     expect(policyGuard).toContain("bash scripts/check-production-environment.sh");
@@ -306,6 +323,10 @@ describe("one-shot credential migration boundary", () => {
     expect(parsedPolicyGuard.jobs["migration-policy"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(parsedPolicyGuard.jobs["migration-switches"].permissions).toEqual({});
     expect(parsedPolicyGuard.jobs["bootstrap-deadline"].permissions).toEqual({});
+    for (const jobName of ["production-policy", "migration-policy"]) {
+      const checkout = parsedPolicyGuard.jobs[jobName].steps.find(({ uses }) => uses?.startsWith("actions/checkout@"));
+      expect(checkout?.with).toEqual({ "persist-credentials": false, ref: "main" });
+    }
     const policyGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the fixed production ref policy"))?.run;
     const productionRepositoryPinRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
@@ -803,7 +824,7 @@ credential_migration_schema_exclusion
     )).toBe(1);
     expect(await execute("true", "1", "2")).toBe(1);
     expect(await execute("true", "0", "0", "1")).toBe(1);
-    expect(await execute("true", "0", "0", "0", "0", "100")).toBe(1);
+    expect(await execute("true", "0", "0", "0", "0", "100")).toBe(0);
     expect(await execute("yes", "0", "0")).toBe(1);
     expect(await execute("true", "0", "0", "0", "9")).toBe(9);
     const exclusionFor = (migrationState: string, nowEpoch = "99"): string => {
@@ -834,7 +855,8 @@ credential_migration_schema_exclusion
       },
       stdout: "pipe", stderr: "pipe",
     });
-    expect(expiredExclusion.exitCode).toBe(1);
+    expect(expiredExclusion.exitCode).toBe(0);
+    expect(new TextDecoder().decode(expiredExclusion.stdout)).toBe("");
     expect(new TextDecoder().decode(expiredExclusion.stderr)).toContain("schema exclusion expired");
     const database = new Database(":memory:");
     database.exec("create table d1_migrations(id integer); create table credential_migration_transfer(run_id text); create table retained_application_table(id integer)");
@@ -1143,6 +1165,7 @@ if [[ "$*" == *" -d "* ]]; then printf '100\\n'; else printf '%s\\n' "\${FAKE_NO
 
     const applySource = await Bun.file("scripts/apply-production-environment.sh").text();
     expect(applySource).toContain("temporary production main admission expired");
+    expect(applySource).toContain('any(.branch_policies[]?; .name == "main" and .type == "branch")');
     const policyBlock = applySource.slice(
       applySource.indexOf('expected_policies='),
       applySource.lastIndexOf('\n"$root/scripts/check-production-environment.sh"'),

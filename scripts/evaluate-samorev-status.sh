@@ -4,7 +4,11 @@ set -euo pipefail
 # samo-agent; verified with: gh api users/samo-agent --jq .id
 reviewer_id="280144521"
 not_before="${SAMOREV_NOT_BEFORE:-}"
-target_url="${SAMOREV_TARGET_URL:?SAMOREV_TARGET_URL is required}"
+if [[ -z "${SAMOREV_TARGET_URL:-}" ]]; then
+  echo "SAMOREV_TARGET_URL is required" >&2
+  exit 5
+fi
+target_url="$SAMOREV_TARGET_URL"
 statuses="$(cat)"
 if ! status="$(jq -ce '
   if type != "array" then error("expected an array") else . end

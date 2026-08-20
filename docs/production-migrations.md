@@ -51,8 +51,10 @@ During the temporary credential migration window, prefix any manual
 This admits only the reviewed `credential_migration_transfer` table after
 proving it is absent or contains at most one row. This temporary exclusion
 expires at `2026-08-27T00:00:00Z`; after that instant the helper prints an
-explicit expiry diagnostic and refuses the exclusion, so the ordinary strict
-schema check fails until #67 removes the transfer table and temporary wiring.
+explicit expiry diagnostic and supplies no exclusion, so the ordinary strict
+schema comparison runs and fails only while the transfer table remains. Once
+#67 drops that table, the same permanent migration and deploy paths work without
+the temporary predicate.
 Do not run
 `bun run db:bootstrap` or `scripts/bootstrap-production-db.sh` during this
 window: bootstrap still requires a completely empty database and rejects the

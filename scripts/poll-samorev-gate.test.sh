@@ -13,6 +13,12 @@ export GITHUB_SERVER_URL=https://github.com
 export GITHUB_REPOSITORY=NikolayS/gitzette
 export GITHUB_RUN_ID=7
 
+grep -q 'publish_terminal error "samorev verdict evaluator is misconfigured"' \
+  "$root/scripts/poll-samorev-gate.sh" || {
+  echo "poller does not map evaluator configuration errors to terminal error" >&2
+  exit 1
+}
+
 for required in GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID; do
   missing_error="$test_dir/missing-$required.err"
   if env -u "$required" bash "$root/scripts/poll-samorev-gate.sh" \

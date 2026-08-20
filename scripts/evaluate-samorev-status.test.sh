@@ -22,8 +22,8 @@ assert_exit() {
 
 missing_target_actual=0
 env -u SAMOREV_TARGET_URL "$script" <<<'[]' >/dev/null 2>&1 || missing_target_actual=$?
-if [[ "$missing_target_actual" != 1 ]]; then
-  echo "expected missing SAMOREV_TARGET_URL to exit 1, got $missing_target_actual" >&2
+if [[ "$missing_target_actual" != 5 ]]; then
+  echo "expected missing SAMOREV_TARGET_URL to exit 5, got $missing_target_actual" >&2
   exit 1
 fi
 

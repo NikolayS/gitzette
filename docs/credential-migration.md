@@ -613,10 +613,10 @@ text matching is not the authorization proof.
    policy guard reports the same deadline. At that instant the production
    environment checker requires the safer `v*`-only state, the production
    environment apply script refuses to re-add `main`, and the production schema
-   helper prints an explicit expiry diagnostic and refuses its transfer-table
-   exclusion. Any remaining bootstrap workflow or policy then is an incident,
-   not an extension; teardown must remove the guard only together with the
-   migration surface.
+   helper prints an explicit expiry diagnostic and returns to the ordinary
+   strict schema comparison. Any remaining bootstrap workflow or policy then is
+   an incident, not an extension; teardown must remove the guard only together
+   with the migration surface.
 
 7. After successful read-capability verification, drop the transfer table and
    remove nonessential local material, but retain the encrypted private key and
@@ -662,6 +662,9 @@ text matching is not the authorization proof.
    `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Remove the temporary
    `main` branch entry from
    `config/production-environment.json`, apply the restored `v*`-only policy,
+   remove the temporary deadline branches from
+   `scripts/apply-production-environment.sh` and
+   `scripts/check-production-environment.sh`,
    remove `CREDENTIAL_MIGRATION_IN_PROGRESS` from `deploy.yml` so all three
    production schema gates again require the transfer table to be absent,
    and remove the temporary helper integration from

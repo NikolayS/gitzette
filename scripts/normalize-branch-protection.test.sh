@@ -3,7 +3,16 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow_permissions='{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}'
-rulesets="$(jq -c .repository_rulesets "$root/config/main-branch-protection.json")"
+live_ruleset_fixture="$root/fixtures/github-rulesets-live-2026-08-20.json"
+rulesets="$(jq -c .admin_rulesets "$live_ruleset_fixture")"
+[[ "$(jq -r '[.admin_rulesets[].bypass_actors[] | select(.actor_id == 280144521 and .actor_type == "User" and .bypass_mode == "always")] | length' "$live_ruleset_fixture")" == 2 ]] || {
+  echo "captured admin rulesets did not preserve the immutable User bypass actor" >&2
+  exit 1
+}
+[[ "$(jq -r '[.external_rulesets[] | select(.bypass_actors == null and .current_user_can_bypass == "always")] | length' "$live_ruleset_fixture")" == 2 ]] || {
+  echo "captured external rulesets did not preserve the samo-agent bypass view" >&2
+  exit 1
+}
 protection='{
   "required_status_checks":{"strict":true,"checks":[{"context":"typecheck","app_id":15368},{"context":"samorev-gate","app_id":15368},{"context":"samorev","app_id":null},{"context":"policy-api-readability","app_id":15368}]},
   "enforce_admins":{"enabled":true},

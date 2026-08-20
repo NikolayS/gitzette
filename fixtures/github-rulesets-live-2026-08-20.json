@@ -1,0 +1,52 @@
+{
+  "captured_at": "2026-08-20T05:49:04Z",
+  "repository": "NikolayS/gitzette",
+  "admin_rulesets": [
+    {
+      "id": 21062699,
+      "name": "main-samo-only-updates",
+      "target": "branch",
+      "enforcement": "active",
+      "bypass_actors": [
+        { "actor_id": 280144521, "actor_type": "User", "bypass_mode": "always" }
+      ],
+      "conditions": { "ref_name": { "exclude": [], "include": ["refs/heads/main"] } },
+      "rules": [{ "type": "creation" }, { "type": "update" }, { "type": "deletion" }],
+      "current_user_can_bypass": "never"
+    },
+    {
+      "id": 21062743,
+      "name": "release-tags-samo-only",
+      "target": "tag",
+      "enforcement": "active",
+      "bypass_actors": [
+        { "actor_id": 280144521, "actor_type": "User", "bypass_mode": "always" }
+      ],
+      "conditions": { "ref_name": { "exclude": [], "include": ["refs/tags/v*"] } },
+      "rules": [{ "type": "creation" }, { "type": "update" }, { "type": "deletion" }],
+      "current_user_can_bypass": "never"
+    }
+  ],
+  "external_rulesets": [
+    {
+      "id": 21062699,
+      "name": "main-samo-only-updates",
+      "target": "branch",
+      "enforcement": "active",
+      "bypass_actors": null,
+      "conditions": { "ref_name": { "exclude": [], "include": ["refs/heads/main"] } },
+      "rules": [{ "type": "creation" }, { "type": "update" }, { "type": "deletion" }],
+      "current_user_can_bypass": "always"
+    },
+    {
+      "id": 21062743,
+      "name": "release-tags-samo-only",
+      "target": "tag",
+      "enforcement": "active",
+      "bypass_actors": null,
+      "conditions": { "ref_name": { "exclude": [], "include": ["refs/tags/v*"] } },
+      "rules": [{ "type": "creation" }, { "type": "update" }, { "type": "deletion" }],
+      "current_user_can_bypass": "always"
+    }
+  ]
+}

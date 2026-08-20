@@ -108,6 +108,10 @@ for attempt in $(seq 1 "$max_attempts"); do
         exit 1
       fi
       ;;
+    5)
+      publish_terminal error "samorev verdict evaluator is misconfigured"
+      exit 1
+      ;;
     *)
       publish_terminal error "samorev verdict evaluator failed unexpectedly"
       exit 1

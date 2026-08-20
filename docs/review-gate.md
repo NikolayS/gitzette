@@ -111,6 +111,16 @@ or repository-settings change, immediately before publishing terminal samorev
 success, immediately before merge, and immediately before creating a release
 tag. Any unreadable or drifting audit blocks the operation.
 
+The reviewed live-shape capture is
+`fixtures/github-rulesets-live-2026-08-20.json`. The administrator `GET` view
+preserves `actor_type: "User"`, immutable actor ID `280144521`, and
+`bypass_mode: "always"` for both rulesets; the same two `GET` requests under the
+`samo-agent` credential report `current_user_can_bypass: "always"`. The
+administrator view reports `current_user_can_bypass: "never"`. The readiness
+record must refresh and attach both live ruleset responses at the final exact
+head; the committed capture is a regression fixture, not a substitute for that
+pre-merge audit.
+
 Immediately before approving a `production` deployment, Nik independently
 proves that the lightweight release tag still targets the protected `main` tip;
 workflow logs are not evidence:

@@ -19,7 +19,8 @@ if [[ "$#" -ne 0 ]]; then
 fi
 policy="$root/config/production-environment.json"
 bootstrap_expires_at="2026-08-27T00:00:00Z"
-if (( $(date -u +%s) >= $(date -u -d "$bootstrap_expires_at" +%s) )); then
+if (( $(date -u +%s) >= $(date -u -d "$bootstrap_expires_at" +%s) )) &&
+  jq -e 'any(.branch_policies[]?; .name == "main" and .type == "branch")' "$policy" >/dev/null; then
   echo "temporary production main admission expired at $bootstrap_expires_at; restore the v*-only policy through the reviewed teardown" >&2
   exit 1
 fi

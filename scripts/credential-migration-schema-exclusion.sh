@@ -82,8 +82,8 @@ credential_migration_schema_exclusion() {
   deadline_epoch="$(date -u -d "$bootstrap_expires_at" +%s)"
   now_epoch="$(date -u +%s)"
   if (( now_epoch >= deadline_epoch )); then
-    echo "Credential migration schema exclusion expired at $bootstrap_expires_at; refusing the temporary exclusion" >&2
-    return 1
+    echo "Credential migration schema exclusion expired at $bootstrap_expires_at; using the ordinary strict schema comparison" >&2
+    return 0
   fi
   printf "%s" " AND NOT (type = 'table' AND name = 'credential_migration_transfer')"
 }
