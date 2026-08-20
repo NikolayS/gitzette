@@ -186,8 +186,13 @@ text matching is not the authorization proof.
      --workflow=credential-migration-switch-guard.yml --branch main \
      --event workflow_dispatch --limit 1 \
      --json databaseId --jq '.[0].databaseId // 0')"
+   previous_deadline_guard_run_id="$(gh run list \
+     --workflow=credential-migration-deadline-guard.yml --branch main \
+     --event workflow_dispatch --limit 1 \
+     --json databaseId --jq '.[0].databaseId // 0')"
    gh workflow run credential-migration-policy-guard.yml --ref main
    gh workflow run credential-migration-switch-guard.yml --ref main
+   gh workflow run credential-migration-deadline-guard.yml --ref main
    POLICY_GUARD_RUN_ID=""
    for _ in {1..20}; do
      candidate="$(gh run list --workflow=credential-migration-policy-guard.yml \
@@ -214,6 +219,19 @@ text matching is not the authorization proof.
    done
    : "${SWITCH_GUARD_RUN_ID:?new preflight switch guard run was not observed}"
    gh run watch "$SWITCH_GUARD_RUN_ID" --exit-status
+   DEADLINE_GUARD_RUN_ID=""
+   for _ in {1..20}; do
+     candidate="$(gh run list --workflow=credential-migration-deadline-guard.yml \
+       --branch main --event workflow_dispatch \
+       --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+     if [[ "$candidate" -gt "$previous_deadline_guard_run_id" ]]; then
+       DEADLINE_GUARD_RUN_ID="$candidate"
+       break
+     fi
+     sleep 2
+   done
+   : "${DEADLINE_GUARD_RUN_ID:?new preflight deadline guard run was not observed}"
+   gh run watch "$DEADLINE_GUARD_RUN_ID" --exit-status
    ```
 
    The two-entry read-only call is a mandatory live preflight of both the
@@ -226,7 +244,8 @@ text matching is not the authorization proof.
    policy and Nik-only migration approval boundary. The separately scheduled
    switch guard proves neither repository-scoped migration switch is nonempty;
    an expected open switch therefore cannot mask the first policy-drift failure
-   transition. The adjacent inventory command uses the
+   transition. The third, separately scheduled deadline guard makes expiry red
+   without masking either policy transition. The adjacent inventory command uses the
    operator's administrator token to prove the credential-migration environment
    has no variables or secrets, the production environment has no variables
    that can shadow the verification switch, and its secrets stay within the
@@ -668,8 +687,13 @@ text matching is not the authorization proof.
      --workflow=credential-migration-switch-guard.yml --branch main \
      --event workflow_dispatch --limit 1 \
      --json databaseId --jq '.[0].databaseId // 0')"
+   previous_cleanup_deadline_guard_run_id="$(gh run list \
+     --workflow=credential-migration-deadline-guard.yml --branch main \
+     --event workflow_dispatch --limit 1 \
+     --json databaseId --jq '.[0].databaseId // 0')"
    gh workflow run credential-migration-policy-guard.yml --ref main
    gh workflow run credential-migration-switch-guard.yml --ref main
+   gh workflow run credential-migration-deadline-guard.yml --ref main
    CLEANUP_GUARD_RUN_ID=""
    for _ in {1..20}; do
      candidate="$(gh run list --workflow=credential-migration-policy-guard.yml \
@@ -696,6 +720,19 @@ text matching is not the authorization proof.
    done
    : "${CLEANUP_SWITCH_GUARD_RUN_ID:?new post-cleanup switch guard run was not observed}"
    gh run watch "$CLEANUP_SWITCH_GUARD_RUN_ID" --exit-status
+   CLEANUP_DEADLINE_GUARD_RUN_ID=""
+   for _ in {1..20}; do
+     candidate="$(gh run list --workflow=credential-migration-deadline-guard.yml \
+       --branch main --event workflow_dispatch \
+       --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+     if [[ "$candidate" -gt "$previous_cleanup_deadline_guard_run_id" ]]; then
+       CLEANUP_DEADLINE_GUARD_RUN_ID="$candidate"
+       break
+     fi
+     sleep 2
+   done
+   : "${CLEANUP_DEADLINE_GUARD_RUN_ID:?new post-cleanup deadline guard run was not observed}"
+   gh run watch "$CLEANUP_DEADLINE_GUARD_RUN_ID" --exit-status
    ```
 
    A red switch-guard result after the verify run is no longer waiting is
@@ -767,6 +804,7 @@ text matching is not the authorization proof.
    `.github/workflows/migrate-production-credentials.yml`,
    `.github/workflows/credential-migration-policy-guard.yml`,
    `.github/workflows/credential-migration-switch-guard.yml`,
+   `.github/workflows/credential-migration-deadline-guard.yml`,
    `config/credential-migration-environment.json`,
    all corresponding apply/check scripts, including
    `scripts/check-credential-migration-inventory.sh` and

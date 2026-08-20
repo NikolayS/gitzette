@@ -77,13 +77,16 @@ unavailable to repository workflows or the self-hosted GitZette runner.
 are only the two migration switches with value exactly `true` (`false` is
 rejected as residue), Dependabot has no secrets,
 repository secrets contain only the reviewed mention-driven Claude OAuth token
-and the two temporary Cloudflare migration names, and every environment has no
+and, before migration only, the two temporary Cloudflare migration names; every
+environment has no
 variables while every non-production environment has no secrets. Its bare
 pre-migration invocation accepts either an empty `production` secret set or the
 exact reviewed Cloudflare pair. Set `REQUIRE_PRODUCTION_CREDENTIALS=true` to
 prove both independently validated production names are installed; the external
 readiness operator runs that inventory check with repository-administration
-read access. Before
+read access, and that mode also requires both repository Cloudflare copies to
+be absent. The bare pre-migration mode is the only mode that permits them.
+Before
 publishing success, the external reviewer must inspect every changed
 `.github/workflows/**` file, every `scripts/*.sh` file,
 `scripts/normalize-branch-protection.jq`,

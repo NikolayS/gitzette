@@ -15,6 +15,9 @@ if [[ "$require_production_credentials" != true && "$require_production_credenti
   exit 1
 fi
 allowed_repository='["CLAUDE_CODE_OAUTH_TOKEN","CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"]'
+if [[ "$require_production_credentials" == true ]]; then
+  allowed_repository='["CLAUDE_CODE_OAUTH_TOKEN"]'
+fi
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
 
@@ -37,7 +40,9 @@ if ! jq -e '[.[] | select(.permissions.admin == true) | .id] == [1345402]' <<<"$
 fi
 
 repository_secrets="$(read_api "repository Actions secrets" --paginate --slurp "repos/$repository/actions/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
-if ! jq -e --argjson allowed "$allowed_repository" 'all(.[]; .name as $name | $allowed | index($name))' <<<"$repository_secrets" >/dev/null; then
+if ! jq -e --argjson allowed "$allowed_repository" '
+  all(.[]; .name as $name | $allowed | index($name))
+' <<<"$repository_secrets" >/dev/null; then
   echo "repository contains a secret outside the reviewed Claude/migration allowlist" >&2
   exit 1
 fi

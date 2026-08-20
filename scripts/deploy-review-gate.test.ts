@@ -329,6 +329,8 @@ case "$endpoint" in
   *actions/secrets*)
     if [[ "\${FAKE_MODE:-ok}" == repository ]]; then
       printf '[{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN"},{"name":"SAMO_AGENT_TOKEN"}]}]\n'
+    elif [[ "\${FAKE_MODE:-ok}" == post-migration ]]; then
+      printf '[{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN"}]}]\n'
     else
       printf '[{"secrets":[{"name":"CLAUDE_CODE_OAUTH_TOKEN"},{"name":"CLOUDFLARE_API_TOKEN"}]}]\n'
     fi
@@ -389,7 +391,8 @@ esac
     expect(await run("production-empty")).toBe(0);
     expect(await run("production-incomplete")).toBe(1);
     expect(await run("production-missing")).toBe(1);
-    expect(await run("ok", "true")).toBe(0);
+    expect(await run("ok", "true")).toBe(1);
+    expect(await run("post-migration", "true")).toBe(0);
     expect(await run("production-empty", "true")).toBe(1);
     expect(await run("ok", "invalid")).toBe(1);
     expect(await run("repository")).toBe(1);

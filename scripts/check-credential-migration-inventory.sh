@@ -22,6 +22,22 @@ fi
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
 
+set +e
+"$root/scripts/get-github-environment.sh" "$repository" credential-migration \
+  >/dev/null 2>"$error_file"
+environment_status=$?
+set -e
+if [[ "$environment_status" -ne 0 ]]; then
+  if [[ "$environment_status" -eq 4 ]]; then
+    echo "credential-migration environment is missing; run scripts/apply-credential-migration-environment.sh" >&2
+    sed 's/^/  /' "$error_file" >&2
+    exit 4
+  fi
+  echo "unable to read credential-migration environment with the operator token:" >&2
+  sed 's/^/  /' "$error_file" >&2
+  exit 3
+fi
+
 if ! variables="$(gh api --paginate --slurp "repos/$repository/environments/credential-migration/variables?per_page=100" 2>"$error_file" | jq -c 'map(.variables) | add // []')"; then
   echo "unable to read credential-migration environment variables with the operator token:" >&2
   sed 's/^/  /' "$error_file" >&2
