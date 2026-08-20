@@ -18,10 +18,11 @@ jobs:
       - name: Prove policy guard API readability
         env:
           GH_TOKEN: ${{ github.token }}
+          IS_FORK_PR: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REPOSITORY" != "NikolayS/gitzette" ]]; then
-            echo "policy API readability is canonical-repository-only; skipping fork"
+          if [[ "$IS_FORK_PR" == true || "$GITHUB_REPOSITORY" != "NikolayS/gitzette" ]]; then
+            echo "policy API readability is canonical same-repository PR only; skipping fork"
             exit 0
           fi
           production_environment="$(gh api \
@@ -53,36 +54,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install image validation runtime
-        run: |
-          set -euo pipefail
-          # GitHub's Azure mirror can stall indefinitely; rewrite every apt source shape used by runner images.
-          apt_source_list="$(mktemp)"
-          trap 'rm -f "$apt_source_list"' EXIT
-          sudo find /etc/apt -type f \( -name 'apt-mirrors.txt' -o -name 'sources.list' -o -name '*.sources' -o -name '*.list' \) -print0 |
-            tee "$apt_source_list" >/dev/null
-          mapfile -d '' -t apt_sources <"$apt_source_list"
-          if [[ "${#apt_sources[@]}" -eq 0 ]]; then
-            echo "no apt source files found" >&2
-            exit 1
-          fi
-          for apt_source in "${apt_sources[@]}"; do
-            sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$apt_source"
-            if sudo grep -Eq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_source"; then
-              echo "Azure Ubuntu mirror rewrite did not take effect in $apt_source" >&2
-              exit 1
-            else
-              grep_status=$?
-              if [[ "$grep_status" -ne 1 ]]; then
-                echo "Azure Ubuntu mirror verification could not read $apt_source" >&2
-                exit "$grep_status"
-              fi
-            fi
-          done
-          sudo apt-get update
-          sudo apt-get install -y \
-            imagemagick=8:6.9.12.98+dfsg1-5.2build2 \
-            imagemagick-6.q16=8:6.9.12.98+dfsg1-5.2build2
-          sudo install -o root -g root -m 0644 runner/imagemagick/policy.xml /etc/ImageMagick-6/policy.xml
+        run: bash scripts/install-image-validation-runtime.sh
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Verify systemd Bun invocation flag
         run: bun --no-env-file --version

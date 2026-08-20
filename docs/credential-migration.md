@@ -320,6 +320,12 @@ text matching is not the authorization proof.
    nonzero count other than one remains a hard stop with repository rollback
    copies intact.
 
+   Set `INCIDENT_RECORD_FILE` to a durable operator-controlled path outside
+   `MIGRATION_KEY_DIR` before running the block. Recovery dispatches append only
+   timestamps, run IDs, and recovery states there. That record survives the
+   required destruction of every per-run migration directory and remains the
+   audit trail for failed or interrupted exports.
+
    GitHub and Cloudflare timestamps come from independent clocks. The executable
    check allows 120 seconds of skew on either side of the recorded run window. If
    the sole expected row passes every identity/count/ciphertext check but only
@@ -335,6 +341,7 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
+   umask 077
    : "${RUN_ID:?set the exact export run ID}"
    export_run="$(gh run view "$RUN_ID" \
      --json conclusion,event,headSha,startedAt,updatedAt,workflowName)"
@@ -360,8 +367,18 @@ text matching is not the authorization proof.
    database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
    migration_dir="$MIGRATION_KEY_DIR/run-$RUN_ID-1"
    install -d -m 0700 "$migration_dir"
+   incident_record_file="${INCIDENT_RECORD_FILE:?set a durable operator incident record outside MIGRATION_KEY_DIR}"
+   migration_key_dir_real="$(realpath -m "$MIGRATION_KEY_DIR")"
+   incident_record_real="$(realpath -m "$incident_record_file")"
+   [[ "$incident_record_real" != "$migration_key_dir_real" &&
+      "$incident_record_real" != "$migration_key_dir_real"/* ]]
+   [[ -d "$(dirname "$incident_record_real")" && -w "$(dirname "$incident_record_real")" ]]
+   : >>"$incident_record_real"
    dispatch_export_recovery() {
      local recovery_state="$1"
+     printf '%s export run %s requires %s recovery\n' \
+       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" "$recovery_state" \
+       >>"$incident_record_real"
      bash scripts/check-credential-migration-environment.sh
      bash scripts/check-credential-migration-inventory.sh
      gh variable set CREDENTIAL_EXPORT_OPEN --body true
@@ -380,8 +397,6 @@ text matching is not the authorization proof.
      jq -er 'select(.success == true) | .result[0] | select(.success == true) |
        .results[0].total | select(. == 0 or . == 1)')"
    if [[ "$transfer_table_count" == 0 ]]; then
-     printf '%s export run %s failed before creating the transfer table\n' \
-       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" >>"$migration_dir/incident.log"
      dispatch_export_recovery absent-table
    fi
    jq -n '{sql:"select count(*) as total_rows, min(rowid) as transfer_rowid, min(created_at) as transfer_created_at, min(ciphertext) as transfer_ciphertext from credential_migration_transfer"}' \
@@ -398,8 +413,6 @@ text matching is not the authorization proof.
           (.transfer_ciphertext | type == "string" and length > 0)))')"
    transfer_rows="$(jq -r .total_rows <<<"$transfer_snapshot")"
    if [[ "$transfer_rows" == 0 ]]; then
-     printf '%s export run %s created an empty transfer table\n' \
-       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" >>"$migration_dir/incident.log"
      jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
      curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
        -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
@@ -715,7 +728,7 @@ text matching is not the authorization proof.
        .result[0].success == true and (.result[0].results | length == 1) and
        .result[0].results[0].remaining == 0' >/dev/null
    unset plaintext ciphertext account_id api_token d1_token
-   for material in table-count.json select.json count.json drop.json prove-drop.json incident.log; do
+   for material in table-count.json select.json count.json drop.json prove-drop.json; do
      [[ ! -f "$migration_dir/$material" ]] || shred -u "$migration_dir/$material"
    done
    test -s "$migration_dir/credentials.bin"
@@ -782,7 +795,9 @@ text matching is not the authorization proof.
    own exact-head review gate. After that tag's production deployment and the
    mandatory smoke test both succeed, destroy the retained encrypted rollback
    material. GNU `shred -u` remains best-effort; tmpfs or encrypted storage is
-   the actual at-rest control.
+   the actual at-rest control. The cleanup iterates over every retained
+   `run-*-1` directory, not only the latest run, and intentionally leaves the
+   durable `INCIDENT_RECORD_FILE` outside that tree intact.
 
    ```bash
    set -euo pipefail
@@ -807,9 +822,15 @@ text matching is not the authorization proof.
      (( (8#$smoke_mode & 0022) == 0 ))
    done
    bash /tmp/gl-dispatch/dispatch/smoke-test.sh
-   shred -u "$migration_dir/credentials.bin"
+   for retained_run_dir in "$MIGRATION_KEY_DIR"/run-*-1; do
+     [[ -e "$retained_run_dir" ]] || continue
+     [[ -d "$retained_run_dir" && ! -L "$retained_run_dir" ]]
+     while IFS= read -r -d '' retained_file; do
+       shred -u "$retained_file"
+     done < <(find "$retained_run_dir" -maxdepth 1 -type f -print0)
+     rmdir "$retained_run_dir"
+   done
    shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"
    rm -f "$MIGRATION_KEY_DIR/production-migration-public.pem"
-   rmdir "$migration_dir"
    unset deploy_evidence release_sha DEPLOY_RUN_ID RELEASE_TAG
    ```

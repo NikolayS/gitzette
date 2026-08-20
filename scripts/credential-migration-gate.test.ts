@@ -256,7 +256,7 @@ describe("one-shot credential migration boundary", () => {
       verifyStep.indexOf("gh variable delete CREDENTIAL_VERIFY_OPEN"),
     );
     expect(migrationDoc).toContain('previous_guard_run_id="$(gh run list');
-    expect(migrationDoc).toContain("created an empty transfer table");
+    expect(migrationDoc).toContain("stopped between\n   table creation and insert");
     expect(migrationDoc).toContain("dispatch_export_recovery empty-table");
     expect(migrationDoc).toContain("dispatch_export_recovery absent-table");
     expect(migrationDoc).toContain("Production D1 REST batch preflight OK");
@@ -266,7 +266,11 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("live Worker-bound application D1 database");
     expect(migrationDoc).toContain('account_id="a3265e0d0db71fdece29365819452f00"');
     expect(migrationDoc).toContain('d1_token="$(sed -n');
-    expect(migrationDoc).toContain("table-count.json select.json count.json drop.json prove-drop.json incident.log");
+    expect(migrationDoc).toContain("table-count.json select.json count.json drop.json prove-drop.json");
+    expect(migrationDoc).toContain("INCIDENT_RECORD_FILE");
+    expect(migrationDoc).toContain("outside\n   `MIGRATION_KEY_DIR`");
+    expect(migrationDoc).toContain('for retained_run_dir in "$MIGRATION_KEY_DIR"/run-*-1');
+    expect(migrationDoc).not.toContain('>>"$migration_dir/incident.log"');
     expect(migrationDoc).toContain("sqlite_schema where type = \\u0027table\\u0027");
     expect(migrationDoc.indexOf("mandatory smoke test both succeed")).toBeLessThan(
       migrationDoc.indexOf('shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"'),
@@ -951,14 +955,59 @@ ${closeSwitch}`,
     expect(job.permissions).toEqual({ actions: "read", contents: "read" });
     expect(ci.jobs.typecheck?.["timeout-minutes"]).toBe(15);
     const imageRuntime = ci.jobs.typecheck?.steps.find(({ name }) => name === "Install image validation runtime")?.run ?? "";
-    expect(imageRuntime).not.toBe("");
-    expect(imageRuntime).toContain("set -euo pipefail");
-    expect(imageRuntime).toContain("sudo find /etc/apt");
-    expect(imageRuntime).toContain("-print0");
-    expect(imageRuntime.match(/https\?\:\/\/\(\[a-z0-9\.\-\]\*\\\.\)\?azure\\\.archive\\\.ubuntu\\\.com\/ubuntu/g)).toHaveLength(2);
-    expect(imageRuntime).not.toContain("grep -R");
-    expect(imageRuntime).toContain('"$apt_source"');
-    expect(imageRuntime).toContain('[[ "$grep_status" -ne 1 ]]');
+    expect(imageRuntime).toBe("bash scripts/install-image-validation-runtime.sh");
+    const aptHarnessRoot = await mkdtemp(join(tmpdir(), "gitzette-apt-runtime-"));
+    const aptBin = join(aptHarnessRoot, "bin");
+    await mkdir(aptBin);
+    await Bun.write(join(aptBin, "sudo"), `#!/usr/bin/env bash
+set -euo pipefail
+case "\${1:-}" in
+  sed) [[ "\${FAKE_SUDO_MODE:-normal}" != no-op-sed ]] || exit 0 ;;
+  grep) [[ "\${FAKE_SUDO_MODE:-normal}" != grep-error ]] || exit 2 ;;
+  apt-get|install) printf '%s\\n' "$*" >>"$FAKE_SUDO_RECORD"; exit 0 ;;
+esac
+exec "$@"
+`);
+    await Bun.spawn(["chmod", "+x", join(aptBin, "sudo")]).exited;
+    const executeImageRuntime = async (
+      fixture: string,
+      options: { unrecognized?: string; mode?: string; skipInstall?: boolean } = {},
+    ): Promise<{ status: number; source: string; record: string }> => {
+      const aptRoot = join(aptHarnessRoot, fixture);
+      await mkdir(aptRoot);
+      const source = join(aptRoot, "sources.list");
+      const record = join(aptRoot, "sudo-record");
+      await Bun.write(source, "deb https://azure.archive.ubuntu.com/ubuntu noble main\n");
+      await Bun.write(record, "");
+      if (options.unrecognized !== undefined) {
+        await Bun.write(join(aptRoot, "custom.conf"), options.unrecognized);
+      }
+      const env = {
+        ...process.env,
+        PATH: `${aptBin}:${process.env.PATH}`,
+        APT_ROOT: aptRoot,
+        FAKE_SUDO_MODE: options.mode ?? "normal",
+        FAKE_SUDO_RECORD: record,
+        ...(options.skipInstall ? { APT_SKIP_INSTALL: "true" } : {}),
+      };
+      const status = await Bun.spawn(["bash", "scripts/install-image-validation-runtime.sh"], {
+        cwd: process.cwd(), env, stdout: "pipe", stderr: "pipe",
+      }).exited;
+      return { status, source: await Bun.file(source).text(), record: await Bun.file(record).text() };
+    };
+    const aptSuccess = await executeImageRuntime("success");
+    expect(aptSuccess.status).toBe(0);
+    expect(aptSuccess.source).toContain("https://archive.ubuntu.com/ubuntu");
+    expect(aptSuccess.source).not.toContain("azure.archive.ubuntu.com");
+    expect(aptSuccess.record).toContain("apt-get update");
+    expect(aptSuccess.record).toContain("apt-get install -y");
+    expect(aptSuccess.record).toContain("install -o root -g root -m 0644");
+    expect((await executeImageRuntime("no-op", { mode: "no-op-sed", skipInstall: true })).status).toBe(1);
+    expect((await executeImageRuntime("grep-error", { mode: "grep-error", skipInstall: true })).status).toBe(2);
+    expect((await executeImageRuntime("unrecognized", {
+      unrecognized: "deb https://azure.archive.ubuntu.com/ubuntu noble main\n",
+      skipInstall: true,
+    })).status).toBe(1);
     const runBlock = job.steps.find(({ name }) => name === "Prove policy guard API readability")?.run;
     expect(runBlock).toBeDefined();
     const protection = JSON.parse(await Bun.file("config/main-branch-protection.json").text()) as {
@@ -1019,12 +1068,13 @@ case "$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const execute = (mode: string, repository = "NikolayS/gitzette"): Promise<number> => Bun.spawn(["bash", "-c", runBlock ?? "exit 99"], {
+    const execute = (mode: string, repository = "NikolayS/gitzette", isForkPr = "false"): Promise<number> => Bun.spawn(["bash", "-c", runBlock ?? "exit 99"], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: repository, FAKE_MODE: mode },
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: repository, IS_FORK_PR: isForkPr, FAKE_MODE: mode },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await execute("production-error", "fork/gitzette")).toBe(0);
+    expect(await execute("production-error", "NikolayS/gitzette", "true")).toBe(0);
     expect(await execute("ok-no-migration")).toBe(0);
     expect(await execute("production-custom-false")).toBe(0);
     expect(await execute("ok-custom-false")).toBe(0);
@@ -1413,8 +1463,8 @@ for argument in "$@"; do
   [[ "$argument" != repos/* ]] || endpoint="$argument"
 done
 if [[ "$method" == PUT ]]; then cat >"$FAKE_RECORD/put.json"; : >"$FAKE_RECORD/installed"; exit 0; fi
-if [[ "$method" == DELETE ]]; then printf '%s\\n' "$endpoint" >>"$FAKE_RECORD/delete.log"; exit 0; fi
-if [[ "$method" == POST ]]; then printf '%s\\n' "$*" >>"$FAKE_RECORD/post.log"; exit 0; fi
+if [[ "$method" == DELETE ]]; then printf '%s\\n' "$endpoint" >>"$FAKE_RECORD/delete.log"; : >"$FAKE_RECORD/deleted"; exit 0; fi
+if [[ "$method" == POST ]]; then printf '%s\\n' "$*" >>"$FAKE_RECORD/post.log"; : >"$FAKE_RECORD/posted"; exit 0; fi
 case "$endpoint" in
   repos/example/gitzette/environments/credential-migration)
     if [[ "\${FAKE_MODE:-correct}" == unreadable && ! -f "$FAKE_RECORD/installed" ]]; then
@@ -1440,7 +1490,13 @@ case "$endpoint" in
   *environments?per_page=100) printf '%s\n' '[{"environments":[]}]' ;;
   *deployment-branch-policies*)
     count_file="$FAKE_RECORD/policy-count"; count=0; [[ ! -f "$count_file" ]] || count="$(<"$count_file")"; count=$((count + 1)); printf '%s' "$count" >"$count_file"
-    if [[ ("\${FAKE_MODE:-correct}" == stale || "\${FAKE_MODE:-correct}" == protected-transition || "\${FAKE_MODE:-correct}" == null-transition) && "$count" -eq 1 ]]; then
+    if [[ -f "$FAKE_RECORD/posted" ]]; then
+      printf '%s\\n' '[{"branch_policies":[{"id":10,"name":"main","type":"branch"}]}]'
+    elif [[ -f "$FAKE_RECORD/deleted" && "\${FAKE_MODE:-correct}" == duplicate ]]; then
+      printf '%s\\n' '[{"branch_policies":[{"id":10,"name":"main","type":"branch"}]}]'
+    elif [[ -f "$FAKE_RECORD/deleted" ]]; then
+      printf '%s\\n' '[{"branch_policies":[]}]'
+    elif [[ ("\${FAKE_MODE:-correct}" == stale || "\${FAKE_MODE:-correct}" == protected-transition || "\${FAKE_MODE:-correct}" == null-transition) && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[{"id":9,"name":"other","type":"branch"}]}]'
     elif [[ "\${FAKE_MODE:-correct}" == missing && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[]}]'
