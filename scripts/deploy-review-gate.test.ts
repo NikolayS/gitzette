@@ -129,8 +129,11 @@ describe("deploy review revalidation", () => {
       "For canonical same-repository PRs, required `policy-api-readability`",
     );
     expect(documentation).toContain(
-      "Fork and non-canonical PRs satisfy this\ncontext vacuously",
+      "Fork and non-canonical PRs satisfy this context\nvacuously",
     );
+    expect(documentation).toContain("Like every PR CI context it is head-controlled");
+    expect(documentation).toContain("one merge-button or direct-CLI action by the\n`samo-agent` credential");
+    expect(documentation).toContain("Formal GitHub approval is not restored");
     expect(documentation).toContain(
       "`scripts/merge-reviewed-head.sh` rejects them",
     );

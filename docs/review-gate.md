@@ -16,11 +16,13 @@ review. Any push after a verdict invalidates it: merge requires a new
 terminal-clean samorev verdict on the exact current head, and a green pipeline
 is never a substitute.
 
-For canonical same-repository PRs, required `policy-api-readability` makes the
-merge depend on the live GitHub environments API being readable and the
-`production` environment existing. Fork and non-canonical PRs satisfy this
-context vacuously, but `scripts/merge-reviewed-head.sh` rejects them before any
-merge. Repair or recreate that environment from the canonical config with
+For canonical same-repository PRs, required `policy-api-readability` records
+whether the live GitHub environments API is readable and the `production`
+environment exists. Like every PR CI context it is head-controlled; it is
+evidence only because samorev inspects every changed `.github/workflows/**` file
+in the full base-to-head delta. Fork and non-canonical PRs satisfy this context
+vacuously, but `scripts/merge-reviewed-head.sh` rejects them before any merge.
+Repair or recreate that environment from the canonical config with
 `scripts/apply-production-environment.sh`, then rerun CI. If an API outage makes
 that impossible, merging waits for the API to recover. Removing the required
 context is not an approved break-glass path: it would weaken the reviewed gate
@@ -324,6 +326,14 @@ only inside the one fail-closed merge transaction covered by the accepted host
 risk above. Never grant `samo-agent` admin access to make an
 administration-scoped inventory call pass, and never invoke `gh pr merge`
 directly.
+A green checks UI plus one merge-button or direct-CLI action by the
+`samo-agent` credential can land an unreviewed head: every displayed context is
+forgeable by same-repository Actions, formal approvals are intentionally zero,
+and the exclusive-update ruleset makes `samo-agent` the sole permitted updater.
+The ruleset blocks every other identity, but it cannot force its one bypass
+actor to use this wrapper. Nik accepts that single-credential procedural risk
+for this bootstrap; suspected credential misuse requires immediate revocation,
+not reliance on the checks UI. Formal GitHub approval is not restored.
 A GitHub `APPROVED` review is not required evidence; the reviewed branch policy
 requires a pull request with zero approvals instead. For the bootstrap that
 changes this policy, run `bash scripts/apply-branch-protection.sh` from the

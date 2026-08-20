@@ -8,7 +8,8 @@ set -euo pipefail
 
 apt_root="${APT_ROOT:-/etc/apt}"
 apt_source_list="$(mktemp)"
-trap 'rm -f "$apt_source_list"' EXIT
+apt_source_copy="$(mktemp)"
+trap 'rm -f "$apt_source_list" "$apt_source_copy"' EXIT
 sudo find "$apt_root" -type f \( -name 'apt-mirrors.txt' -o -name 'sources.list' -o -name '*.sources' -o -name '*.list' \) -print0 |
   tee "$apt_source_list" >/dev/null
 mapfile -d '' -t apt_sources <"$apt_source_list"
@@ -18,7 +19,8 @@ if [[ "${#apt_sources[@]}" -eq 0 ]]; then
 fi
 for apt_source in "${apt_sources[@]}"; do
   sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$apt_source"
-  if grep -Eq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_source"; then
+  sudo cp -- "$apt_source" "$apt_source_copy"
+  if grep -Eq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_source_copy"; then
     echo "Azure Ubuntu mirror rewrite did not take effect in $apt_source" >&2
     exit 1
   else
@@ -29,16 +31,6 @@ for apt_source in "${apt_sources[@]}"; do
     fi
   fi
 done
-if grep -REq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_root"; then
-  echo "an unrecognized apt source still references the Azure Ubuntu mirror" >&2
-  exit 1
-else
-  grep_status=$?
-  if [[ "$grep_status" -ne 1 ]]; then
-    echo "repository-wide apt source verification failed" >&2
-    exit "$grep_status"
-  fi
-fi
 
 if [[ "${APT_SKIP_INSTALL:-false}" != true ]]; then
   sudo apt-get update

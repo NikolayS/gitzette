@@ -408,7 +408,8 @@ text matching is not the authorization proof.
      gh variable set CREDENTIAL_EXPORT_OPEN --body true
      GH_TOKEN="$(gh auth token --user samo-agent)" \
        gh workflow run migrate-production-credentials.yml --ref main -f operation=export
-     echo "$recovery_state recovery dispatched once; stop and obtain the new exact run ID" >&2
+     echo "$recovery_state recovery dispatched once; obtain and approve the new exact run in this operator session" >&2
+     echo "if that cannot complete immediately, run the step-3 close-and-audit block; never leave CREDENTIAL_EXPORT_OPEN set for more than five minutes" >&2
      exit 1
    }
    jq -n '{sql:"select count(*) as total from sqlite_schema where type = \u0027table\u0027 and name = \u0027credential_migration_transfer\u0027"}' \
@@ -542,9 +543,9 @@ text matching is not the authorization proof.
 
    A green verifier is valid evidence only when paired with the recorded
    `REQUIRE_NO_REPOSITORY_CREDENTIALS=true` inventory output from the same
-   dispatch/approval window. The workflow token cannot enumerate repository
-   secret names, so the run alone cannot distinguish an environment value from
-   GitHub's same-named repository-secret fallback.
+   dispatch/approval window. Distinct production names prevent fallback to the
+   old repository source pair; the inventory additionally proves that no
+   same-named `PRODUCTION_CLOUDFLARE_*` repository secret was introduced.
 
    ```bash
    set -euo pipefail

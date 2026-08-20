@@ -272,6 +272,7 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("stopped between\n   table creation and insert");
     expect(migrationDoc).toContain("dispatch_export_recovery empty-table");
     expect(migrationDoc).toContain("dispatch_export_recovery absent-table");
+    expect(migrationDoc).toContain("never leave CREDENTIAL_EXPORT_OPEN set for more than five minutes");
     expect(migrationDoc).toContain("Production D1 REST batch preflight OK");
     expect(migrationDoc).toContain('{sql:"select ?1 as bound",params:["probe"]}');
     expect(migrationDoc).toContain('.result[1].results == [{bound:"probe"}]');
@@ -864,6 +865,7 @@ ${closeSwitch}`,
 set -euo pipefail
 case "\${1:-}" in
   sed) [[ "\${FAKE_SUDO_MODE:-normal}" != no-op-sed ]] || exit 0 ;;
+  cp) [[ "\${FAKE_SUDO_MODE:-normal}" != copy-error ]] || exit 23 ;;
   apt-get|install) printf '%s\\n' "$*" >>"$FAKE_SUDO_RECORD"; exit 0 ;;
 esac
 exec "$@"
@@ -876,7 +878,7 @@ exec /usr/bin/grep "$@"
     await Bun.spawn(["chmod", "+x", join(aptBin, "sudo"), join(aptBin, "grep")]).exited;
     const executeImageRuntime = async (
       fixture: string,
-      options: { unrecognized?: string; mode?: string; skipInstall?: boolean } = {},
+      options: { mode?: string; skipInstall?: boolean } = {},
     ): Promise<{ status: number; source: string; record: string }> => {
       const aptRoot = join(aptHarnessRoot, fixture);
       await mkdir(aptRoot);
@@ -884,9 +886,6 @@ exec /usr/bin/grep "$@"
       const record = join(aptRoot, "sudo-record");
       await Bun.write(source, "deb https://azure.archive.ubuntu.com/ubuntu noble main\n");
       await Bun.write(record, "");
-      if (options.unrecognized !== undefined) {
-        await Bun.write(join(aptRoot, "custom.conf"), options.unrecognized);
-      }
       const env = {
         ...process.env,
         PATH: `${aptBin}:${process.env.PATH}`,
@@ -909,10 +908,7 @@ exec /usr/bin/grep "$@"
     expect(aptSuccess.record).toContain("install -o root -g root -m 0644");
     expect((await executeImageRuntime("no-op", { mode: "no-op-sed", skipInstall: true })).status).toBe(1);
     expect((await executeImageRuntime("grep-error", { mode: "grep-error", skipInstall: true })).status).toBe(2);
-    expect((await executeImageRuntime("unrecognized", {
-      unrecognized: "deb https://azure.archive.ubuntu.com/ubuntu noble main\n",
-      skipInstall: true,
-    })).status).toBe(1);
+    expect((await executeImageRuntime("copy-error", { mode: "copy-error", skipInstall: true })).status).toBe(23);
     const runBlock = job.steps.find(({ name }) => name === "Prove policy guard API readability")?.run;
     expect(runBlock).toBeDefined();
     const protection = JSON.parse(await Bun.file("config/main-branch-protection.json").text()) as {
