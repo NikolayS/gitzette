@@ -544,6 +544,11 @@ fi
     });
     expect(migrationDoc).not.toContain('<<<"$plaintext"');
     expect(migrationDoc).toContain('export TMPDIR="$MIGRATION_KEY_DIR"');
+    expect(migrationDoc).toContain('export RUN_ID="${RUN_ID:?set the exact retained export run ID}"');
+    expect(migrationDoc).toContain('[[ "$(stat -Lc %u "$smoke_path")" == "$(id -u)" ]]');
+    expect(migrationDoc.indexOf('chmod go-w "$smoke_path"')).toBeLessThan(
+      migrationDoc.indexOf("bash /tmp/gl-dispatch/dispatch/smoke-test.sh"),
+    );
     const plaintextAccessors = [...migrationDoc.matchAll(
       /printf '%s' "\$plaintext" \| jq -j -e -r (\.[A-Za-z_][A-Za-z0-9_]*)/g,
     )].map((match) => match[1] ?? "");
@@ -608,7 +613,7 @@ fi
     const migrationDoc = await Bun.file("docs/credential-migration.md").text();
     const bashBlocks = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
       .map((match) => match[1] ?? "");
-    expect(bashBlocks).toHaveLength(12);
+    expect(bashBlocks).toHaveLength(13);
 
     const runbookRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-runbook-"));
     try {
@@ -763,7 +768,13 @@ done
 case "$endpoint" in
   repos/example/gitzette/environments/production)
     [[ "\${FAKE_MODE:-ok}" != production-error ]] || { echo forbidden >&2; exit 1; }
-    if [[ "\${FAKE_MODE:-ok}" == production-field-missing ]]; then printf 'false\n'; else printf 'true\n'; fi
+    custom=true
+    [[ "\${FAKE_MODE:-ok}" != production-custom-false ]] || custom=false
+    if [[ "\${FAKE_MODE:-ok}" == production-field-missing ]]; then
+      jq -nc --argjson custom "$custom" '{deployment_branch_policy:{custom_branch_policies:$custom}}'
+    else
+      jq -nc --argjson custom "$custom" '{can_admins_bypass:false,deployment_branch_policy:{custom_branch_policies:$custom}}'
+    fi
     ;;
   repos/example/gitzette/environments/production/deployment-branch-policies*)
     [[ "\${FAKE_MODE:-ok}" != production-policies-error ]] || { echo forbidden >&2; exit 1; }
@@ -801,6 +812,7 @@ esac
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await execute("ok-no-migration")).toBe(0);
+    expect(await execute("production-custom-false")).toBe(0);
     expect(await execute("ok-custom-false")).toBe(0);
     expect(await execute("ok-custom-true")).toBe(0);
     for (const mode of [

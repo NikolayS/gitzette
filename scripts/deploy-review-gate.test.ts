@@ -6,6 +6,9 @@ import { join } from "node:path";
 describe("deploy review revalidation", () => {
   test("binds release to exact workflow paths and the immutable reviewer", async () => {
     const workflow = await Bun.file(".github/workflows/deploy.yml").text();
+    const parsedWorkflow = Bun.YAML.parse(workflow) as {
+      jobs: Record<string, { "timeout-minutes"?: number }>;
+    };
     const gate = await Bun.file("scripts/check-release-review-evidence.sh").text();
     const codeowners = await Bun.file(".github/CODEOWNERS").text();
     const documentation = await Bun.file("docs/review-gate.md").text();
@@ -14,6 +17,8 @@ describe("deploy review revalidation", () => {
     const reviewerWrapper = await Bun.file("scripts/run-samorev-review.sh").text();
     const tagActorGate = "scripts/check-release-tag-actor.sh";
     expect(workflow).toContain('set -euo pipefail');
+    expect(parsedWorkflow.jobs["review-gate"]?.["timeout-minutes"]).toBe(5);
+    expect(parsedWorkflow.jobs.deploy?.["timeout-minutes"]).toBe(20);
     expect(workflow).toContain('bash scripts/check-release-review-evidence.sh "$reviewed_sha"');
     expect(workflow).toContain("TAG_PUSHER_ID: ${{ github.actor_id }}");
     expect(workflow).toContain('triggering_actor_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .triggering_actor.id)"');

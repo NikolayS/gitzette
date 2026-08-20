@@ -34,7 +34,7 @@ if [[ -n "$not_before" && ( -z "$created_at" || "$created_at" < "$not_before" ) 
 fi
 if [[ -n "$target_url" && "$actual_target_url" != "$target_url" ]]; then
   echo "samorev status targets the wrong publisher: $actual_target_url (expected $target_url)" >&2
-  exit 3
+  exit 2
 fi
 if [[ "$state" == success ]]; then
   echo "samorev passed by $creator ($creator_id)"

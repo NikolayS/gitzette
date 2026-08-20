@@ -20,9 +20,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/environments/production" \
-            --jq 'has("can_admins_bypass")' | grep -qx true
-          gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=1" >/dev/null
+          production_environment="$(gh api \
+            "repos/$GITHUB_REPOSITORY/environments/production")"
+          jq -e 'has("can_admins_bypass")' <<<"$production_environment" >/dev/null
+          if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies \
+            <<<"$production_environment")" == true ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=1" >/dev/null
+          fi
           environments="$(gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/environments?per_page=100" |
             jq -c 'map(.environments) | add // []')"

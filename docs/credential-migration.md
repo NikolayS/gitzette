@@ -17,13 +17,40 @@ Start a disposable child shell with
 `unset HISTFILE; set +o history`; `--noprofile --norc` alone does not disable
 history. Run every code block below only inside that child shell. Do not paste a block containing
 `set -euo pipefail`, `${VAR:?}`, or `exit` directly into the parent interactive
-shell. If a step aborts after decryption but before the environment copy is
-verified, restore the repository rollback copy, immediately `unset plaintext`,
-and shred the exact run directory before retrying. After the repository copy is
-deleted, retain the encrypted private key and ciphertext until the first
-successful production deploy and smoke test. If step 0 aborts before the
+shell. If a step aborts after decryption while the repository rollback copies
+still exist, immediately `unset plaintext` and shred the exact run directory
+before retrying. Once step 5 deletes those repository copies, do not shred the
+run directory: retain `credentials.bin` and the encrypted private key, restore
+repository rollback secrets from that retained ciphertext when required, and
+destroy the retained material only after the first successful production deploy
+and smoke test. If step 0 aborts before the
 encrypted-key fingerprint is verified, shred the plaintext private key before
 retrying. The parent terminal remains available for that cleanup.
+
+After any child-shell abort, start a new disposable child with the same history
+controls, re-export the durable paths and exact run ID, and skip step 0 because
+the retained key is already encrypted. For an empty-table recovery, set the new
+approved export `RUN_ID` and restart step 4. For a post-decryption abort, restore
+the in-memory value only from the retained ciphertext:
+
+```bash
+set -euo pipefail
+umask 077
+export MIGRATION_KEY_DIR="${MIGRATION_KEY_DIR:?set the existing private directory}"
+export TMPDIR="$MIGRATION_KEY_DIR"
+export OPERATOR_TOKEN_FILE="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
+export RUN_ID="${RUN_ID:?set the exact retained export run ID}"
+migration_dir="$MIGRATION_KEY_DIR/run-$RUN_ID-1"
+test -s "$migration_dir/credentials.bin"
+test -s "$MIGRATION_KEY_DIR/production-migration-private.pem"
+plaintext="$(openssl pkeyutl -decrypt \
+  -inkey "$MIGRATION_KEY_DIR/production-migration-private.pem" \
+  -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+  -pkeyopt rsa_mgf1_md:sha256 -in "$migration_dir/credentials.bin")"
+printf '%s' "$plaintext" | jq -e 'type == "object" and
+  (.CLOUDFLARE_ACCOUNT_ID | type == "string" and length > 0) and
+  (.CLOUDFLARE_API_TOKEN | type == "string" and length > 0)' >/dev/null
+```
 
 The migration gate tests parse the executable `run` blocks from the workflow
 and execute them with wrong dispatcher IDs, refs, attempts, switches, main
@@ -544,6 +571,16 @@ text matching is not the authorization proof.
      .conclusion == "success" and .event == "push" and
      .workflowName == "Deploy" and .headSha == $release_sha' \
      <<<"$deploy_evidence" >/dev/null
+   smoke_root=/tmp/gl-dispatch
+   smoke_dir="$smoke_root/dispatch"
+   smoke_test="$smoke_dir/smoke-test.sh"
+   for smoke_path in "$smoke_root" "$smoke_dir" "$smoke_test"; do
+     [[ -e "$smoke_path" && ! -L "$smoke_path" ]]
+     [[ "$(stat -Lc %u "$smoke_path")" == "$(id -u)" ]]
+     chmod go-w "$smoke_path"
+     smoke_mode="$(stat -Lc %a "$smoke_path")"
+     (( (8#$smoke_mode & 0022) == 0 ))
+   done
    bash /tmp/gl-dispatch/dispatch/smoke-test.sh
    shred -u "$migration_dir/credentials.bin"
    shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"
