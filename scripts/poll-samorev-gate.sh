@@ -65,6 +65,7 @@ for attempt in $(seq 1 "$max_attempts"); do
   if ! statuses="$(fetch_statuses "$attempt")"; then
     api_failures=$((api_failures + 1))
     malformed_failures=0
+    last_non_terminal_reason=api-failure
     if [[ "$api_failures" -ge 3 ]]; then
       publish_terminal error "GitHub status API failed three consecutive times"
       exit 1
@@ -97,6 +98,7 @@ for attempt in $(seq 1 "$max_attempts"); do
       ;;
     4)
       malformed_failures=$((malformed_failures + 1))
+      last_non_terminal_reason=malformed
       if [[ "$malformed_failures" -ge 3 ]]; then
         publish_terminal error "samorev status response was malformed three times"
         exit 1
@@ -110,9 +112,18 @@ for attempt in $(seq 1 "$max_attempts"); do
   [[ "$attempt" -eq "$max_attempts" ]] || pause
 done
 
-if [[ "$last_non_terminal_reason" == publisher-target-mismatch ]]; then
-  publish_terminal failure "latest samorev verdict targeted a different publisher run"
-else
-  publish_terminal failure "samorev did not finish within the polling window"
-fi
+case "$last_non_terminal_reason" in
+  publisher-target-mismatch)
+    publish_terminal failure "latest samorev verdict targeted a different publisher run"
+    ;;
+  malformed)
+    publish_terminal failure "latest samorev status response was malformed"
+    ;;
+  api-failure)
+    publish_terminal failure "latest GitHub status API request failed"
+    ;;
+  *)
+    publish_terminal failure "samorev did not finish within the polling window"
+    ;;
+esac
 exit 1

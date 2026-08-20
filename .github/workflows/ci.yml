@@ -63,19 +63,17 @@ jobs:
           fi
           for apt_source in "${apt_sources[@]}"; do
             sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$apt_source"
-          done
-          if sudo grep -REq --include='apt-mirrors.txt' --include='sources.list' \
-            --include='*.sources' --include='*.list' \
-            'azure\.archive\.ubuntu\.com' /etc/apt; then
-            echo "Azure Ubuntu mirror rewrite did not take effect" >&2
-            exit 1
-          else
-            grep_status=$?
-            if [[ "$grep_status" -ne 1 ]]; then
-              echo "Azure Ubuntu mirror verification could not read the complete apt tree" >&2
-              exit "$grep_status"
+            if sudo grep -Eq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_source"; then
+              echo "Azure Ubuntu mirror rewrite did not take effect in $apt_source" >&2
+              exit 1
+            else
+              grep_status=$?
+              if [[ "$grep_status" -ne 1 ]]; then
+                echo "Azure Ubuntu mirror verification could not read $apt_source" >&2
+                exit "$grep_status"
+              fi
             fi
-          fi
+          done
           sudo apt-get update
           sudo apt-get install -y \
             imagemagick=8:6.9.12.98+dfsg1-5.2build2 \

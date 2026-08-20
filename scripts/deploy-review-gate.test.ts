@@ -99,6 +99,10 @@ describe("deploy review revalidation", () => {
     expect(documentation).toContain("single-person availability dependency");
     expect(documentation).toContain("incident/change record naming a specific substitute reviewer");
     expect(documentation).toContain("Never edit the live reviewer set without first");
+    expect(documentation).toContain("`policy-api-readability` is required");
+    expect(documentation).toContain("`scripts/apply-production-environment.sh`");
+    expect(documentation).toContain("incident-recorded last resort");
+    expect(documentation).toContain("`scripts/check-branch-protection.sh`");
     const agentNotes = await Bun.file("CLAUDE.md").text();
     expect(agentNotes).not.toContain("admin-only update ruleset");
     expect(agentNotes).toContain("Only the external\n`samo-agent` identity (ID `280144521`) may update `main`");

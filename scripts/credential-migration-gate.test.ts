@@ -108,6 +108,8 @@ describe("one-shot credential migration boundary", () => {
     const encoded = workflow.match(/^\s*RSA_PUBLIC_KEY_PEM_B64:\s*(\S+)$/m)?.[1];
     expect(encoded).toBeDefined();
     const publicKey = createPublicKey(Buffer.from(encoded ?? "", "base64"));
+    expect(publicKey.asymmetricKeyType).toBe("rsa");
+    expect(publicKey.asymmetricKeyDetails?.modulusLength).toBe(4096);
     const fingerprint = createHash("sha256")
       .update(publicKey.export({ type: "spki", format: "der" }))
       .digest("hex");
@@ -845,11 +847,14 @@ ${closeSwitch}`,
     expect(job["timeout-minutes"]).toBe(2);
     expect(job.permissions).toEqual({ actions: "read", contents: "read" });
     expect(ci.jobs.typecheck?.["timeout-minutes"]).toBe(15);
-    const imageRuntime = ci.jobs.typecheck?.steps.find(({ name }) => name === "Install image validation runtime")?.run;
+    const imageRuntime = ci.jobs.typecheck?.steps.find(({ name }) => name === "Install image validation runtime")?.run ?? "";
+    expect(imageRuntime).not.toBe("");
     expect(imageRuntime).toContain("set -euo pipefail");
     expect(imageRuntime).toContain("sudo find /etc/apt");
     expect(imageRuntime).toContain("-print0");
-    expect(imageRuntime).toContain("'azure\\.archive\\.ubuntu\\.com' /etc/apt");
+    expect(imageRuntime.match(/https\?\:\/\/\(\[a-z0-9\.\-\]\*\\\.\)\?azure\\\.archive\\\.ubuntu\\\.com\/ubuntu/g)).toHaveLength(2);
+    expect(imageRuntime).not.toContain("grep -R");
+    expect(imageRuntime).toContain('"$apt_source"');
     expect(imageRuntime).toContain('[[ "$grep_status" -ne 1 ]]');
     const runBlock = job.steps.find(({ name }) => name === "Prove policy guard API readability")?.run;
     expect(runBlock).toBeDefined();

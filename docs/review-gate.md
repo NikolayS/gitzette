@@ -16,6 +16,16 @@ review. Any push after a verdict invalidates it: merge requires a new
 terminal-clean samorev verdict on the exact current head, and a green pipeline
 is never a substitute.
 
+Because `policy-api-readability` is required, every merge also depends on the
+live GitHub environments API being readable and the `production` environment
+existing. Repair or recreate that environment from the canonical config with
+`scripts/apply-production-environment.sh`, then rerun CI. If an API outage makes
+that impossible and an urgent teardown cannot wait, a repository administrator
+may remove only this required context as an incident-recorded last resort; the
+external `samo-agent` update boundary and every other gate remain mandatory.
+Restore the context immediately afterward and re-audit the complete live policy
+with `scripts/check-branch-protection.sh`.
+
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
 and replaces the status with `success`, `failure`, or `error`. The
