@@ -369,23 +369,21 @@ text matching is not the authorization proof.
    gh run watch "$VERIFY_RUN_ID" --exit-status
    verify_status=$?
    set -e
-   gh variable delete CREDENTIAL_VERIFY_OPEN
+   if ! gh variable delete CREDENTIAL_VERIFY_OPEN 2>/dev/null; then
+     remaining_verify_switches="$(gh variable list --json name --jq \
+       '[.[].name | select(. == "CREDENTIAL_VERIFY_OPEN")] | length')"
+     [[ "$remaining_verify_switches" == 0 ]]
+   fi
    bash scripts/check-production-environment.sh
-   [[ "$verify_status" == 0 ]]
-   ```
-
-   If verification fails, restore the repository rollback copies immediately so
-   the currently deployed workflow remains operable while the environment
-   failure is diagnosed:
-
-   ```bash
-   set -euo pipefail
-   [[ "$verify_status" != 0 ]]
-   rollback_account_id="$(jq -er .cloudflare_account_id <<<"$plaintext")"
-   rollback_api_token="$(jq -er .cloudflare_api_token <<<"$plaintext")"
-   printf '%s' "$rollback_account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID
-   printf '%s' "$rollback_api_token" | gh secret set CLOUDFLARE_API_TOKEN
-   unset rollback_account_id rollback_api_token
+   if [[ "$verify_status" != 0 ]]; then
+     rollback_account_id="$(jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
+     rollback_api_token="$(jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
+     printf '%s' "$rollback_account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID
+     printf '%s' "$rollback_api_token" | gh secret set CLOUDFLARE_API_TOKEN
+     unset rollback_account_id rollback_api_token
+     echo "verification failed; repository rollback credentials restored" >&2
+     exit 1
+   fi
    ```
 
    After repairing and revalidating the environment values, delete those
@@ -393,8 +391,8 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
-   gh secret delete CLOUDFLARE_ACCOUNT_ID
-   gh secret delete CLOUDFLARE_API_TOKEN
+   gh secret delete CLOUDFLARE_ACCOUNT_ID 2>/dev/null || true
+   gh secret delete CLOUDFLARE_API_TOKEN 2>/dev/null || true
    REQUIRE_PRODUCTION_CREDENTIALS=true \
    REQUIRE_NO_REPOSITORY_CREDENTIALS=true \
      bash scripts/check-credential-migration-inventory.sh
@@ -423,7 +421,11 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
-   gh variable delete CREDENTIAL_VERIFY_OPEN
+   if ! gh variable delete CREDENTIAL_VERIFY_OPEN 2>/dev/null; then
+     remaining_verify_switches="$(gh variable list --json name --jq \
+       '[.[].name | select(. == "CREDENTIAL_VERIFY_OPEN")] | length')"
+     [[ "$remaining_verify_switches" == 0 ]]
+   fi
    bash scripts/check-production-environment.sh
    ```
 
@@ -444,14 +446,6 @@ text matching is not the authorization proof.
    and live deletion checks prove that separately.
    Record its run ID next to the pre-verification run ID and reconcile every red
    scheduled run between them to this single verification window.
-
-   On verification failure, restore repository rollback scope before debugging:
-
-   ```bash
-   set -euo pipefail
-   printf '%s' "$account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID
-   printf '%s' "$api_token" | gh secret set CLOUDFLARE_API_TOKEN
-   ```
 
 7. After successful read-capability verification, drop the transfer table and
    remove nonessential local material, but retain the encrypted private key and

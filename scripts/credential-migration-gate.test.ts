@@ -472,10 +472,32 @@ fi
       stdout: "pipe", stderr: "pipe",
     });
     expect(decrypted.exitCode).toBe(0);
-    expect(JSON.parse(new TextDecoder().decode(decrypted.stdout))).toEqual({
+    const decryptedPlaintext = new TextDecoder().decode(decrypted.stdout);
+    expect(JSON.parse(decryptedPlaintext)).toEqual({
       CLOUDFLARE_ACCOUNT_ID: "a3265e0d0db71fdece29365819452f00",
       CLOUDFLARE_API_TOKEN: "exact-token",
     });
+    const plaintextAccessors = [...migrationDoc.matchAll(
+      /jq -j -e -r (\.[A-Za-z_][A-Za-z0-9_]*) <<<"\$plaintext"/g,
+    )].map((match) => match[1] ?? "");
+    expect(plaintextAccessors).toHaveLength(4);
+    expect(new Set(plaintextAccessors)).toEqual(new Set([
+      ".CLOUDFLARE_ACCOUNT_ID",
+      ".CLOUDFLARE_API_TOKEN",
+    ]));
+    for (const accessor of plaintextAccessors) {
+      const extracted = Bun.spawnSync({
+        cmd: ["jq", "-j", "-e", "-r", accessor],
+        stdin: new TextEncoder().encode(decryptedPlaintext),
+        stdout: "pipe", stderr: "pipe",
+      });
+      expect(extracted.exitCode).toBe(0);
+      expect(new TextDecoder().decode(extracted.stdout)).toBe(
+        accessor === ".CLOUDFLARE_ACCOUNT_ID"
+          ? "a3265e0d0db71fdece29365819452f00"
+          : "exact-token",
+      );
+    }
     expect(exportRun).not.toContain('--arg api_token "$CLOUDFLARE_API_TOKEN"');
     expect(exportRun).not.toContain('--arg account_id "$CLOUDFLARE_ACCOUNT_ID"');
     expect(exportRun).not.toContain("--retry");
@@ -516,7 +538,7 @@ fi
     const migrationDoc = await Bun.file("docs/credential-migration.md").text();
     const bashBlocks = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
       .map((match) => match[1] ?? "");
-    expect(bashBlocks).toHaveLength(14);
+    expect(bashBlocks).toHaveLength(12);
 
     const runbookRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-runbook-"));
     try {
@@ -558,18 +580,9 @@ fi
     }
   });
 
-  test("closes the export switch idempotently on operator re-entry", async () => {
+  test("closes both migration switches idempotently on operator re-entry", async () => {
     const migrationDoc = await Bun.file("docs/credential-migration.md").text();
-    const closeBlock = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
-      .map((match) => match[1] ?? "")
-      .find((block) => block.includes("gh variable delete CREDENTIAL_EXPORT_OPEN"));
-    expect(closeBlock).toBeDefined();
-    const closeStart = closeBlock?.indexOf("if ! gh variable delete CREDENTIAL_EXPORT_OPEN") ?? -1;
-    const closeEnd = closeBlock?.indexOf('operator_token_file="${OPERATOR_TOKEN_FILE', closeStart) ?? -1;
-    expect(closeStart).toBeGreaterThanOrEqual(0);
-    expect(closeEnd).toBeGreaterThan(closeStart);
-    const closeSwitch = closeBlock?.slice(closeStart, closeEnd) ?? "exit 99";
-    const execute = (deleteStatus: string, remaining: string): Promise<number> => Bun.spawn([
+    const execute = (closeSwitch: string, deleteStatus: string, remaining: string): Promise<number> => Bun.spawn([
       "bash", "-c", `set -euo pipefail
 gh() {
   if [[ "$1 $2" == "variable delete" ]]; then return "$FAKE_DELETE_STATUS"; fi
@@ -581,9 +594,22 @@ ${closeSwitch}`,
       env: { ...process.env, FAKE_DELETE_STATUS: deleteStatus, FAKE_REMAINING: remaining },
       stdout: "pipe", stderr: "pipe",
     }).exited;
-    expect(await execute("0", "1")).toBe(0);
-    expect(await execute("1", "0")).toBe(0);
-    expect(await execute("1", "1")).toBe(1);
+    for (const [migrationSwitch, expectedCount] of [
+      ["CREDENTIAL_EXPORT_OPEN", 1],
+      ["CREDENTIAL_VERIFY_OPEN", 2],
+    ] as const) {
+      const closePattern = new RegExp(
+        `if ! gh variable delete ${migrationSwitch}[\\s\\S]*?\\n[ \\t]*fi`,
+        "g",
+      );
+      const closes = migrationDoc.match(closePattern) ?? [];
+      expect(closes).toHaveLength(expectedCount);
+      for (const closeSwitch of closes) {
+        expect(await execute(closeSwitch, "0", "1")).toBe(0);
+        expect(await execute(closeSwitch, "1", "0")).toBe(0);
+        expect(await execute(closeSwitch, "1", "1")).toBe(1);
+      }
+    }
   });
 
   test("executes the required policy API readability gate fail closed", async () => {
