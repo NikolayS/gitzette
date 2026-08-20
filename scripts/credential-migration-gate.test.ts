@@ -733,6 +733,7 @@ ${closeSwitch}`,
     const job = ci.jobs[jobName];
     expect(job).toBeDefined();
     expect(job["timeout-minutes"]).toBe(2);
+    expect(ci.jobs.typecheck?.["timeout-minutes"]).toBe(15);
     const runBlock = job.steps.find(({ name }) => name === "Prove policy guard API readability")?.run;
     expect(runBlock).toBeDefined();
     const protection = JSON.parse(await Bun.file("config/main-branch-protection.json").text()) as {
