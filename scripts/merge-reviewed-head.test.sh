@@ -42,6 +42,7 @@ if [[ "${1:-}" == api && "${2:-}" == user ]]; then
     [[ "$mode" != wrong-token ]] || { printf '1\n'; exit 0; }
     printf '280144521\n'
   else
+    [[ "$mode" != non-admin ]] || { printf '1\n'; exit 0; }
     printf '1345402\n'
   fi
   exit 0
@@ -55,7 +56,14 @@ if [[ "${1:-}" == pr && "${2:-}" == view ]]; then
     [[ "$mode" != head-change ]] || { printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'; exit 0; }
     printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
   else
-    jq -nc '{headRefOid:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",state:"OPEN",baseRefName:"main",headRepository:{nameWithOwner:"example/gitzette"}}'
+    state=OPEN
+    base=main
+    head_repository=example/gitzette
+    [[ "$mode" != closed ]] || state=CLOSED
+    [[ "$mode" != wrong-base ]] || base=develop
+    [[ "$mode" != fork ]] || head_repository=fork/gitzette
+    jq -nc --arg state "$state" --arg base "$base" --arg head_repository "$head_repository" \
+      '{headRefOid:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",state:$state,baseRefName:$base,headRepository:{nameWithOwner:$head_repository}}'
   fi
   exit 0
 fi
@@ -73,10 +81,17 @@ run_case() {
   record="$test_dir/$mode.record"
   : >"$record"
   actual_rc=0
-  env -u GH_TOKEN GITHUB_REPOSITORY=example/gitzette FAKE_MODE="$mode" \
-    FAKE_RECORD="$record" PATH="$test_dir/bin:$PATH" \
-    bash "$test_dir/repo/scripts/merge-reviewed-head.sh" 68 \
-    >"$test_dir/$mode.out" 2>"$test_dir/$mode.err" || actual_rc=$?
+  if [[ "$mode" == preset-token ]]; then
+    GH_TOKEN=preset GITHUB_REPOSITORY=example/gitzette FAKE_MODE="$mode" \
+      FAKE_RECORD="$record" PATH="$test_dir/bin:$PATH" \
+      bash "$test_dir/repo/scripts/merge-reviewed-head.sh" 68 \
+      >"$test_dir/$mode.out" 2>"$test_dir/$mode.err" || actual_rc=$?
+  else
+    env -u GH_TOKEN GITHUB_REPOSITORY=example/gitzette FAKE_MODE="$mode" \
+      FAKE_RECORD="$record" PATH="$test_dir/bin:$PATH" \
+      bash "$test_dir/repo/scripts/merge-reviewed-head.sh" 68 \
+      >"$test_dir/$mode.out" 2>"$test_dir/$mode.err" || actual_rc=$?
+  fi
   [[ "$actual_rc" == "$expected_rc" ]] || {
     echo "$mode returned $actual_rc, expected $expected_rc" >&2
     exit 1
@@ -95,7 +110,7 @@ grep -q -- '--merge --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   exit 1
 }
 
-for mode in dirty audit-fail wrong-token head-change; do
+for mode in preset-token non-admin closed wrong-base fork dirty audit-fail wrong-token head-change; do
   run_case "$mode" 1
   if grep -q '^gh pr merge ' "$test_dir/$mode.record"; then
     echo "$mode reached merge" >&2

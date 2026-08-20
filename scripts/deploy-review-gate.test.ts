@@ -108,7 +108,17 @@ describe("deploy review revalidation", () => {
     expect(checkNonadminBoundary.indexOf("select(length == 2 and")).toBeLessThan(
       checkNonadminBoundary.indexOf("while IFS= read -r ruleset_name"),
     );
-    expect(documentation).toContain("every changed enforcement script under\n`scripts/check-*.sh`");
+    for (const reviewedPath of [
+      "`.github/workflows/**`",
+      "`scripts/check-*.sh`",
+      "`scripts/merge-reviewed-head.sh`",
+      "`scripts/apply-*.sh`",
+      "`scripts/normalize-branch-protection.jq`",
+      "`config/main-branch-protection.json`",
+      "`config/*-environment.json`",
+    ]) {
+      expect(documentation).toContain(reviewedPath);
+    }
     expect(documentation).toContain("Actions bot's immutable ID, not `280144521`");
     expect(documentation).toContain("GitHub Actions and repository administrators are\nnot bypass actors");
     expect(documentation).toContain("Administrator policy authorization is explicit");

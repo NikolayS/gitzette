@@ -72,9 +72,12 @@ exact reviewed Cloudflare pair. Set `REQUIRE_PRODUCTION_CREDENTIALS=true` to
 prove both independently validated production names are installed; the external
 readiness operator runs that inventory check with repository-administration
 read access. Before
-publishing success, the external reviewer must inspect every
-`.github/workflows/**` change and every changed enforcement script under
-`scripts/check-*.sh` in the full base-to-head delta. `.github/CODEOWNERS` still
+publishing success, the external reviewer must inspect every changed
+`.github/workflows/**` file, `scripts/check-*.sh`,
+`scripts/merge-reviewed-head.sh`, `scripts/apply-*.sh`,
+`scripts/normalize-branch-protection.jq`,
+`config/main-branch-protection.json`, and `config/*-environment.json` in the
+full base-to-head delta. `.github/CODEOWNERS` still
 documents ownership of the entire repository (`* @samo-agent`), including those
 scripts, but is intentionally not a merge gate. The final
 deploy job also requires Nik's approval in the non-bypassable `production`
