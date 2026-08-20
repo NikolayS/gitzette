@@ -3,7 +3,13 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
-policy="$root/config/main-branch-protection.json"
+policy="${BRANCH_PROTECTION_POLICY:-$root/config/main-branch-protection.json}"
+
+# Validate the complete local policy before arming the partial-mutation audit.
+if [[ "$(jq '.repository_rulesets | length' "$policy")" -ne 2 ]]; then
+  echo "branch policy must define exactly the main and release-tag rulesets" >&2
+  exit 1
+fi
 owner_type="$(gh api "repos/$repository" --jq .owner.type)"
 
 audit_partial_apply() {
@@ -19,10 +25,6 @@ trap audit_partial_apply EXIT
 # Install the non-forgeable update boundary before reducing formal approvals.
 # Only immutable external user ID 280144521 can update main; GitHub Actions and
 # repository administrators are not bypass actors even if contexts are forged.
-if [[ "$(jq '.repository_rulesets | length' "$policy")" -ne 2 ]]; then
-  echo "branch policy must define exactly the main and release-tag rulesets" >&2
-  exit 1
-fi
 jq '{allow_auto_merge}' "$policy" | gh api --method PATCH "repos/$repository" --input - --silent
 ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=false&per_page=100" | jq -c 'add')"
 while IFS= read -r ruleset_payload; do

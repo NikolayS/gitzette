@@ -26,6 +26,18 @@ for required in GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID; do
   }
 done
 
+repository_mismatch_error="$test_dir/repository-mismatch.err"
+if GITHUB_REPOSITORY=example/gitzette bash "$root/scripts/poll-samorev-gate.sh" \
+  >/dev/null 2>"$repository_mismatch_error"; then
+  echo "repository mismatch unexpectedly passed" >&2
+  exit 1
+fi
+grep -q 'REPOSITORY and GITHUB_REPOSITORY must name the same repository' \
+  "$repository_mismatch_error" || {
+  echo "repository mismatch did not produce its explicit diagnostic" >&2
+  exit 1
+}
+
 run_case() {
   name="$1"
   expected_rc="$2"

@@ -7,6 +7,10 @@ set -euo pipefail
 : "${GITHUB_SERVER_URL:?GITHUB_SERVER_URL is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+if [[ "$REPOSITORY" != "$GITHUB_REPOSITORY" ]]; then
+  echo "REPOSITORY and GITHUB_REPOSITORY must name the same repository" >&2
+  exit 1
+fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 samorev_target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 max_attempts="${SAMOREV_MAX_ATTEMPTS:-60}"

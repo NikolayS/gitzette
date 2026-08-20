@@ -169,7 +169,11 @@ The exporter writes only RSA-4096-OAEP ciphertext to a transient table in the
 live Worker-bound application D1 database; no public Actions artifact is
 created. That encryption is the stored value's only confidentiality boundary:
 a Worker data-exposure path could leak ciphertext, but not plaintext, during
-the bootstrap window. Stored-value
+the bootstrap window. It is not an authenticity boundary: a D1 write path could
+replace ciphertext. The operator therefore binds retrieval to the completed
+export run's time window and proves the row identity and timestamp unchanged
+across two reads before decrypting; the exact Worker account probe prevents an
+attacker-selected credential from being accepted for another account. Stored-value
 verification uses a workflow-dispatch run pinned to the exact protected `main`
 tip. GitHub records that immutable run SHA before the production approval wait,
 and the workflow re-resolves `main` before and after approval. During the

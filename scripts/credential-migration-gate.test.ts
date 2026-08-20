@@ -159,6 +159,10 @@ describe("one-shot credential migration boundary", () => {
     );
     expect(migrationDoc).toContain("remaining_repository_cloudflare_secrets");
     expect(migrationDoc).toContain(".total_rows == 1 and .expected_rows == 1 and .other_rows == 0");
+    expect(migrationDoc).toContain("transfer_created_epoch >= export_started_epoch");
+    expect(migrationDoc).toContain('transfer_rowid <<<"$selected_row"');
+    expect(migrationDoc).toContain('transfer_created_at <<<"$selected_row"');
+    expect(migrationDoc).toContain("RSA does not authenticate the stored row");
     expect(migrationDoc).toContain("GitHub can silently fall back");
     expect(migrationDoc).toContain("GitHub pins the workflow\n   run to the immutable `main` SHA at dispatch");
     expect(migrationDoc).toContain("Production is temporarily widened");
@@ -245,6 +249,9 @@ describe("one-shot credential migration boundary", () => {
       "credential-migration-gate.test.ts",
       "check-credential-migration-inventory.sh",
       "credential-migration-schema-exclusion.sh",
+      "scripts/check-production-drift.sh",
+      "scripts/check-production-applied-schema.sh",
+      "scripts/check-production-schema.sh",
       "CREDENTIAL_MIGRATION_IN_PROGRESS",
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);

@@ -89,8 +89,14 @@ jobs:
           [{"context":"policy-api-readability","app_id":15368},{"context":"samorev","app_id":null},{"context":"samorev-gate","app_id":15368},{"context":"typecheck","app_id":15368}] and
           .enforce_admins == true and .required_conversation_resolution == true and
           .required_pull_request_reviews.require_code_owner_reviews == false and
+          .required_pull_request_reviews.dismiss_stale_reviews == false and
           .required_pull_request_reviews.required_approving_review_count == 0 and
           .required_pull_request_reviews.require_last_push_approval == false and
+          .allow_auto_merge == false and
+          .actions_workflow_permissions == {"default_workflow_permissions":"read","can_approve_pull_request_reviews":false} and
+          .restrictions == null and .lock_branch == false and
+          .block_creations == false and .required_linear_history == false and
+          .required_signatures == false and
           (.repository_rulesets | length) == 2 and
           .repository_rulesets[0].name == "main-samo-only-updates" and
           .repository_rulesets[0].target == "branch" and

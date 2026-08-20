@@ -37,7 +37,8 @@ assert_drift() {
   name="$1"
   changed_protection="$2"
   changed_rulesets="${3:-$rulesets}"
-  normalized="$(jq -nSc --argjson protection "$changed_protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$changed_rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
+  changed_workflow_permissions="${4:-$workflow_permissions}"
+  normalized="$(jq -nSc --argjson protection "$changed_protection" --argjson workflow_permissions "$changed_workflow_permissions" --argjson rulesets "$changed_rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
   [[ "$normalized" != "$expected" ]] || { echo "$name drift was not detected" >&2; exit 1; }
 }
 
@@ -45,6 +46,11 @@ assert_drift bypass "$(jq -c '.required_pull_request_reviews.bypass_pull_request
 assert_drift dismissal "$(jq -c '.required_pull_request_reviews.dismissal_restrictions={users:[{login:"attacker"}],teams:[]}' <<<"$protection")"
 assert_drift pull-request-requirement-removed "$(jq -c 'del(.required_pull_request_reviews)' <<<"$protection")"
 assert_drift restrictions "$(jq -c '.restrictions={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
+assert_drift strict-disabled "$(jq -c '.required_status_checks.strict=false' <<<"$protection")"
+assert_drift required-check-removed "$(jq -c '.required_status_checks.checks |= map(select(.context != "samorev"))' <<<"$protection")"
+assert_drift required-check-app-unbound "$(jq -c '(.required_status_checks.checks[] | select(.context == "typecheck")).app_id=null' <<<"$protection")"
+assert_drift workflow-write "$protection" "$rulesets" \
+  "$(jq -c '.default_workflow_permissions="write"' <<<"$workflow_permissions")"
 assert_drift missing-ruleset "$protection" '[]'
 assert_drift actions-bypass "$protection" "$(jq -c '.[0].bypass_actors += [{actor_id:15368,actor_type:"Integration",bypass_mode:"always"}]' <<<"$rulesets")"
 assert_drift missing-tag-ruleset "$protection" "$(jq -c 'del(.[1])' <<<"$rulesets")"

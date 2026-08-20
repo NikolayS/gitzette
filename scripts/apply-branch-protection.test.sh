@@ -149,6 +149,22 @@ run_failure() {
 
 run_failure multiple
 [[ ! -e "$test_dir/multiple.mutations" ]]
+one_ruleset_policy="$test_dir/one-ruleset.json"
+jq 'del(.repository_rulesets[1])' "$root/config/main-branch-protection.json" >"$one_ruleset_policy"
+one_ruleset_record="$test_dir/one-ruleset"
+if GITHUB_REPOSITORY=example/gitzette FAKE_MODE=success FAKE_RECORD="$one_ruleset_record" \
+  FAKE_POLICY="$one_ruleset_policy" BRANCH_PROTECTION_POLICY="$one_ruleset_policy" \
+  PATH="$test_dir:$PATH" bash "$root/scripts/apply-branch-protection.sh" \
+  >"$one_ruleset_record.out" 2>"$one_ruleset_record.err"; then
+  echo "one-ruleset policy unexpectedly applied" >&2
+  exit 1
+fi
+assert_file_contains "$one_ruleset_record.err" 'must define exactly the main and release-tag rulesets'
+[[ ! -e "$one_ruleset_record.mutations" && ! -e "$one_ruleset_record.classic" ]]
+if grep -q 'possibly partial live policy' "$one_ruleset_record.err"; then
+  echo "local policy precondition armed the partial-apply audit" >&2
+  exit 1
+fi
 run_failure admin-bypass
 run_failure mismatch
 run_failure nonadmin-main-denied

@@ -7,8 +7,10 @@ encrypts it with the reviewed RSA-4096 public key and writes only ciphertext to
 a transient table in the live Worker-bound application D1 database. The only
 confidentiality control on that stored value is RSA-4096-OAEP: a Worker data
 exposure path could leak ciphertext, but not plaintext, during the bootstrap
-window. The migration never publishes an Actions artifact, log value, output,
-or environment value.
+window. RSA does not authenticate the stored row, so the retrieval also binds
+its timestamp to the completed export-run window and proves its row identity
+and timestamp unchanged across two reads before decryption. The migration never
+publishes an Actions artifact, log value, output, or environment value.
 
 The operator-held fallback token is restricted to D1, so it can retrieve and
 delete the ciphertext but cannot deploy Workers or replace the production
@@ -288,6 +290,15 @@ text matching is not the authorization proof.
    ```bash
    set -euo pipefail
    : "${RUN_ID:?set the exact export run ID}"
+   export_run="$(gh run view "$RUN_ID" \
+     --json conclusion,event,headSha,startedAt,updatedAt,workflowName)"
+   jq -e '.conclusion == "success" and .event == "workflow_dispatch" and
+     .workflowName == "Migrate production credential scope" and
+     (.headSha | type == "string" and length == 40) and
+     (.startedAt | type == "string" and length > 0) and
+     (.updatedAt | type == "string" and length > 0)' <<<"$export_run" >/dev/null
+   export_started_epoch="$(date -u -d "$(jq -r .startedAt <<<"$export_run")" +%s)"
+   export_completed_epoch="$(date -u -d "$(jq -r .updatedAt <<<"$export_run")" +%s)"
    if ! gh variable delete CREDENTIAL_EXPORT_OPEN 2>/dev/null; then
      remaining_export_switches="$(gh variable list --json name --jq \
        '[.[].name | select(. == "CREDENTIAL_EXPORT_OPEN")] | length')"
@@ -326,14 +337,18 @@ text matching is not the authorization proof.
        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" >>"$migration_dir/incident.log"
      dispatch_export_recovery absent-table
    fi
-   jq -n '{sql:"select count(*) as total_rows from credential_migration_transfer"}' \
+   jq -n '{sql:"select count(*) as total_rows, min(rowid) as transfer_rowid, min(created_at) as transfer_created_at from credential_migration_transfer"}' \
      >"$migration_dir/count.json"
-   transfer_rows="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
+   transfer_snapshot="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
      --connect-timeout 10 --max-time 30 --config - \
      -H 'Content-Type: application/json' --data-binary "@$migration_dir/count.json" \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
      <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -er '.result[0].results[0].total_rows')"
+     jq -cer 'select(.success == true) | .result[0] | select(.success == true) | .results[0] |
+       select(.total_rows == 0 or
+         (.total_rows == 1 and (.transfer_rowid | type == "number") and
+          (.transfer_created_at | type == "string" and length > 0)))')"
+   transfer_rows="$(jq -r .total_rows <<<"$transfer_snapshot")"
    if [[ "$transfer_rows" == 0 ]]; then
      printf '%s export run %s created an empty transfer table\n' \
        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" >>"$migration_dir/incident.log"
@@ -353,18 +368,28 @@ text matching is not the authorization proof.
      dispatch_export_recovery empty-table
    fi
    [[ "$transfer_rows" == 1 ]]
+   snapshot_rowid="$(jq -er .transfer_rowid <<<"$transfer_snapshot")"
+   snapshot_created_at="$(jq -er .transfer_created_at <<<"$transfer_snapshot")"
    jq -n --arg run_id "$RUN_ID" '{
-     sql:"select ciphertext, (select count(*) from credential_migration_transfer) as total_rows, (select count(*) from credential_migration_transfer where run_id = ?1) as expected_rows, (select count(*) from credential_migration_transfer where run_id <> ?1) as other_rows from credential_migration_transfer where run_id = ?1",
+     sql:"select rowid as transfer_rowid, created_at as transfer_created_at, ciphertext, (select count(*) from credential_migration_transfer) as total_rows, (select count(*) from credential_migration_transfer where run_id = ?1) as expected_rows, (select count(*) from credential_migration_transfer where run_id <> ?1) as other_rows from credential_migration_transfer where run_id = ?1",
      params:[$run_id]
    }' >"$migration_dir/select.json"
-   ciphertext="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
+   selected_row="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
      --connect-timeout 10 --max-time 30 --config - \
      -H 'Content-Type: application/json' --data-binary "@$migration_dir/select.json" \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
      <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -er '.result[0].results[0] |
+     jq -cer 'select(.success == true) | .result[0] | select(.success == true) | .results[0] |
        select(.total_rows == 1 and .expected_rows == 1 and .other_rows == 0) |
-       .ciphertext')"
+       select((.transfer_rowid | type) == "number" and
+         (.transfer_created_at | type) == "string" and
+         (.ciphertext | type) == "string" and (.ciphertext | length) > 0)')"
+   [[ "$(jq -r .transfer_rowid <<<"$selected_row")" == "$snapshot_rowid" ]]
+   [[ "$(jq -r .transfer_created_at <<<"$selected_row")" == "$snapshot_created_at" ]]
+   transfer_created_epoch="$(date -u -d "$snapshot_created_at UTC" +%s)"
+   (( transfer_created_epoch >= export_started_epoch &&
+      transfer_created_epoch <= export_completed_epoch ))
+   ciphertext="$(jq -r .ciphertext <<<"$selected_row")"
    printf '%s' "$ciphertext" | base64 --decode >"$migration_dir/credentials.bin"
    plaintext="$(openssl pkeyutl -decrypt \
      -inkey "$MIGRATION_KEY_DIR/production-migration-private.pem" \
@@ -635,6 +660,13 @@ text matching is not the authorization proof.
    `config/production-environment.json`, apply the restored `v*`-only policy,
    remove `CREDENTIAL_MIGRATION_IN_PROGRESS` from `deploy.yml` so all three
    production schema gates again require the transfer table to be absent,
+   and remove the temporary helper integration from
+   `scripts/check-production-drift.sh`,
+   `scripts/check-production-applied-schema.sh`, and
+   `scripts/check-production-schema.sh`: delete each helper's ShellCheck/source
+   lines and `credential_migration_assert_transfer_state` call, then delete the
+   `schema_exclusion_predicate` assignment and its interpolation from each
+   schema query before deleting the helper itself,
    remove the temporary manual-migration notice from
    `docs/production-migrations.md`,
    remove the transient credential-migration
