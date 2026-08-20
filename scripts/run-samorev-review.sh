@@ -22,6 +22,10 @@ if [[ "$(git -C "$SAMOREV_HOME" rev-parse HEAD)" != "$reviewer_sha" ]]; then
   echo "samorev must be checked out at $reviewer_sha" >&2
   exit 1
 fi
+if [[ -n "$(git -C "$SAMOREV_HOME" status --porcelain --untracked-files=all)" ]]; then
+  echo "samorev checkout must be clean at $reviewer_sha" >&2
+  exit 1
+fi
 
 pr="$(gh pr view "$pr_number" --repo "$repository" --json headRefOid,url)"
 head_sha="$(jq -er .headRefOid <<<"$pr")"

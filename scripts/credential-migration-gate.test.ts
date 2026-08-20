@@ -37,6 +37,7 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
+    expect(workflow.match(/BOOTSTRAP_EXPIRES_AT: 2026-08-27T00:00:00Z/g)).toHaveLength(3);
     expect(workflow).toContain("both production environment credentials must be present");
     expect(workflow).toContain("both Cloudflare repository secrets must be present");
     expect(workflow).toContain("7067899ede540031e13351ac29297fa51c0dc975f9ed2702d1c4dfe937299cdc");
@@ -410,6 +411,17 @@ exit 8
     const gateRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-gate-"));
     const gateBin = join(gateRoot, "bin");
     await mkdir(gateBin);
+    const date = join(gateBin, "date");
+    await Bun.write(date, `#!/usr/bin/env bash
+set -euo pipefail
+if [[ " $* " == *" -d "* ]]; then
+  printf '1787788800\n'
+elif [[ "\${FAKE_BOOTSTRAP_EXPIRED:-false}" == true ]]; then
+  printf '1787788800\n'
+else
+  printf '1787788799\n'
+fi
+`);
     const curl = join(gateBin, "curl");
     await Bun.write(curl, `#!/usr/bin/env bash
 set -euo pipefail
@@ -429,7 +441,7 @@ else
     "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_D1_CHANGES:-1}"
 fi
 `);
-    await Bun.spawn(["chmod", "+x", curl]).exited;
+    await Bun.spawn(["chmod", "+x", date, curl]).exited;
     const execute = async (run: string | undefined, overrides: Record<string, string | undefined> = {}): Promise<number> => {
       const env: Record<string, string> = {
         ...process.env,
@@ -441,6 +453,7 @@ fi
         EXPORT_OPEN: "true",
         VERIFY_OPEN: "false",
         MIGRATION_OPEN: "true",
+        BOOTSTRAP_EXPIRES_AT: "2026-08-27T00:00:00Z",
         GH_TOKEN: "fake",
         GITHUB_REPOSITORY: "example/gitzette",
         GITHUB_RUN_ID: "77",
@@ -473,6 +486,8 @@ fi
     expect(await execute(revalidateRun, { FAKE_APPROVAL_STATE: "rejected" })).toBe(1);
     expect(await execute(revalidateRun, { FAKE_APPROVAL_EMPTY: "true" })).toBe(1);
     expect(await execute(revalidateRun, { DISPATCH_SHA: "stale" })).toBe(1);
+    expect(await execute(authorizeRun, { FAKE_BOOTSTRAP_EXPIRED: "true" })).toBe(1);
+    expect(await execute(revalidateRun, { FAKE_BOOTSTRAP_EXPIRED: "true" })).toBe(1);
     const curlRecord = join(gateRoot, "curl-record");
     expect(await execute(revalidateRun, { FAKE_CURL_RECORD: curlRecord })).toBe(0);
     const curlArgs = await Bun.file(`${curlRecord}.args`).text();
@@ -498,6 +513,7 @@ fi
     expect(await execute(verifyApprovalRun, { ...verify, MIGRATION_OPEN: "false" })).toBe(1);
     expect(await execute(verifyApprovalRun, { ...verify, DISPATCH_REF: "refs/heads/other" })).toBe(1);
     expect(await execute(verifyApprovalRun, { ...verify, DISPATCH_SHA: "stale" })).toBe(1);
+    expect(await execute(verifyApprovalRun, { ...verify, FAKE_BOOTSTRAP_EXPIRED: "true" })).toBe(1);
     expect(await execute(verifyCredentialsRun, {
       CLOUDFLARE_ACCOUNT_ID: "a3265e0d0db71fdece29365819452f00", CLOUDFLARE_API_TOKEN: "exact-token",
     })).toBe(0);

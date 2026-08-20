@@ -31,6 +31,7 @@ SAMOREV_NOT_BEFORE=2026-08-16T00:02:00Z SAMOREV_TARGET_URL=https://github.com/ex
 SAMOREV_NOT_BEFORE=2026-08-16T00:02:00Z assert_exit 0 '[{"context":"samorev","state":"success","created_at":"2026-08-16T00:03:00Z","creator":{"id":280144521,"login":"samo-agent"}}]'
 SAMOREV_TARGET_URL=https://github.com/example/gitzette/actions/runs/7 assert_exit 0 '[{"context":"samorev","state":"success","target_url":"https://github.com/example/gitzette/actions/runs/7","creator":{"id":280144521,"login":"samo-agent"}}]'
 SAMOREV_TARGET_URL=https://github.com/example/gitzette/actions/runs/7 assert_exit 2 '[{"context":"samorev","state":"success","target_url":"https://github.com/example/gitzette/actions/runs/6","creator":{"id":280144521,"login":"samo-agent"}}]'
+SAMOREV_TARGET_URL=https://github.com/example/gitzette/actions/runs/7 assert_exit 2 '[{"context":"samorev","state":"success","creator":{"id":280144521,"login":"samo-agent"}}]'
 assert_exit 4 'not-json'
 assert_exit 4 '{}'
 

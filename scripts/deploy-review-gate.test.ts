@@ -229,10 +229,12 @@ case "$endpoint" in
     target=https://github.com/example/gitzette/actions/runs/2
     [[ "$mode" != wrong-publisher-target ]] || target=https://github.com/example/gitzette/actions/runs/999
     [[ "$mode" != later-gate-failure ]] || target=https://github.com/example/gitzette/actions/runs/1
+    missing_target=false; [[ "$mode" != missing-publisher-target ]] || missing_target=true
     created_at=2026-01-03T00:00:00Z; [[ "$mode" != predated-verdict ]] || created_at=2026-01-01T00:00:00Z
-    jq -nc --arg state "$latest_state" --argjson actor "$latest_id" --arg login "$latest_login" --arg target "$target" --arg created_at "$created_at" '[[
+    jq -nc --arg state "$latest_state" --argjson actor "$latest_id" --arg login "$latest_login" --arg target "$target" --arg created_at "$created_at" --argjson missing_target "$missing_target" '[[
       {id:1,context:"samorev",state:"success",created_at:"2026-01-01T00:00:00Z",target_url:"https://github.com/example/gitzette/actions/runs/1",creator:{id:280144521,login:"samo-agent"}},
-      {id:2,context:"samorev",state:$state,created_at:$created_at,target_url:$target,creator:{id:$actor,login:$login}}]]'
+      {id:2,context:"samorev",state:$state,created_at:$created_at,target_url:$target,creator:{id:$actor,login:$login}}]] |
+      if $missing_target then del(.[0][1].target_url) else . end'
     ;;
   *) exit 91 ;;
 esac
@@ -252,7 +254,7 @@ esac
     for (const mode of [
       "latest-ci-failure", "no-ci-path", "latest-gate-failure", "no-gate-path",
       "latest-review-failure", "forged-reviewer", "wrong-ci-base", "fork-ci-head",
-      "wrong-base", "fork-head", "wrong-publisher-target", "predated-verdict", "api-error",
+      "wrong-base", "fork-head", "wrong-publisher-target", "missing-publisher-target", "predated-verdict", "api-error",
     ]) {
       const code = await run(mode);
       if (code === 0) throw new Error(`${mode} unexpectedly passed release evidence`);

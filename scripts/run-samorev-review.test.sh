@@ -9,7 +9,9 @@ mkdir -p "$test_dir/bin" "$test_dir/samorev/src"
 cat >"$test_dir/bin/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${FAKE_MODE:-}" == reviewer-sha ]]; then
+if [[ "${1:-}" == -C && "${3:-}" == status ]]; then
+  [[ "${FAKE_MODE:-}" != reviewer-dirty ]] || printf '?? untracked-reviewer-edit\n'
+elif [[ "${FAKE_MODE:-}" == reviewer-sha ]]; then
   printf 'bad-reviewer-sha\n'
 else
   printf '1397e9762c3f7b0f6230260ca4960241dfb38bf2\n'
@@ -107,7 +109,7 @@ run_case() {
   fi
 }
 
-for mode in wrong-path wrong-event fork wrong-head wrong-pr wrong-job reviewer-sha; do
+for mode in wrong-path wrong-event fork wrong-head wrong-pr wrong-job reviewer-sha reviewer-dirty; do
   run_case "$mode" 1
 done
 run_case success 0 success

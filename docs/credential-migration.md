@@ -347,7 +347,7 @@ text matching is not the authorization proof.
    jq -e --argjson before "$environment_secrets_before" '
      ([.[].name] | sort) == ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
      all(.[]; . as $current |
-       ($before | map(select(.name == $current.name)) | .[0].updated_at // "") <
+       ($before | map(select(.name == $current.name)) | .[0].updated_at // "") <=
        $current.updated_at)' <<<"$environment_secrets" >/dev/null
    curl --fail --silent --show-error --connect-timeout 10 --max-time 20 --config - \
      "https://api.cloudflare.com/client/v4/accounts/$exported_account_id/workers/services/gitzette" \
@@ -500,9 +500,10 @@ text matching is not the authorization proof.
    Record its run ID next to the pre-verification run ID and reconcile every red
    scheduled run between them to this single verification window.
 
-   The temporary policy guard mechanically expires this bootstrap at
-   `2026-08-27T00:00:00Z`. Any remaining bootstrap workflow or policy at that
-   deadline is an incident, not an extension; teardown must remove the guard
+   The migration workflow fails closed at `2026-08-27T00:00:00Z` before initial
+   authorization and again after either environment approval. The temporary
+   policy guard reports the same deadline. Any remaining bootstrap workflow or
+   policy then is an incident, not an extension; teardown must remove the guard
    only together with the migration surface.
 
 7. After successful read-capability verification, drop the transfer table and
