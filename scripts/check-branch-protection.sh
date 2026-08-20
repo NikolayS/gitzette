@@ -1,17 +1,49 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "check-branch-protection.sh must be executed by path, not sourced or piped to Bash" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
+  exit 1
+fi
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+"$root/scripts/check-branch-protection-policy-file.sh" \
+  "$root/config/main-branch-protection.json"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
-expected="$(jq -Sc 'del(.audit_command) | .required_status_checks.checks |= sort_by(.context)' "$root/config/main-branch-protection.json")"
+expected="$(jq -Sc '
+  del(.audit_command,.allow_auto_merge) |
+  .required_status_checks.checks |= sort_by(.context) |
+  .repository_rulesets |= map(
+    .bypass_actors |= sort_by(.actor_type, .actor_id) |
+    .rules |= sort_by(.type)
+  ) | .repository_rulesets |= sort_by(.name)
+' "$root/config/main-branch-protection.json")"
+expected_auto_merge="$(jq -r .allow_auto_merge "$root/config/main-branch-protection.json")"
+actual_auto_merge="$(gh api "repos/$repository" --jq .allow_auto_merge)"
+if [[ "$actual_auto_merge" != "$expected_auto_merge" ]]; then
+  echo "repository allow_auto_merge differs from config/main-branch-protection.json" >&2
+  exit 1
+fi
 protection="$(gh api "repos/$repository/branches/main/protection")"
 workflow_permissions="$(gh api "repos/$repository/actions/permissions/workflow")"
-ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=true&per_page=100" | jq -c 'add')"
+if ! ruleset_summaries="$(gh api --paginate --slurp \
+  "repos/$repository/rulesets?includes_parents=true&per_page=100" |
+  jq -ce 'add // [] | select(type == "array")')"; then
+  echo "unable to enumerate rulesets: repository ruleset summary response is invalid" >&2
+  exit 3
+fi
+if ! jq -e 'all(.[]; ._links.self.href | type == "string")' \
+  <<<"$ruleset_summaries" >/dev/null; then
+  echo "unable to enumerate rulesets: a ruleset summary lacks its API URL" >&2
+  exit 3
+fi
+ruleset_urls="$(jq -r '.[]._links.self.href' <<<"$ruleset_summaries")"
 rulesets='[]'
 while IFS= read -r ruleset_url; do
+  [[ -n "$ruleset_url" ]] || continue
   ruleset="$(gh api "$ruleset_url")"
   rulesets="$(jq -c --argjson ruleset "$ruleset" '. + [$ruleset]' <<<"$rulesets")"
-done < <(jq -r '.[]._links.self.href' <<<"$ruleset_summaries")
+done <<<"$ruleset_urls"
 actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
 
 if [[ "$actual" != "$expected" ]]; then
@@ -24,4 +56,4 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-echo "Branch protection OK: base-controlled gate, exact-head verdict, CI, and an independent fresh approval are required for admins"
+echo "Branch protection OK: only samo-agent can update main or mutate v* tags, and main remains subject to pull requests, exact-head technical gates, and resolved conversations; approval count is zero"

@@ -1,5 +1,6 @@
 {
   "audit_command": "bash scripts/check-branch-protection.sh",
+  "allow_auto_merge": false,
   "actions_workflow_permissions": {
     "default_workflow_permissions": "read",
     "can_approve_pull_request_reviews": false
@@ -7,6 +8,7 @@
   "required_status_checks": {
     "strict": true,
     "checks": [
+      { "context": "policy-api-readability", "app_id": 15368 },
       { "context": "samorev", "app_id": null },
       { "context": "samorev-gate", "app_id": 15368 },
       { "context": "typecheck", "app_id": 15368 }
@@ -14,10 +16,10 @@
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {
-    "dismiss_stale_reviews": true,
-    "require_code_owner_reviews": true,
-    "required_approving_review_count": 1,
-    "require_last_push_approval": true,
+    "dismiss_stale_reviews": false,
+    "require_code_owner_reviews": false,
+    "required_approving_review_count": 0,
+    "require_last_push_approval": false,
     "dismissal_restrictions": { "users": [], "teams": [] },
     "bypass_pull_request_allowances": { "users": [], "teams": [], "apps": [] }
   },
@@ -29,5 +31,38 @@
   "lock_branch": false,
   "block_creations": false,
   "restrictions": null,
-  "repository_rulesets": []
+  "repository_rulesets": [
+    {
+      "name": "main-samo-only-updates",
+      "target": "branch",
+      "enforcement": "active",
+      "bypass_actors": [
+        { "actor_id": 280144521, "actor_type": "User", "bypass_mode": "always" }
+      ],
+      "conditions": {
+        "ref_name": { "exclude": [], "include": ["refs/heads/main"] }
+      },
+      "rules": [
+        { "type": "creation" },
+        { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } },
+        { "type": "deletion" }
+      ]
+    },
+    {
+      "name": "release-tags-samo-only",
+      "target": "tag",
+      "enforcement": "active",
+      "bypass_actors": [
+        { "actor_id": 280144521, "actor_type": "User", "bypass_mode": "always" }
+      ],
+      "conditions": {
+        "ref_name": { "exclude": [], "include": ["refs/tags/v*"] }
+      },
+      "rules": [
+        { "type": "creation" },
+        { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } },
+        { "type": "deletion" }
+      ]
+    }
+  ]
 }

@@ -2,8 +2,8 @@
 
 Before merging, follow [`docs/review-gate.md`](docs/review-gate.md). The former
 automatic PR workflow `claude-code-review.yml` was removed; the mention-driven
-`claude.yml` workflow remains. The canonical check and CODEOWNER requirements
-live only in `docs/review-gate.md`.
+`claude.yml` workflow remains. The canonical checks and merge-boundary
+requirements live only in `docs/review-gate.md`.
 
 Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or illustration rules.
 
@@ -18,7 +18,12 @@ Read `DISPATCH_SPEC.md` before changing generation, publication, queueing, or il
 
 Run `bun run test:all`. The E2E must exercise the real local Worker, D1, R2, HTTP queue/runner APIs, and public read path. A mocked handler test is not a replacement.
 
-Green CI alone is not a review. The separate `samo-agent` CODEOWNER runs
-Tanya301/samorev on every exact head and approves only after a clean exit.
+Green CI alone is not a review. The separate `samo-agent` identity runs
+Tanya301/samorev on every exact head and publishes the immutable-creator verdict.
+Formal GitHub approvals are intentionally not a gate. Only the external
+`samo-agent` identity (ID `280144521`) may update `main`; repository Actions and
+the repository administrator are not configured as bypass actors. An administrator
+can still change the ruleset itself, so rerun `scripts/check-branch-protection.sh`
+before every merge and release tag. See `docs/review-gate.md`.
 
 Before production activation, complete the canaries and mandatory post-deploy smoke test listed in `DISPATCH_SPEC.md`.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# shellcheck source=scripts/require-wrangler.sh
+# shellcheck source=./require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 
 # Before applying any pending migration, prove that live D1 still matches a

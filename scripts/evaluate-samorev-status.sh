@@ -4,6 +4,11 @@ set -euo pipefail
 # samo-agent; verified with: gh api users/samo-agent --jq .id
 reviewer_id="280144521"
 not_before="${SAMOREV_NOT_BEFORE:-}"
+if [[ -z "${SAMOREV_TARGET_URL:-}" ]]; then
+  echo "SAMOREV_TARGET_URL is required" >&2
+  exit 5
+fi
+target_url="$SAMOREV_TARGET_URL"
 statuses="$(cat)"
 if ! status="$(jq -ce '
   if type != "array" then error("expected an array") else . end
@@ -19,6 +24,7 @@ state="$(jq -r '.state // empty' <<<"$status")"
 creator_id="$(jq -r '.creator.id // empty' <<<"$status")"
 creator="$(jq -r '.creator.login // empty' <<<"$status")"
 created_at="$(jq -r '.created_at // empty' <<<"$status")"
+actual_target_url="$(jq -r '.target_url // empty' <<<"$status")"
 
 if [[ -z "$state" || "$state" == pending ]]; then
   exit 2
@@ -27,7 +33,21 @@ if [[ -z "$creator_id" || "$creator_id" != "$reviewer_id" ]]; then
   echo "samorev status has unexpected creator: $creator ($creator_id)" >&2
   exit 3
 fi
-if [[ -n "$not_before" && ( -z "$created_at" || "$created_at" < "$not_before" ) ]]; then
+if [[ -n "$not_before" ]]; then
+  if ! not_before_epoch="$(date -u -d "$not_before" +%s)"; then
+    echo "SAMOREV_NOT_BEFORE is not a valid timestamp" >&2
+    exit 5
+  fi
+  if [[ -z "$created_at" ]] || ! created_at_epoch="$(date -u -d "$created_at" +%s)"; then
+    echo "samorev status has an invalid created_at timestamp" >&2
+    exit 3
+  fi
+  if (( created_at_epoch < not_before_epoch )); then
+    exit 2
+  fi
+fi
+if [[ "$actual_target_url" != "$target_url" ]]; then
+  echo "samorev status targets the wrong publisher: $actual_target_url (expected $target_url)" >&2
   exit 2
 fi
 if [[ "$state" == success ]]; then

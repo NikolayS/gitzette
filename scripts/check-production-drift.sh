@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# shellcheck source=scripts/require-wrangler.sh
+# shellcheck source=./require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 
 # This is a one-time pre-cutover baseline gate. After cutover, Wrangler's D1

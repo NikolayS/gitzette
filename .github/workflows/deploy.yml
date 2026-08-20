@@ -11,11 +11,12 @@ on:
 jobs:
   review-gate:
     permissions:
-      checks: read
+      actions: read
       contents: read
       pull-requests: read
       statuses: read
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -24,7 +25,11 @@ jobs:
       - name: Require the reviewed current main merge
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_PUSHER_ID: ${{ github.actor_id }}
         run: |
+          set -euo pipefail
+          triggering_actor_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .triggering_actor.id)"
+          bash scripts/check-release-tag-actor.sh "$TAG_PUSHER_ID" "$triggering_actor_id"
           git fetch --no-tags origin main
           main_sha="$(git rev-parse origin/main)"
           if [ "$GITHUB_SHA" != "$main_sha" ]; then
@@ -40,27 +45,8 @@ jobs:
             exit 1
           fi
 
-          check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/check-runs?filter=latest&per_page=100")"
-          if ! jq -e 'any(.check_runs[]; .name == "typecheck" and .conclusion == "success" and .app.id == 15368)' <<<"$check_runs" >/dev/null; then
-            echo "reviewed head lacks successful app-bound typecheck" >&2
-            exit 1
-          fi
-          if ! jq -e 'any(.check_runs[]; .name == "base-controlled samorev publisher" and .conclusion == "success" and .app.id == 15368)' <<<"$check_runs" >/dev/null; then
-            echo "reviewed head lacks successful app-bound samorev publisher" >&2
-            exit 1
-          fi
-
-          statuses="$(gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_sha/statuses?per_page=100")"
-          if ! jq -e 'any(.[]; .context == "samorev" and .state == "success" and .creator.login == "samo-agent") and any(.[]; .context == "samorev-gate" and .state == "success")' <<<"$statuses" >/dev/null; then
-            echo "reviewed head lacks the CODEOWNER samorev verdict or base-controlled gate" >&2
-            exit 1
-          fi
-
-          reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$(jq -r '.number' <<<"$reviewed_pr")/reviews")"
-          if ! jq -e --arg sha "$reviewed_sha" 'any(.[]; .user.login == "samo-agent" and .state == "APPROVED" and .commit_id == $sha)' <<<"$reviews" >/dev/null; then
-            echo "reviewed head lacks the exact-head CODEOWNER approval" >&2
-            exit 1
-          fi
+          GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            bash scripts/check-release-review-evidence.sh "$reviewed_sha"
 
   deploy:
     needs: review-gate
@@ -68,6 +54,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -77,25 +64,25 @@ jobs:
       - name: Verify required Worker secrets
         run: bash scripts/check-production-secrets.sh
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
       - name: Verify weekly profile activation prerequisites
         run: bash scripts/check-weekly-profiles.sh
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
       - name: Verify production drift and apply migrations
         run: bun run db:migrate
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
       - name: Re-assert the live schema before deploying the Worker
         run: bash scripts/check-production-schema.sh
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
       - name: Deploy only after secrets, migrations, and live schema verification
         run: ./node_modules/.bin/wrangler deploy
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}

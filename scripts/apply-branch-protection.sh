@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "apply-branch-protection.sh must be executed by path, not sourced or piped to Bash" >&2
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then return 1; fi
+  exit 1
+fi
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 policy="$root/config/main-branch-protection.json"
+
+# Validate the complete local policy before arming the partial-mutation audit.
+"$root/scripts/check-branch-protection-policy-file.sh" "$policy"
 owner_type="$(gh api "repos/$repository" --jq .owner.type)"
 
 audit_partial_apply() {
@@ -15,6 +23,48 @@ audit_partial_apply() {
   exit "$rc"
 }
 trap audit_partial_apply EXIT
+
+# Install the non-forgeable update boundary before reducing formal approvals.
+# Only immutable external user ID 280144521 can update main; GitHub Actions and
+# repository administrators are not bypass actors even if contexts are forged.
+jq '{allow_auto_merge}' "$policy" | gh api --method PATCH "repos/$repository" --input - --silent
+ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=false&per_page=100" | jq -c 'add')"
+while IFS= read -r ruleset_payload; do
+  ruleset_name="$(jq -r .name <<<"$ruleset_payload")"
+  matching_ids="$(jq -r --arg name "$ruleset_name" '.[] | select(.name == $name) | .id' <<<"$ruleset_summaries")"
+  if [[ "$(wc -w <<<"$matching_ids")" -gt 1 ]]; then
+    echo "multiple repository rulesets are named $ruleset_name" >&2
+    exit 1
+  fi
+  if [[ -n "$matching_ids" ]]; then
+    ruleset_endpoint="repos/$repository/rulesets/$matching_ids"
+    ruleset_method=PUT
+  else
+    ruleset_endpoint="repos/$repository/rulesets"
+    ruleset_method=POST
+  fi
+  ruleset_mutation="$(jq '{name,target,enforcement,bypass_actors,conditions,rules}' <<<"$ruleset_payload" |
+    gh api --method "$ruleset_method" "$ruleset_endpoint" --input -)"
+  ruleset_id="$(jq -er .id <<<"$ruleset_mutation")"
+  live_ruleset="$(gh api "repos/$repository/rulesets/$ruleset_id")"
+  if [[ "$(jq -r .current_user_can_bypass <<<"$live_ruleset")" != never ]]; then
+    echo "the applying administrator has an unexpected bypass for $ruleset_name" >&2
+    exit 1
+  fi
+  normalized_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules} |
+    .bypass_actors |= sort_by(.actor_type, .actor_id) |
+    .rules |= map(
+      if .type == "update" and (has("parameters") | not) then
+        .parameters = {update_allows_fetch_and_merge:false}
+      else . end
+    ) | .rules |= sort_by(.type)' <<<"$live_ruleset")"
+  expected_ruleset="$(jq -Sc '{name,target,enforcement,bypass_actors,conditions,rules} |
+    .bypass_actors |= sort_by(.actor_type, .actor_id) | .rules |= sort_by(.type)' <<<"$ruleset_payload")"
+  if [[ "$normalized_ruleset" != "$expected_ruleset" ]]; then
+    echo "$ruleset_name did not apply exactly" >&2
+    exit 1
+  fi
+done < <(jq -c '.repository_rulesets[]' "$policy")
 
 jq '.actions_workflow_permissions' "$policy" | gh api --method PUT \
   "repos/$repository/actions/permissions/workflow" --input - --silent
