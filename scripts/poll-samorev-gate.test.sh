@@ -48,6 +48,7 @@ run_case transport 1 'error|GitHub status API failed three consecutive times' __
 run_case malformed 1 'error|samorev status response was malformed three times' not-json not-json not-json
 run_case interleaved 0 'success|immutable-reviewer samorev verdict passed' __FAIL__ "$pending" __FAIL__ "$success"
 run_case superseded-publisher 0 'success|immutable-reviewer samorev verdict passed' "$wrong_target" "$success"
+run_case wrong-target-exhausted 1 'failure|latest samorev verdict targeted a different publisher run' "$wrong_target" "$wrong_target"
 run_case exhausted 1 'failure|samorev did not finish within the polling window' "$pending" "$pending"
 
 : >"$SAMOREV_PUBLISH_LOG"

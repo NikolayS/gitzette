@@ -42,8 +42,7 @@ wrangler d1 create gitzette-db
 
 # update wrangler.toml with the returned database_id
 # verify the one-time production baseline and apply versioned migrations
-# (the environment prefix is temporary until credential-migration teardown #67)
-CREDENTIAL_MIGRATION_IN_PROGRESS=true bun run db:migrate
+bun run db:migrate
 
 # set secrets
 wrangler secret put GITHUB_CLIENT_ID

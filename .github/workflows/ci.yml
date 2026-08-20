@@ -50,8 +50,13 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install image validation runtime
         run: |
+          set -euo pipefail
           # GitHub's Azure mirror can stall indefinitely; rewrite every apt source shape used by runner images.
-          mapfile -t apt_sources < <(find /etc/apt -type f \( -name 'apt-mirrors.txt' -o -name 'sources.list' -o -name '*.sources' -o -name '*.list' \) -print)
+          apt_source_list="$(mktemp)"
+          trap 'rm -f "$apt_source_list"' EXIT
+          sudo find /etc/apt -type f \( -name 'apt-mirrors.txt' -o -name 'sources.list' -o -name '*.sources' -o -name '*.list' \) -print0 |
+            tee "$apt_source_list" >/dev/null
+          mapfile -d '' -t apt_sources <"$apt_source_list"
           if [[ "${#apt_sources[@]}" -eq 0 ]]; then
             echo "no apt source files found" >&2
             exit 1
@@ -59,9 +64,17 @@ jobs:
           for apt_source in "${apt_sources[@]}"; do
             sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$apt_source"
           done
-          if sudo grep -HEq 'azure\.archive\.ubuntu\.com' "${apt_sources[@]}"; then
+          if sudo grep -REq --include='apt-mirrors.txt' --include='sources.list' \
+            --include='*.sources' --include='*.list' \
+            'azure\.archive\.ubuntu\.com' /etc/apt; then
             echo "Azure Ubuntu mirror rewrite did not take effect" >&2
             exit 1
+          else
+            grep_status=$?
+            if [[ "$grep_status" -ne 1 ]]; then
+              echo "Azure Ubuntu mirror verification could not read the complete apt tree" >&2
+              exit "$grep_status"
+            fi
           fi
           sudo apt-get update
           sudo apt-get install -y \

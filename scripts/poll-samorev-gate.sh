@@ -59,6 +59,7 @@ fi
 
 api_failures=0
 malformed_failures=0
+last_non_terminal_reason=pending
 for attempt in $(seq 1 "$max_attempts"); do
   echo "samorev verdict poll $attempt/$max_attempts"
   if ! statuses="$(fetch_statuses "$attempt")"; then
@@ -74,8 +75,9 @@ for attempt in $(seq 1 "$max_attempts"); do
 
   api_failures=0
   verdict_rc=0
-  SAMOREV_NOT_BEFORE="$SAMOREV_NOT_BEFORE" SAMOREV_TARGET_URL="$samorev_target_url" \
-    bash "$root/scripts/evaluate-samorev-status.sh" <<<"$statuses" || verdict_rc=$?
+  verdict_diagnostic="$(SAMOREV_NOT_BEFORE="$SAMOREV_NOT_BEFORE" \
+    SAMOREV_TARGET_URL="$samorev_target_url" \
+    bash "$root/scripts/evaluate-samorev-status.sh" <<<"$statuses" 2>&1)" || verdict_rc=$?
   case "$verdict_rc" in
     0)
       publish_terminal success "immutable-reviewer samorev verdict passed"
@@ -87,6 +89,11 @@ for attempt in $(seq 1 "$max_attempts"); do
       ;;
     2)
       malformed_failures=0
+      if grep -q "targets the wrong publisher" <<<"$verdict_diagnostic"; then
+        last_non_terminal_reason=publisher-target-mismatch
+      else
+        last_non_terminal_reason=pending
+      fi
       ;;
     4)
       malformed_failures=$((malformed_failures + 1))
@@ -103,5 +110,9 @@ for attempt in $(seq 1 "$max_attempts"); do
   [[ "$attempt" -eq "$max_attempts" ]] || pause
 done
 
-publish_terminal failure "samorev did not finish within the polling window"
+if [[ "$last_non_terminal_reason" == publisher-target-mismatch ]]; then
+  publish_terminal failure "latest samorev verdict targeted a different publisher run"
+else
+  publish_terminal failure "samorev did not finish within the polling window"
+fi
 exit 1

@@ -180,11 +180,12 @@ text matching is not the authorization proof.
    After both applies, production policy does not change during export or
    verification; any checker failure is therefore real drift.
 
-   Throughout this temporary window, prefix every manual `bun run db:migrate`,
-   `bun run db:bootstrap`, or direct `scripts/bootstrap-production-db.sh`
+   Throughout this temporary window, prefix every manual `bun run db:migrate`
    invocation with `CREDENTIAL_MIGRATION_IN_PROGRESS=true`. Without that exact
    value, the ordinary schema gates correctly reject the temporary transfer
-   table as drift.
+   table as drift. Do not run `bun run db:bootstrap` or
+   `scripts/bootstrap-production-db.sh`: bootstrap requires a completely empty
+   database and correctly rejects the transfer table.
 
 2. Open the independently removable switch and dispatch exactly one export as
    immutable runner ID `280144521` (`samo-agent`). Workflow concurrency only
@@ -552,7 +553,7 @@ text matching is not the authorization proof.
    `config/production-environment.json`, apply the restored `v*`-only policy,
    remove `CREDENTIAL_MIGRATION_IN_PROGRESS` from `deploy.yml` so all three
    production schema gates again require the transfer table to be absent,
-   remove the temporary manual-migration notices from `README.md` and
+   remove the temporary manual-migration notice from
    `docs/production-migrations.md`,
    remove the transient credential-migration
    readability block from `.github/workflows/ci.yml`, and audit the ordinary exact-schema policy before

@@ -164,7 +164,9 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("D1 `/query` contract accepts either a single");
     expect(productionMigrationDoc).toContain("CREDENTIAL_MIGRATION_IN_PROGRESS=true");
     expect(migrationDoc).toContain("prefix every manual `bun run db:migrate`");
-    expect(readme).toContain("CREDENTIAL_MIGRATION_IN_PROGRESS=true bun run db:migrate");
+    expect(readme).not.toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
+    expect(productionMigrationDoc).toContain("bootstrap still requires a completely empty database");
+    expect(migrationDoc).toContain("bootstrap requires a completely empty");
     expect(migrationDoc).toContain("#67 restores the `v*`-only policy");
     expect(migrationDoc).toContain("#67 removes the exclusion after dropping the");
     expect(migrationDoc).toContain("readability block from `.github/workflows/ci.yml`");
@@ -723,6 +725,28 @@ credential_migration_schema_exclusion
     expect(await execute("true", "1", "2")).toBe(1);
     expect(await execute("yes", "0", "0")).toBe(1);
     expect(await execute("true", "0", "0", "9")).toBe(9);
+    const exclusionFor = (migrationState: string): string => {
+      const result = Bun.spawnSync({
+        cmd: ["bash", "-c", "source scripts/credential-migration-schema-exclusion.sh; credential_migration_schema_exclusion"],
+        cwd: process.cwd(),
+        env: { ...process.env, CREDENTIAL_MIGRATION_IN_PROGRESS: migrationState },
+        stdout: "pipe", stderr: "pipe",
+      });
+      expect(result.exitCode).toBe(0);
+      return new TextDecoder().decode(result.stdout);
+    };
+    const disabledExclusion = exclusionFor("false");
+    const enabledExclusion = exclusionFor("true");
+    expect(disabledExclusion).toBe("");
+    expect(enabledExclusion).toBe(",'credential_migration_transfer'");
+    const database = new Database(":memory:");
+    database.exec("create table d1_migrations(id integer); create table credential_migration_transfer(run_id text); create table retained_application_table(id integer)");
+    const visibleTables = (exclusion: string): string[] => database.query(
+      `select name from sqlite_master where type = 'table' and name not like 'sqlite_%' and name not like '_cf_%' and name not in ('d1_migrations'${exclusion}) order by name`,
+    ).all().map((row) => String((row as { name: unknown }).name));
+    expect(visibleTables(disabledExclusion)).toEqual(["credential_migration_transfer", "retained_application_table"]);
+    expect(visibleTables(enabledExclusion)).toEqual(["retained_application_table"]);
+    database.close();
     expect(await readdir(temporaryRoot)).toEqual([]);
     await rm(root, { recursive: true, force: true });
   });
@@ -774,6 +798,12 @@ ${closeSwitch}`,
     expect(job["timeout-minutes"]).toBe(2);
     expect(job.permissions).toEqual({ actions: "read", contents: "read" });
     expect(ci.jobs.typecheck?.["timeout-minutes"]).toBe(15);
+    const imageRuntime = ci.jobs.typecheck?.steps.find(({ name }) => name === "Install image validation runtime")?.run;
+    expect(imageRuntime).toContain("set -euo pipefail");
+    expect(imageRuntime).toContain("sudo find /etc/apt");
+    expect(imageRuntime).toContain("-print0");
+    expect(imageRuntime).toContain("'azure\\.archive\\.ubuntu\\.com' /etc/apt");
+    expect(imageRuntime).toContain('[[ "$grep_status" -ne 1 ]]');
     const runBlock = job.steps.find(({ name }) => name === "Prove policy guard API readability")?.run;
     expect(runBlock).toBeDefined();
     const protection = JSON.parse(await Bun.file("config/main-branch-protection.json").text()) as {
