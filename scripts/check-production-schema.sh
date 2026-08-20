@@ -21,8 +21,8 @@ trap cleanup EXIT
 local_wrangler d1 migrations apply gitzette-db --local --persist-to "$migration_state" >/dev/null
 credential_migration_assert_transfer_state
 schema_exclusions="'d1_migrations'"
-schema_exclusions+="$(credential_migration_schema_exclusion)"
-query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ($schema_exclusions) ORDER BY type,name"
+schema_exclusion_predicate="$(credential_migration_schema_exclusion)"
+query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ($schema_exclusions)$schema_exclusion_predicate ORDER BY type,name"
 local_wrangler d1 execute gitzette-db --local --persist-to "$migration_state" --command "$query" --json >"$migration_state/schema.json"
 "$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
 bun scripts/schema-equivalence.ts "$migration_state/schema.json" "$remote_json"

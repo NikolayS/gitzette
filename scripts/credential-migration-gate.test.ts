@@ -168,6 +168,7 @@ describe("one-shot credential migration boundary", () => {
     expect(productionMigrationDoc).toContain("bootstrap still requires a completely empty database");
     expect(migrationDoc).toContain("bootstrap requires a completely empty");
     expect(migrationDoc).toContain("#67 restores the `v*`-only policy");
+    expect(migrationDoc).toContain("guard intentionally reports any early tightening as drift");
     expect(migrationDoc).toContain("#67 removes the exclusion after dropping the");
     expect(migrationDoc).toContain("readability block from `.github/workflows/ci.yml`");
     for (const schemaGate of [
@@ -183,11 +184,14 @@ describe("one-shot credential migration boundary", () => {
     const schemaExclusion = await Bun.file("scripts/credential-migration-schema-exclusion.sh").text();
     expect(schemaExclusion).toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
     expect(schemaExclusion).toContain(". >= 0 and . <= 1");
+    expect(schemaExclusion).toContain("type<>'table'");
+    expect(schemaExclusion).toContain("ordinary strict schema");
     expect(schemaExclusion).toContain("credential_migration_transfer");
     expect(workflow).not.toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
     const deployWorkflow = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deployWorkflow.match(/CREDENTIAL_MIGRATION_IN_PROGRESS: true/g)).toHaveLength(2);
     expect(deployWorkflow.match(/Temporary bootstrap flag; removed by #67/g)).toHaveLength(2);
+    expect(workflow).toContain("curl --fail-with-body --silent --show-error");
     expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("[[ \"$verify_status\" == 0 ]]")).toBeLessThan(
       migrationDoc.lastIndexOf("drop table credential_migration_transfer"),
@@ -699,7 +703,9 @@ fi
     await Bun.write(wrangler, `#!/usr/bin/env bash
 set -euo pipefail
 [[ "\${FAKE_WRANGLER_STATUS:-0}" == 0 ]] || exit "$FAKE_WRANGLER_STATUS"
-if [[ "$*" == *sqlite_schema* ]]; then
+if [[ "$*" == *"type<>'table'"* ]]; then
+  total="\${FAKE_NON_TABLE_COUNT:-0}"
+elif [[ "$*" == *sqlite_schema* ]]; then
   total="\${FAKE_TABLE_COUNT:-0}"
 else
   total="\${FAKE_ROW_COUNT:-0}"
@@ -720,6 +726,7 @@ fi
       migrationState: string,
       tableCount: string,
       rowCount: string,
+      nonTableCount = "0",
       wranglerStatus = "0",
       nowEpoch = "99",
     ): Promise<number> =>
@@ -737,6 +744,7 @@ credential_migration_schema_exclusion
           FAKE_WRANGLER: wrangler,
           FAKE_TABLE_COUNT: tableCount,
           FAKE_ROW_COUNT: rowCount,
+          FAKE_NON_TABLE_COUNT: nonTableCount,
           FAKE_WRANGLER_STATUS: wranglerStatus,
           FAKE_NOW_EPOCH: nowEpoch,
           PATH: `${root}:${process.env.PATH ?? ""}`,
@@ -748,14 +756,20 @@ credential_migration_schema_exclusion
     expect(await execute("true", "0", "0")).toBe(0);
     expect(await execute("true", "1", "1")).toBe(0);
     expect(await execute("true", "1", "2")).toBe(1);
-    expect(await execute("true", "0", "0", "0", "100")).toBe(1);
+    expect(await execute("true", "0", "0", "1")).toBe(1);
+    expect(await execute("true", "0", "0", "0", "0", "100")).toBe(0);
     expect(await execute("yes", "0", "0")).toBe(1);
-    expect(await execute("true", "0", "0", "9")).toBe(9);
-    const exclusionFor = (migrationState: string): string => {
+    expect(await execute("true", "0", "0", "0", "9")).toBe(9);
+    const exclusionFor = (migrationState: string, nowEpoch = "99"): string => {
       const result = Bun.spawnSync({
         cmd: ["bash", "-c", "source scripts/credential-migration-schema-exclusion.sh; credential_migration_schema_exclusion"],
         cwd: process.cwd(),
-        env: { ...process.env, CREDENTIAL_MIGRATION_IN_PROGRESS: migrationState },
+        env: {
+          ...process.env,
+          CREDENTIAL_MIGRATION_IN_PROGRESS: migrationState,
+          FAKE_NOW_EPOCH: nowEpoch,
+          PATH: `${root}:${process.env.PATH ?? ""}`,
+        },
         stdout: "pipe", stderr: "pipe",
       });
       expect(result.exitCode).toBe(0);
@@ -763,15 +777,22 @@ credential_migration_schema_exclusion
     };
     const disabledExclusion = exclusionFor("false");
     const enabledExclusion = exclusionFor("true");
+    const expiredExclusion = exclusionFor("true", "100");
     expect(disabledExclusion).toBe("");
-    expect(enabledExclusion).toBe(",'credential_migration_transfer'");
+    expect(enabledExclusion).toBe(" AND NOT (type = 'table' AND name = 'credential_migration_transfer')");
+    expect(expiredExclusion).toBe("");
     const database = new Database(":memory:");
     database.exec("create table d1_migrations(id integer); create table credential_migration_transfer(run_id text); create table retained_application_table(id integer)");
     const visibleTables = (exclusion: string): string[] => database.query(
-      `select name from sqlite_master where type = 'table' and name not like 'sqlite_%' and name not like '_cf_%' and name not in ('d1_migrations'${exclusion}) order by name`,
+      `select name from sqlite_master where type = 'table' and name not like 'sqlite_%' and name not like '_cf_%' and name not in ('d1_migrations')${exclusion} order by name`,
     ).all().map((row) => String((row as { name: unknown }).name));
     expect(visibleTables(disabledExclusion)).toEqual(["credential_migration_transfer", "retained_application_table"]);
     expect(visibleTables(enabledExclusion)).toEqual(["retained_application_table"]);
+    database.exec("drop table credential_migration_transfer; create view credential_migration_transfer as select id from retained_application_table");
+    const visibleObjects = database.query(
+      `select type || ':' || name as object from sqlite_master where type in ('table','view') and name not in ('d1_migrations')${enabledExclusion} order by type,name`,
+    ).all().map((row) => String((row as { object: unknown }).object));
+    expect(visibleObjects).toContain("view:credential_migration_transfer");
     database.close();
     expect(await readdir(temporaryRoot)).toEqual([]);
     await rm(root, { recursive: true, force: true });

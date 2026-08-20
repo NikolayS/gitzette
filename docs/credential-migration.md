@@ -616,6 +616,11 @@ text matching is not the authorization proof.
    live environment plus both variables return not found.
    Retain `scripts/get-github-environment.sh`: it is a shared helper used by
    the permanent production-environment audit and apply scripts.
+   Do not remove the temporary `main` production branch policy before the #67
+   teardown merges. The fixed widened policy is the reviewed verification path,
+   so its guard intentionally reports any early tightening as drift; #67 must
+   restore the safer `v*`-only policy atomically with removal of the bootstrap
+   workflows, switches, environment, and schema exclusion.
    Tighten `scripts/check-reviewer-credential-isolation.sh` at the same time:
    repository Actions variables must be empty and repository Actions secrets
    may contain only the reviewed `CLAUDE_CODE_OAUTH_TOKEN` after migration,
