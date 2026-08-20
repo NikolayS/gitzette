@@ -174,10 +174,20 @@ describe("one-shot credential migration boundary", () => {
     );
     expect(migrationDoc).toContain("remaining_repository_cloudflare_secrets");
     expect(migrationDoc).toContain(".total_rows == 1 and .expected_rows == 1 and .other_rows == 0");
-    expect(migrationDoc).toContain("transfer_created_epoch >= export_started_epoch");
+    expect(migrationDoc).toContain("export_started_epoch - clock_skew_seconds");
+    expect(migrationDoc).toContain("export_completed_epoch + clock_skew_seconds");
     expect(migrationDoc).toContain('transfer_rowid <<<"$selected_row"');
     expect(migrationDoc).toContain('transfer_created_at <<<"$selected_row"');
+    expect(migrationDoc).toContain('ciphertext <<<"$selected_row"');
+    expect(migrationDoc).toContain('== "$snapshot_ciphertext"');
+    expect(migrationDoc).toContain("min(ciphertext) as transfer_ciphertext");
     expect(migrationDoc).toContain("RSA does not authenticate the stored row");
+    const recoveryConclusionOffset = migrationDoc.indexOf('(.conclusion == "success" or .conclusion == "failure")');
+    const recoveryRunOffset = migrationDoc.lastIndexOf('export_run="$(gh run view', recoveryConclusionOffset);
+    const recoveryCloseOffset = migrationDoc.lastIndexOf("gh variable delete CREDENTIAL_EXPORT_OPEN", recoveryConclusionOffset);
+    expect(recoveryRunOffset).toBeGreaterThan(-1);
+    expect(recoveryCloseOffset).toBeGreaterThan(recoveryRunOffset);
+    expect(recoveryCloseOffset).toBeLessThan(recoveryConclusionOffset);
     expect(migrationDoc).toContain("GitHub can silently fall back");
     expect(migrationDoc).toContain("GitHub pins the workflow\n   run to the immutable `main` SHA at dispatch");
     expect(migrationDoc).toContain("Production is temporarily widened");
@@ -953,7 +963,7 @@ for argument in "$@"; do
   [[ "$argument" != repos/* ]] || endpoint="$argument"
 done
 case "$endpoint" in
-  repos/example/gitzette/environments/production)
+  repos/NikolayS/gitzette/environments/production)
     [[ "\${FAKE_MODE:-ok}" != production-error ]] || { echo forbidden >&2; exit 1; }
     custom=true
     [[ "\${FAKE_MODE:-ok}" != production-custom-false ]] || custom=false
@@ -963,11 +973,11 @@ case "$endpoint" in
       jq -nc --argjson custom "$custom" '{can_admins_bypass:false,deployment_branch_policy:{custom_branch_policies:$custom}}'
     fi
     ;;
-  repos/example/gitzette/environments/production/deployment-branch-policies*)
+  repos/NikolayS/gitzette/environments/production/deployment-branch-policies*)
     [[ "\${FAKE_MODE:-ok}" != production-policies-error ]] || { echo forbidden >&2; exit 1; }
     printf '{"branch_policies":[]}\n'
     ;;
-  repos/example/gitzette/environments?per_page=100)
+  repos/NikolayS/gitzette/environments?per_page=100)
     [[ "\${FAKE_MODE:-ok}" != inventory-error ]] || { echo forbidden >&2; exit 1; }
     if [[ "\${FAKE_MODE:-ok}" == ok-no-migration ]]; then
       printf '[{"environments":[]}]\n'
@@ -975,7 +985,7 @@ case "$endpoint" in
       printf '[{"environments":[{"name":"credential-migration"}]}]\n'
     fi
     ;;
-  repos/example/gitzette/environments/credential-migration)
+  repos/NikolayS/gitzette/environments/credential-migration)
     [[ "\${FAKE_MODE:-ok}" != migration-error ]] || { echo forbidden >&2; exit 1; }
     custom=false
     [[ "\${FAKE_MODE:-ok}" != ok-custom-true && "\${FAKE_MODE:-ok}" != migration-policies-error ]] || custom=true
@@ -985,7 +995,7 @@ case "$endpoint" in
       jq -nc --argjson custom "$custom" '{can_admins_bypass:false,deployment_branch_policy:{custom_branch_policies:$custom}}'
     fi
     ;;
-  repos/example/gitzette/environments/credential-migration/deployment-branch-policies*)
+  repos/NikolayS/gitzette/environments/credential-migration/deployment-branch-policies*)
     [[ "\${FAKE_MODE:-ok}" != migration-policies-error ]] || { echo forbidden >&2; exit 1; }
     printf '{"branch_policies":[]}\n'
     ;;
@@ -993,11 +1003,12 @@ case "$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const execute = (mode: string): Promise<number> => Bun.spawn(["bash", "-c", runBlock ?? "exit 99"], {
+    const execute = (mode: string, repository = "NikolayS/gitzette"): Promise<number> => Bun.spawn(["bash", "-c", runBlock ?? "exit 99"], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode },
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: repository, FAKE_MODE: mode },
       stdout: "pipe", stderr: "pipe",
     }).exited;
+    expect(await execute("production-error", "fork/gitzette")).toBe(0);
     expect(await execute("ok-no-migration")).toBe(0);
     expect(await execute("production-custom-false")).toBe(0);
     expect(await execute("ok-custom-false")).toBe(0);

@@ -7,9 +7,11 @@ encrypts it with the reviewed RSA-4096 public key and writes only ciphertext to
 a transient table in the live Worker-bound application D1 database. The only
 confidentiality control on that stored value is RSA-4096-OAEP: a Worker data
 exposure path could leak ciphertext, but not plaintext, during the bootstrap
-window. RSA does not authenticate the stored row, so the retrieval also binds
-its timestamp to the completed export-run window and proves its row identity
-and timestamp unchanged across two reads before decryption. The migration never
+window. RSA does not authenticate the stored row. Retrieval therefore proves
+the row identity, timestamp, and full ciphertext unchanged across two reads and
+binds its timestamp to the completed export-run window with a documented clock-skew
+tolerance. The account-ID equality check and exact-account Worker token probe,
+not the row metadata, reject attacker-selected credentials. The migration never
 publishes an Actions artifact, log value, output, or environment value.
 
 The operator-held fallback token is restricted to D1, so it can retrieve and
@@ -294,6 +296,12 @@ text matching is not the authorization proof.
    nonzero count other than one remains a hard stop with repository rollback
    copies intact.
 
+   GitHub and Cloudflare timestamps come from independent clocks. The executable
+   check allows 120 seconds of skew on either side of the recorded run window. If
+   the sole expected row passes every identity/count/ciphertext check but only
+   this window check fails, investigate provider clock skew and do not replay the
+   export; it is not the generic unexpected-row recovery case.
+
    The reviewed Cloudflare D1 `/query` contract accepts either a single
    `{sql, params}` object or a `{batch}` array of query objects. The exporter uses
    the documented `{batch}` form and requires one successful result per entry,
@@ -306,18 +314,19 @@ text matching is not the authorization proof.
    : "${RUN_ID:?set the exact export run ID}"
    export_run="$(gh run view "$RUN_ID" \
      --json conclusion,event,headSha,startedAt,updatedAt,workflowName)"
-   jq -e '.conclusion == "success" and .event == "workflow_dispatch" and
+   if ! gh variable delete CREDENTIAL_EXPORT_OPEN 2>/dev/null; then
+     remaining_export_switches="$(gh variable list --json name --jq \
+       '[.[].name | select(. == "CREDENTIAL_EXPORT_OPEN")] | length')"
+     [[ "$remaining_export_switches" == 0 ]]
+   fi
+   jq -e '(.conclusion == "success" or .conclusion == "failure") and
+     .event == "workflow_dispatch" and
      .workflowName == "Migrate production credential scope" and
      (.headSha | type == "string" and length == 40) and
      (.startedAt | type == "string" and length > 0) and
      (.updatedAt | type == "string" and length > 0)' <<<"$export_run" >/dev/null
    export_started_epoch="$(date -u -d "$(jq -r .startedAt <<<"$export_run")" +%s)"
    export_completed_epoch="$(date -u -d "$(jq -r .updatedAt <<<"$export_run")" +%s)"
-   if ! gh variable delete CREDENTIAL_EXPORT_OPEN 2>/dev/null; then
-     remaining_export_switches="$(gh variable list --json name --jq \
-       '[.[].name | select(. == "CREDENTIAL_EXPORT_OPEN")] | length')"
-     [[ "$remaining_export_switches" == 0 ]]
-   fi
    operator_token_file="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
    token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$operator_token_file" || true)"
    [[ "$token_count" == 1 ]]
@@ -351,7 +360,7 @@ text matching is not the authorization proof.
        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" >>"$migration_dir/incident.log"
      dispatch_export_recovery absent-table
    fi
-   jq -n '{sql:"select count(*) as total_rows, min(rowid) as transfer_rowid, min(created_at) as transfer_created_at from credential_migration_transfer"}' \
+   jq -n '{sql:"select count(*) as total_rows, min(rowid) as transfer_rowid, min(created_at) as transfer_created_at, min(ciphertext) as transfer_ciphertext from credential_migration_transfer"}' \
      >"$migration_dir/count.json"
    transfer_snapshot="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
      --connect-timeout 10 --max-time 30 --config - \
@@ -361,7 +370,8 @@ text matching is not the authorization proof.
      jq -cer 'select(.success == true) | .result[0] | select(.success == true) | .results[0] |
        select(.total_rows == 0 or
          (.total_rows == 1 and (.transfer_rowid | type == "number") and
-          (.transfer_created_at | type == "string" and length > 0)))')"
+          (.transfer_created_at | type == "string" and length > 0) and
+          (.transfer_ciphertext | type == "string" and length > 0)))')"
    transfer_rows="$(jq -r .total_rows <<<"$transfer_snapshot")"
    if [[ "$transfer_rows" == 0 ]]; then
      printf '%s export run %s created an empty transfer table\n' \
@@ -384,6 +394,7 @@ text matching is not the authorization proof.
    [[ "$transfer_rows" == 1 ]]
    snapshot_rowid="$(jq -er .transfer_rowid <<<"$transfer_snapshot")"
    snapshot_created_at="$(jq -er .transfer_created_at <<<"$transfer_snapshot")"
+   snapshot_ciphertext="$(jq -er .transfer_ciphertext <<<"$transfer_snapshot")"
    jq -n --arg run_id "$RUN_ID" '{
      sql:"select rowid as transfer_rowid, created_at as transfer_created_at, ciphertext, (select count(*) from credential_migration_transfer) as total_rows, (select count(*) from credential_migration_transfer where run_id = ?1) as expected_rows, (select count(*) from credential_migration_transfer where run_id <> ?1) as other_rows from credential_migration_transfer where run_id = ?1",
      params:[$run_id]
@@ -400,9 +411,14 @@ text matching is not the authorization proof.
          (.ciphertext | type) == "string" and (.ciphertext | length) > 0)')"
    [[ "$(jq -r .transfer_rowid <<<"$selected_row")" == "$snapshot_rowid" ]]
    [[ "$(jq -r .transfer_created_at <<<"$selected_row")" == "$snapshot_created_at" ]]
+   [[ "$(jq -r .ciphertext <<<"$selected_row")" == "$snapshot_ciphertext" ]]
    transfer_created_epoch="$(date -u -d "$snapshot_created_at UTC" +%s)"
-   (( transfer_created_epoch >= export_started_epoch &&
-      transfer_created_epoch <= export_completed_epoch ))
+   clock_skew_seconds=120
+   if (( transfer_created_epoch < export_started_epoch - clock_skew_seconds ||
+         transfer_created_epoch > export_completed_epoch + clock_skew_seconds )); then
+     echo "the sole expected transfer row is outside the export window plus 120s clock-skew tolerance; investigate clock skew without replaying export" >&2
+     exit 1
+   fi
    ciphertext="$(jq -r .ciphertext <<<"$selected_row")"
    printf '%s' "$ciphertext" | base64 --decode >"$migration_dir/credentials.bin"
    plaintext="$(openssl pkeyutl -decrypt \

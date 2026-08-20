@@ -20,6 +20,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [[ "$GITHUB_REPOSITORY" != "NikolayS/gitzette" ]]; then
+            echo "policy API readability is canonical-repository-only; skipping fork"
+            exit 0
+          fi
           production_environment="$(gh api \
             "repos/$GITHUB_REPOSITORY/environments/production")"
           jq -e 'has("can_admins_bypass")' <<<"$production_environment" >/dev/null

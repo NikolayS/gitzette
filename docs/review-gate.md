@@ -179,10 +179,16 @@ live Worker-bound application D1 database; no public Actions artifact is
 created. That encryption is the stored value's only confidentiality boundary:
 a Worker data-exposure path could leak ciphertext, but not plaintext, during
 the bootstrap window. It is not an authenticity boundary: a D1 write path could
-replace ciphertext. The operator therefore binds retrieval to the completed
-export run's time window and proves the row identity and timestamp unchanged
-across two reads before decrypting; the exact Worker account probe prevents an
-attacker-selected credential from being accepted for another account. Stored-value
+replace ciphertext. The operator therefore proves the row identity, timestamp,
+and full ciphertext unchanged across two reads and binds the timestamp to the
+export window with a 120-second cross-provider clock-skew tolerance. Those checks
+protect against row replacement, duplication, and between-read mutation; the
+account-ID equality pin plus exact-account Worker token probe is the control that
+rejects substituted ciphertext containing attacker-selected credentials. The
+committed Cloudflare account and D1 database IDs are deliberately non-confidential
+identifiers used for exact-target binding. The account ID remains in the encrypted
+pair only to preserve and verify the existing two-secret runtime interface; only
+the API token depends on OAEP for confidentiality. Stored-value
 verification uses a workflow-dispatch run pinned to the exact protected `main`
 tip. GitHub records that immutable run SHA before the production approval wait,
 and the workflow re-resolves `main` before and after approval. During the
