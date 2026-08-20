@@ -221,6 +221,10 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("dispatch_export_recovery absent-table");
     expect(migrationDoc).toContain("Production D1 REST batch preflight OK");
     expect(migrationDoc).toContain("select count(*) as total from sqlite_schema");
+    expect(migrationDoc).toContain("live Worker-bound application D1 database");
+    expect(migrationDoc).toContain('account_id="a3265e0d0db71fdece29365819452f00"');
+    expect(migrationDoc).toContain('d1_token="$(sed -n');
+    expect(migrationDoc).toContain("table-count.json select.json count.json drop.json prove-drop.json incident.log");
     expect(migrationDoc).toContain("sqlite_schema where type = \\u0027table\\u0027");
     expect(migrationDoc.indexOf("mandatory smoke test both succeed")).toBeLessThan(
       migrationDoc.indexOf('shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"'),
@@ -689,6 +693,7 @@ fi
   test("bounds the temporary production schema exclusion", async () => {
     const root = await mkdtemp(join(tmpdir(), "gitzette-transfer-schema-gate-"));
     const wrangler = join(root, "wrangler");
+    const fakeDate = join(root, "date");
     const temporaryRoot = join(root, "tmp");
     await mkdir(temporaryRoot);
     await Bun.write(wrangler, `#!/usr/bin/env bash
@@ -702,7 +707,22 @@ fi
 printf '[{"results":[{"total":%s}]}]\\n' "$total"
 `);
     await Bun.spawn(["chmod", "+x", wrangler]).exited;
-    const execute = (migrationState: string, tableCount: string, rowCount: string, wranglerStatus = "0"): Promise<number> =>
+    await Bun.write(fakeDate, `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *" -d "* ]]; then
+  printf '%s\\n' 100
+else
+  printf '%s\\n' "\${FAKE_NOW_EPOCH:-99}"
+fi
+`);
+    await Bun.spawn(["chmod", "+x", fakeDate]).exited;
+    const execute = (
+      migrationState: string,
+      tableCount: string,
+      rowCount: string,
+      wranglerStatus = "0",
+      nowEpoch = "99",
+    ): Promise<number> =>
       Bun.spawn(["bash", "-c", `
 set -euo pipefail
 source scripts/credential-migration-schema-exclusion.sh
@@ -718,6 +738,8 @@ credential_migration_schema_exclusion
           FAKE_TABLE_COUNT: tableCount,
           FAKE_ROW_COUNT: rowCount,
           FAKE_WRANGLER_STATUS: wranglerStatus,
+          FAKE_NOW_EPOCH: nowEpoch,
+          PATH: `${root}:${process.env.PATH ?? ""}`,
           TMPDIR: temporaryRoot,
         },
         stdout: "pipe", stderr: "pipe",
@@ -726,6 +748,7 @@ credential_migration_schema_exclusion
     expect(await execute("true", "0", "0")).toBe(0);
     expect(await execute("true", "1", "1")).toBe(0);
     expect(await execute("true", "1", "2")).toBe(1);
+    expect(await execute("true", "0", "0", "0", "100")).toBe(1);
     expect(await execute("yes", "0", "0")).toBe(1);
     expect(await execute("true", "0", "0", "9")).toBe(9);
     const exclusionFor = (migrationState: string): string => {

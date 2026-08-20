@@ -155,8 +155,11 @@ fails early because `scripts/check-release-tag-actor.sh` requires both
 `samo-agent` ID `280144521`. Production `prevent_self_review` remains a separate
 approval-time control.
 
-The exporter writes only RSA-encrypted ciphertext to a transient table in the
-private D1 database; no public Actions artifact is created. Stored-value
+The exporter writes only RSA-4096-OAEP ciphertext to a transient table in the
+live Worker-bound application D1 database; no public Actions artifact is
+created. That encryption is the stored value's only confidentiality boundary:
+a Worker data-exposure path could leak ciphertext, but not plaintext, during
+the bootstrap window. Stored-value
 verification uses a workflow-dispatch run pinned to the exact protected `main`
 tip. GitHub records that immutable run SHA before the production approval wait,
 and the workflow re-resolves `main` before and after approval. During the

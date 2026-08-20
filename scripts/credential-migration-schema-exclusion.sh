@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 
 credential_migration_assert_transfer_state() {
-  local migration_state
+  local bootstrap_expires_at deadline_epoch migration_state now_epoch
   migration_state="${CREDENTIAL_MIGRATION_IN_PROGRESS:-false}"
   if [[ "$migration_state" != true && "$migration_state" != false ]]; then
     echo "CREDENTIAL_MIGRATION_IN_PROGRESS must be exactly true or false" >&2
     return 1
   fi
   [[ "$migration_state" == true ]] || return 0
+
+  bootstrap_expires_at="2026-08-27T00:00:00Z"
+  deadline_epoch="$(date -u -d "$bootstrap_expires_at" +%s)"
+  now_epoch="$(date -u +%s)"
+  if (( now_epoch >= deadline_epoch )); then
+    echo "credential migration schema exclusion expired at $bootstrap_expires_at" >&2
+    return 1
+  fi
 
   (
     local temporary_dir table_json table_count rows_json row_count

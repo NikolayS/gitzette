@@ -4,8 +4,11 @@ This bootstrap moves the existing Cloudflare repository secrets into the
 protected `production` environment. Plaintext exists only inside the approved
 export job and a dedicated child Bash process on the operator host. The job
 encrypts it with the reviewed RSA-4096 public key and writes only ciphertext to
-a transient table in the private production D1 database. It never publishes an
-Actions artifact, log value, output, or environment value.
+a transient table in the live Worker-bound application D1 database. The only
+confidentiality control on that stored value is RSA-4096-OAEP: a Worker data
+exposure path could leak ciphertext, but not plaintext, during the bootstrap
+window. The migration never publishes an Actions artifact, log value, output,
+or environment value.
 
 The operator-held fallback token is restricted to D1, so it can retrieve and
 delete the ciphertext but cannot deploy Workers or replace the production
@@ -40,6 +43,12 @@ export MIGRATION_KEY_DIR="${MIGRATION_KEY_DIR:?set the existing private director
 export TMPDIR="$MIGRATION_KEY_DIR"
 export OPERATOR_TOKEN_FILE="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
 export RUN_ID="${RUN_ID:?set the exact retained export run ID}"
+token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$OPERATOR_TOKEN_FILE" || true)"
+[[ "$token_count" == 1 ]]
+d1_token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$OPERATOR_TOKEN_FILE")"
+[[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
+account_id="a3265e0d0db71fdece29365819452f00"
+database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
 migration_dir="$MIGRATION_KEY_DIR/run-$RUN_ID-1"
 test -s "$migration_dir/credentials.bin"
 test -s "$MIGRATION_KEY_DIR/production-migration-private.pem"
@@ -576,7 +585,7 @@ text matching is not the authorization proof.
        .result[0].success == true and (.result[0].results | length == 1) and
        .result[0].results[0].remaining == 0' >/dev/null
    unset plaintext ciphertext account_id api_token d1_token
-   for material in select.json count.json drop.json prove-drop.json; do
+   for material in table-count.json select.json count.json drop.json prove-drop.json incident.log; do
      [[ ! -f "$migration_dir/$material" ]] || shred -u "$migration_dir/$material"
    done
    test -s "$migration_dir/credentials.bin"
