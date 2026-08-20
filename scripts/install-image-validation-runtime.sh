@@ -6,6 +6,13 @@ if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 set -euo pipefail
 
+if [[ "${GITHUB_ACTIONS:-false}" == true ]] && {
+  [[ -n "${APT_ROOT+x}" ]] || [[ -n "${APT_SKIP_INSTALL+x}" ]]
+}; then
+  echo "apt runtime test hooks are forbidden in GitHub Actions" >&2
+  exit 1
+fi
+
 apt_root="${APT_ROOT:-/etc/apt}"
 apt_source_list="$(mktemp)"
 apt_source_copy="$(mktemp)"

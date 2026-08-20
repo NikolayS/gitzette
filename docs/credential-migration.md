@@ -390,13 +390,6 @@ text matching is not the authorization proof.
    [[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
    account_id="a3265e0d0db71fdece29365819452f00"
    transfer_database_name="gitzette-credential-transfer-2026-08"
-   database_id="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
-     --connect-timeout 10 --max-time 30 --config - \
-     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database?name=$transfer_database_name" \
-     <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -er --arg name "$transfer_database_name" '
-       select(.success == true) | [.result[] | select(.name == $name)] |
-       select(length == 1) | .[0].uuid')"
    migration_dir="$MIGRATION_KEY_DIR/run-$RUN_ID-1"
    install -d -m 0700 "$migration_dir"
    incident_record_file="${INCIDENT_RECORD_FILE:?set a durable operator incident record outside MIGRATION_KEY_DIR}"
@@ -406,6 +399,36 @@ text matching is not the authorization proof.
       "$incident_record_real" != "$migration_key_dir_real"/* ]]
    [[ -d "$(dirname "$incident_record_real")" && -w "$(dirname "$incident_record_real")" ]]
    : >>"$incident_record_real"
+   database_inventory="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
+     --connect-timeout 10 --max-time 30 --config - \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database?name=$transfer_database_name" \
+     <<<"header = \"Authorization: Bearer $d1_token\"")"
+   database_match_count="$(jq -er --arg name "$transfer_database_name" '
+     select(.success == true) | [.result[]? | select(.name == $name)] | length
+   ' <<<"$database_inventory")"
+   case "$database_match_count" in
+     0)
+       printf '%s export run %s requires absent-database recovery; nothing was consumed (no database, no table, no row)\n' \
+         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" >>"$incident_record_real"
+       bash scripts/check-credential-migration-environment.sh
+       bash scripts/check-credential-migration-inventory.sh
+       gh variable set CREDENTIAL_EXPORT_OPEN --body true
+       GH_TOKEN="$(gh auth token --user samo-agent)" \
+         gh workflow run migrate-production-credentials.yml --ref main -f operation=export
+       echo "absent-database recovery dispatched once; obtain and approve the new exact run in this operator session" >&2
+       echo "if that cannot complete immediately, run the step-3 close-and-audit block; never leave CREDENTIAL_EXPORT_OPEN set for more than five minutes" >&2
+       exit 1
+       ;;
+     1)
+       database_id="$(jq -er --arg name "$transfer_database_name" '
+         [.result[] | select(.name == $name)][0].uuid
+       ' <<<"$database_inventory")"
+       ;;
+     *)
+       echo "multiple D1 databases match $transfer_database_name; hard stop without dispatch" >&2
+       exit 1
+       ;;
+   esac
    dispatch_export_recovery() {
      local recovery_state="$1"
      printf '%s export run %s requires %s recovery\n' \
@@ -832,8 +855,9 @@ text matching is not the authorization proof.
    `scripts/get-github-environment.sh`, the permanent production environment
    apply/check pair, `scripts/install-image-validation-runtime.sh`, and the
    `policy-api-readability` job. Keep that named test under the existing
-   `scripts/*.test.ts` expansion in `test:runner`; deleting or renaming it must
-   make `test:all` fail until equivalent retained coverage is wired in.
+   `scripts/*.test.ts` expansion in `test:runner`; the teardown review must
+   reject deleting or renaming it until equivalent retained behavioral coverage
+   is wired in.
    Do not remove the temporary `main` production branch policy before the #67
    teardown merges. The fixed widened policy is the reviewed verification path,
    so its guard intentionally reports any early tightening as drift; #67 must
