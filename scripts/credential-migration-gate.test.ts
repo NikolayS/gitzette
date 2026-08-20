@@ -255,6 +255,16 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain('environment_secrets_before="$(gh api');
     expect(migrationDoc).not.toContain("secret_write_started");
     expect(migrationDoc).toContain('map(select(.name == $current.name))');
+    expect(migrationDoc).toContain('.updated_at // "") <');
+    expect(migrationDoc).not.toContain('.updated_at // "") <=');
+    const postCleanupStart = migrationDoc.indexOf("After cleanup, re-run the inventory audit");
+    const postCleanupEnd = migrationDoc.indexOf("The migration workflow fails closed", postCleanupStart);
+    const postCleanup = migrationDoc.slice(postCleanupStart, postCleanupEnd);
+    expect(postCleanup).toContain("bash scripts/check-credential-migration-inventory.sh");
+    expect(postCleanup).toContain("gh workflow run credential-migration-policy-guard.yml --ref main");
+    expect(postCleanup).toContain('gh run watch "$CLEANUP_GUARD_RUN_ID" --exit-status');
+    expect(postCleanup).toContain("repository-scoped\n   switch residue");
+    expect(postCleanup).toContain("environment-scoped\n   credential inventory");
 
     const policyGuard = await Bun.file(".github/workflows/credential-migration-policy-guard.yml").text();
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {
@@ -390,27 +400,42 @@ exit 8
     expect(deploy).toContain("tags:\n      - 'v*'");
     expect(deploy).not.toContain("workflow_dispatch");
     const productionConsumers: string[] = [];
+    const repositoryCredentialConsumers: string[] = [];
     for await (const name of new Bun.Glob("*.{yml,yaml}").scan(".github/workflows")) {
       const path = `.github/workflows/${name}`;
       const parsedWorkflow = Bun.YAML.parse(await Bun.file(path).text()) as {
-        jobs?: Record<string, { environment?: unknown }>;
+        jobs?: Record<string, { environment?: unknown; [key: string]: unknown }>;
       };
       for (const [jobName, job] of Object.entries(parsedWorkflow.jobs ?? {})) {
-        if (job.environment === undefined) continue;
-        const environment = typeof job.environment === "string"
+        const environment = job.environment === undefined ? undefined
+          : typeof job.environment === "string"
           ? job.environment
           : typeof job.environment === "object" && job.environment !== null &&
               typeof (job.environment as { name?: unknown }).name === "string"
             ? (job.environment as { name: string }).name
             : undefined;
-        expect(environment, `${path} job ${jobName} must use a literal environment name`).toBeDefined();
-        expect(environment).not.toContain("${{");
+        if (job.environment !== undefined) {
+          expect(environment, `${path} job ${jobName} must use a literal environment name`).toBeDefined();
+          expect(environment).not.toContain("${{");
+        }
         if (environment === "production") productionConsumers.push(path);
+        if (JSON.stringify(job).includes("secrets.CLOUDFLARE_")) {
+          const repositoryExporter = path === ".github/workflows/migrate-production-credentials.yml" &&
+            jobName === "export-encrypted-credentials";
+          expect(
+            environment === "production" || repositoryExporter,
+            `${path} job ${jobName} must use production or be the reviewed one-shot exporter`,
+          ).toBe(true);
+          if (repositoryExporter) repositoryCredentialConsumers.push(`${path}:${jobName}`);
+        }
       }
     }
     expect([...new Set(productionConsumers)].sort()).toEqual([
       ".github/workflows/deploy.yml",
       ".github/workflows/migrate-production-credentials.yml",
+    ]);
+    expect(repositoryCredentialConsumers).toEqual([
+      ".github/workflows/migrate-production-credentials.yml:export-encrypted-credentials",
     ]);
 
     const authorizeRun = parsed.jobs["authorize-export"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
@@ -654,7 +679,7 @@ fi
     const migrationDoc = await Bun.file("docs/credential-migration.md").text();
     const bashBlocks = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
       .map((match) => match[1] ?? "");
-    expect(bashBlocks).toHaveLength(13);
+    expect(bashBlocks).toHaveLength(14);
 
     const runbookRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-runbook-"));
     try {
@@ -705,7 +730,10 @@ fi
     await Bun.write(wrangler, `#!/usr/bin/env bash
 set -euo pipefail
 [[ "\${FAKE_WRANGLER_STATUS:-0}" == 0 ]] || exit "$FAKE_WRANGLER_STATUS"
-if [[ "$*" == *"type<>'table'"* ]]; then
+if [[ "$*" == *"SELECT sql FROM sqlite_schema"* ]]; then
+  jq -nc --arg sql "\${FAKE_TABLE_SQL:-create table credential_migration_transfer (run_id text primary key, ciphertext text not null, created_at text not null)}" '[{results:[{sql:$sql}]}]'
+  exit 0
+elif [[ "$*" == *"type<>'table'"* ]]; then
   total="\${FAKE_NON_TABLE_COUNT:-0}"
 elif [[ "$*" == *sqlite_schema* ]]; then
   total="\${FAKE_TABLE_COUNT:-0}"
@@ -731,6 +759,7 @@ fi
       nonTableCount = "0",
       wranglerStatus = "0",
       nowEpoch = "99",
+      tableSql = "create table credential_migration_transfer (run_id text primary key, ciphertext text not null, created_at text not null)",
     ): Promise<number> =>
       Bun.spawn(["bash", "-c", `
 set -euo pipefail
@@ -749,6 +778,7 @@ credential_migration_schema_exclusion
           FAKE_NON_TABLE_COUNT: nonTableCount,
           FAKE_WRANGLER_STATUS: wranglerStatus,
           FAKE_NOW_EPOCH: nowEpoch,
+          FAKE_TABLE_SQL: tableSql,
           PATH: `${root}:${process.env.PATH ?? ""}`,
           TMPDIR: temporaryRoot,
         },
@@ -757,6 +787,10 @@ credential_migration_schema_exclusion
     expect(await execute("false", "1", "2")).toBe(0);
     expect(await execute("true", "0", "0")).toBe(0);
     expect(await execute("true", "1", "1")).toBe(0);
+    expect(await execute(
+      "true", "1", "1", "0", "0", "99",
+      "create table credential_migration_transfer (run_id text primary key, ciphertext blob not null, created_at text not null)",
+    )).toBe(1);
     expect(await execute("true", "1", "2")).toBe(1);
     expect(await execute("true", "0", "0", "1")).toBe(1);
     expect(await execute("true", "0", "0", "0", "0", "100")).toBe(0);

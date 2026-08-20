@@ -18,7 +18,7 @@ credential_migration_assert_transfer_state() {
   fi
 
   (
-    local objects_json row_count rows_json table_count table_json temporary_dir
+    local canonical_sql ddl_json objects_json row_count rows_json table_count table_json temporary_dir
     temporary_dir="$(mktemp -d)"
     trap 'rm -rf "$temporary_dir"' EXIT
     table_json="$temporary_dir/table.json"
@@ -32,6 +32,20 @@ credential_migration_assert_transfer_state() {
     if ! table_count="$(jq -er '.[0].results[0].total | select(. == 0 or . == 1)' "$table_json")"; then
       echo "credential migration transfer table assertion returned invalid evidence" >&2
       return 1
+    fi
+    if [[ "$table_count" == 1 ]]; then
+      ddl_json="$temporary_dir/ddl.json"
+      # shellcheck disable=SC2154
+      "$wrangler_bin" d1 execute gitzette-db --remote --command \
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name='credential_migration_transfer'" \
+        --json >"$ddl_json"
+      canonical_sql="$(jq -er '.[0].results | select(length == 1) | .[0].sql | select(type == "string")' "$ddl_json" |
+        tr '\n' ' ' |
+        sed -E 's/[[:space:]]+/ /g; s/[[:space:]]*([(),])[[:space:]]*/\1/g; s/^ //; s/ $//')"
+      if [[ "$canonical_sql" != "create table credential_migration_transfer(run_id text primary key,ciphertext text not null,created_at text not null)" ]]; then
+        echo "credential migration transfer table DDL differs from the reviewed schema" >&2
+        return 1
+      fi
     fi
     # shellcheck disable=SC2154
     "$wrangler_bin" d1 execute gitzette-db --remote --command \

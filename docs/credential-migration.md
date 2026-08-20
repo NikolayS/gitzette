@@ -401,7 +401,7 @@ text matching is not the authorization proof.
    jq -e --argjson before "$environment_secrets_before" '
      ([.[].name] | sort) == ["CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN"] and
      all(.[]; . as $current |
-       ($before | map(select(.name == $current.name)) | .[0].updated_at // "") <=
+       ($before | map(select(.name == $current.name)) | .[0].updated_at // "") <
        $current.updated_at)' <<<"$environment_secrets" >/dev/null
    curl --fail --silent --show-error --connect-timeout 10 --max-time 20 --config - \
      "https://api.cloudflare.com/client/v4/accounts/$exported_account_id/workers/services/gitzette" \
@@ -543,10 +543,39 @@ text matching is not the authorization proof.
    masks the other. Policy drift is never an expected result. Its separate
    switch-residue job is expected red during an open export switch or the
    legitimate production approval wait.
-   After cleanup, explicitly dispatch that guard and require it to turn green;
+   After cleanup, re-run the inventory audit, then explicitly dispatch that
+   guard and require it to turn green:
+
+   ```bash
+   set -euo pipefail
+   REQUIRE_PRODUCTION_CREDENTIALS=true \
+   REQUIRE_NO_REPOSITORY_CREDENTIALS=true \
+     bash scripts/check-credential-migration-inventory.sh
+   previous_cleanup_guard_run_id="$(gh run list \
+     --workflow=credential-migration-policy-guard.yml --branch main \
+     --event workflow_dispatch --limit 1 \
+     --json databaseId --jq '.[0].databaseId // 0')"
+   gh workflow run credential-migration-policy-guard.yml --ref main
+   CLEANUP_GUARD_RUN_ID=""
+   for _ in {1..20}; do
+     candidate="$(gh run list --workflow=credential-migration-policy-guard.yml \
+       --branch main --event workflow_dispatch --limit 1 \
+       --json databaseId --jq '.[0].databaseId // 0')"
+     if [[ "$candidate" -gt "$previous_cleanup_guard_run_id" ]]; then
+       CLEANUP_GUARD_RUN_ID="$candidate"
+       break
+     fi
+     sleep 2
+   done
+   : "${CLEANUP_GUARD_RUN_ID:?new post-cleanup guard run was not observed}"
+   gh run watch "$CLEANUP_GUARD_RUN_ID" --exit-status
+   ```
+
    a red result after the verify run is no longer waiting is lingering
-   switch residue. The explicit post-cleanup dispatch, not schedule timing, is
-   authoritative for closing this operational window. GitHub schedules are
+   switch residue. The explicit post-cleanup dispatch proves repository-scoped
+   switch residue is absent; the inventory audit proves the environment-scoped
+   credential inventory. Together, not schedule timing, they close this
+   operational window. GitHub schedules are
    best-effort and may be delayed or disabled after repository inactivity. The
    green manual run does not prove final
    deletion of the bootstrap workflow or environment; the #67 teardown diff
