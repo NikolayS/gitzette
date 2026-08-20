@@ -610,9 +610,13 @@ text matching is not the authorization proof.
 
    The migration workflow fails closed at `2026-08-27T00:00:00Z` before initial
    authorization and again after either environment approval. The temporary
-   policy guard reports the same deadline. Any remaining bootstrap workflow or
-   policy then is an incident, not an extension; teardown must remove the guard
-   only together with the migration surface.
+   policy guard reports the same deadline. At that instant the production
+   environment checker requires the safer `v*`-only state, the production
+   environment apply script refuses to re-add `main`, and the production schema
+   helper prints an explicit expiry diagnostic and refuses its transfer-table
+   exclusion. Any remaining bootstrap workflow or policy then is an incident,
+   not an extension; teardown must remove the guard only together with the
+   migration surface.
 
 7. After successful read-capability verification, drop the transfer table and
    remove nonessential local material, but retain the encrypted private key and

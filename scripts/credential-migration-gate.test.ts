@@ -169,6 +169,8 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("migration-policy` is expected red with exit 4");
     expect(migrationDoc).toContain("D1 `/query` contract accepts either a single");
     expect(productionMigrationDoc).toContain("CREDENTIAL_MIGRATION_IN_PROGRESS=true");
+    expect(productionMigrationDoc).toContain("expires at `2026-08-27T00:00:00Z`");
+    expect(productionMigrationDoc).toContain("explicit expiry diagnostic and refuses the exclusion");
     expect(migrationDoc).toContain("prefix every manual `bun run db:migrate`");
     expect(readme).not.toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
     expect(productionMigrationDoc).toContain("bootstrap still requires a completely empty database");
@@ -192,6 +194,7 @@ describe("one-shot credential migration boundary", () => {
     expect(schemaExclusion).toContain(". >= 0 and . <= 1");
     expect(schemaExclusion).toContain("type<>'table'");
     expect(schemaExclusion).toContain("ordinary strict schema");
+    expect(schemaExclusion).toContain("refusing the temporary exclusion");
     expect(schemaExclusion).toContain("credential_migration_transfer");
     expect(workflow).not.toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
     const deployWorkflow = await Bun.file(".github/workflows/deploy.yml").text();
@@ -282,7 +285,7 @@ describe("one-shot credential migration boundary", () => {
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
     expect(policyGuard).toContain("bash scripts/check-production-environment.sh");
     expect(policyGuard).toContain("bash scripts/check-credential-migration-environment.sh");
-    expect(policyGuard).toContain("CRITICAL: production no longer admits exactly protected main and release tags");
+    expect(policyGuard).toContain("CRITICAL: production ref policy is outside the reviewed deadline-bound main plus release-tag policy");
     expect(policyGuard).toContain("GUARD UNREADABLE: production environment API evidence could not be retrieved");
     expect(policyGuard).toContain("CRITICAL: production environment is missing");
     expect(policyGuard).toContain("CRITICAL: credential-migration no longer requires Nik-only approval with self-review blocked");
@@ -800,7 +803,7 @@ credential_migration_schema_exclusion
     )).toBe(1);
     expect(await execute("true", "1", "2")).toBe(1);
     expect(await execute("true", "0", "0", "1")).toBe(1);
-    expect(await execute("true", "0", "0", "0", "0", "100")).toBe(0);
+    expect(await execute("true", "0", "0", "0", "0", "100")).toBe(1);
     expect(await execute("yes", "0", "0")).toBe(1);
     expect(await execute("true", "0", "0", "0", "9")).toBe(9);
     const exclusionFor = (migrationState: string, nowEpoch = "99"): string => {
@@ -820,10 +823,19 @@ credential_migration_schema_exclusion
     };
     const disabledExclusion = exclusionFor("false");
     const enabledExclusion = exclusionFor("true");
-    const expiredExclusion = exclusionFor("true", "100");
     expect(disabledExclusion).toBe("");
     expect(enabledExclusion).toBe(" AND NOT (type = 'table' AND name = 'credential_migration_transfer')");
-    expect(expiredExclusion).toBe("");
+    const expiredExclusion = Bun.spawnSync({
+      cmd: ["bash", "-c", "source scripts/credential-migration-schema-exclusion.sh; credential_migration_schema_exclusion"],
+      cwd: process.cwd(),
+      env: {
+        ...process.env, CREDENTIAL_MIGRATION_IN_PROGRESS: "true", FAKE_NOW_EPOCH: "100",
+        PATH: `${root}:${process.env.PATH ?? ""}`,
+      },
+      stdout: "pipe", stderr: "pipe",
+    });
+    expect(expiredExclusion.exitCode).toBe(1);
+    expect(new TextDecoder().decode(expiredExclusion.stderr)).toContain("schema exclusion expired");
     const database = new Database(":memory:");
     database.exec("create table d1_migrations(id integer); create table credential_migration_transfer(run_id text); create table retained_application_table(id integer)");
     const visibleTables = (exclusion: string): string[] => database.query(
@@ -999,6 +1011,8 @@ case "$endpoint" in
       exit 1
     elif [[ "\${FAKE_LIVE_POLICY:-default}" == empty ]]; then
       printf '%s\\n' '[{"branch_policies":[]}]'
+    elif [[ "\${FAKE_LIVE_POLICY:-default}" == v-only ]]; then
+      printf '%s\\n' '[{"branch_policies":[{"name":"v*","type":"tag"}]}]'
     else
       printf '%s\\n' '[{"branch_policies":[{"name":"main","type":"branch"},{"name":"v*","type":"tag"}]}]'
     fi
@@ -1007,10 +1021,16 @@ case "$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (live: string, apiError = "none"): Promise<{ code: number; stdout: string; stderr: string }> => {
+    const date = join(bin, "date");
+    await Bun.write(date, `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *" -d "* ]]; then printf '100\\n'; else printf '%s\\n' "\${FAKE_NOW_EPOCH:-99}"; fi
+`);
+    await Bun.spawn(["chmod", "+x", date]).exited;
+    const run = async (live: string, apiError = "none", nowEpoch = "99"): Promise<{ code: number; stdout: string; stderr: string }> => {
       const child = Bun.spawn(["bash", "scripts/check-production-environment.sh"], {
         cwd: process.cwd(),
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_LIVE_POLICY: live, FAKE_API_ERROR: apiError },
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_LIVE_POLICY: live, FAKE_API_ERROR: apiError, FAKE_NOW_EPOCH: nowEpoch },
         stdout: "pipe", stderr: "pipe",
       });
       const [code, stdout, stderr] = await Promise.all([
@@ -1021,6 +1041,11 @@ esac
     const normal = await run("default");
     expect(normal.code).toBe(0);
     expect(normal.stdout).toContain("admitted refs: main, v*");
+    const expiredWidened = await run("default", "none", "100");
+    expect(expiredWidened.code).toBe(1);
+    const expiredNarrowed = await run("v-only", "none", "100");
+    expect(expiredNarrowed.code).toBe(0);
+    expect(expiredNarrowed.stdout).toContain("admitted refs: v*");
     const empty = await run("empty");
     expect(empty.code).toBe(1);
     expect(empty.stderr).toContain('"branch_policies":[]');
@@ -1090,11 +1115,17 @@ case "$method:$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (adminBypass = false, create = false): Promise<number> => Bun.spawn([
+    const date = join(bin, "date");
+    await Bun.write(date, `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *" -d "* ]]; then printf '100\\n'; else printf '%s\\n' "\${FAKE_NOW_EPOCH:-99}"; fi
+`);
+    await Bun.spawn(["chmod", "+x", date]).exited;
+    const run = async (adminBypass = false, create = false, nowEpoch = "99"): Promise<number> => Bun.spawn([
       "bash", "scripts/apply-production-environment.sh",
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state, FAKE_ADMIN_BYPASS: String(adminBypass), FAKE_CREATE: String(create) },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state, FAKE_ADMIN_BYPASS: String(adminBypass), FAKE_CREATE: String(create), FAKE_NOW_EPOCH: nowEpoch },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await run()).toBe(0);
@@ -1107,8 +1138,11 @@ esac
     await rm(`${state}.put-count`, { force: true });
     expect(await run(false, true)).toBe(1);
     expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
+    expect(await run(false, false, "100")).toBe(1);
+    expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
 
     const applySource = await Bun.file("scripts/apply-production-environment.sh").text();
+    expect(applySource).toContain("temporary production main admission expired");
     const policyBlock = applySource.slice(
       applySource.indexOf('expected_policies='),
       applySource.lastIndexOf('\n"$root/scripts/check-production-environment.sh"'),
@@ -1328,15 +1362,20 @@ case "$endpoint" in
     fi
     bypass=false; [[ "\${FAKE_MODE:-correct}" != missing && "\${FAKE_MODE:-correct}" != bypass ]] || bypass=true
     protected=false; custom=true
+    if [[ ! -f "$FAKE_RECORD/installed" && "\${FAKE_MODE:-correct}" == protected-transition ]]; then
+      protected=true; custom=false
+    fi
+    if [[ ! -f "$FAKE_RECORD/installed" && "\${FAKE_MODE:-correct}" == null-transition ]]; then
+      jq -nc --argjson bypass "$bypass" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}}]}],deployment_branch_policy:null}'
+      exit 0
+    fi
     jq -nc --argjson bypass "$bypass" --argjson protected "$protected" --argjson custom "$custom" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}}]}],deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}}'
     ;;
   *environments?per_page=100) printf '%s\n' '[{"environments":[]}]' ;;
   *deployment-branch-policies*)
     count_file="$FAKE_RECORD/policy-count"; count=0; [[ ! -f "$count_file" ]] || count="$(<"$count_file")"; count=$((count + 1)); printf '%s' "$count" >"$count_file"
-    if [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 1 ]]; then
+    if [[ ("\${FAKE_MODE:-correct}" == stale || "\${FAKE_MODE:-correct}" == protected-transition || "\${FAKE_MODE:-correct}" == null-transition) && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[{"id":9,"name":"other","type":"branch"}]}]'
-    elif [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 2 ]]; then
-      printf '%s\\n' '[{"branch_policies":[]}]'
     elif [[ "\${FAKE_MODE:-correct}" == missing && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[]}]'
     elif [[ "\${FAKE_MODE:-correct}" == duplicate && "$count" -eq 1 ]]; then
@@ -1365,6 +1404,13 @@ esac
     expect(JSON.parse(await Bun.file(join(stale, "put.json")).text()).can_admins_bypass).toBeUndefined();
     expect(await Bun.file(join(stale, "delete.log")).text()).toContain("deployment-branch-policies/9");
     expect(await Bun.file(join(stale, "post.log")).text()).toContain("name=main");
+
+    for (const mode of ["protected-transition", "null-transition"]) {
+      const record = join(root, mode);
+      expect(await run(mode, record)).toBe(0);
+      expect(await Bun.file(join(record, "delete.log")).text()).toContain("deployment-branch-policies/9");
+      expect(await Bun.file(join(record, "post.log")).text()).toContain("name=main");
+    }
 
     const correct = join(root, "correct");
     expect(await run("correct", correct)).toBe(0);

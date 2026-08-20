@@ -17,7 +17,17 @@ if [[ "$#" -ne 0 ]]; then
   exit 2
 fi
 policy="$root/config/production-environment.json"
-expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
+bootstrap_expires_at="2026-08-27T00:00:00Z"
+deadline_epoch="$(date -u -d "$bootstrap_expires_at" +%s)"
+now_epoch="$(date -u +%s)"
+if (( now_epoch >= deadline_epoch )); then
+  expected="$(jq -Sc '
+    .branch_policies |= map(select(.name != "main" or .type != "branch")) |
+    .reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)
+  ' "$policy")"
+else
+  expected="$(jq -Sc '.reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)' "$policy")"
+fi
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
 set +e
@@ -68,6 +78,6 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-policy_names="$(jq -r 'if .deployment_branch_policy.protected_branches then "protected branches" else .branch_policies | map(.name) | join(", ") end' "$policy")"
-reviewer_names="$(jq -r '.reviewers | map(.login) | join(", ")' "$policy")"
+policy_names="$(jq -r 'if .deployment_branch_policy.protected_branches then "protected branches" else .branch_policies | map(.name) | join(", ") end' <<<"$expected")"
+reviewer_names="$(jq -r '.reviewers | map(.login) | join(", ")' <<<"$expected")"
 echo "Production environment OK: required reviewers $reviewer_names; admitted refs: $policy_names"
