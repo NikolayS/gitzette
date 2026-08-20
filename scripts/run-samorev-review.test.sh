@@ -87,7 +87,15 @@ case "${FAKE_MODE:-success}" in
   *) exit 0 ;;
 esac
 EOF
-chmod +x "$test_dir/bin/git" "$test_dir/bin/gh" "$test_dir/bin/bun"
+
+cat >"$test_dir/bin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+log_file="${FAKE_RECORD:?}.log"
+: >"$log_file"
+printf '%s\n' "$log_file"
+EOF
+chmod +x "$test_dir/bin/git" "$test_dir/bin/gh" "$test_dir/bin/bun" "$test_dir/bin/mktemp"
 
 run_case() {
   mode="$1"
@@ -112,6 +120,10 @@ run_case() {
     echo "$mode published before the publisher boundary passed" >&2
     exit 1
   fi
+  [[ ! -e "$record.log" ]] || {
+    echo "$mode left the reviewer log behind" >&2
+    exit 1
+  }
 }
 
 for mode in wrong-path wrong-event fork wrong-head wrong-pr wrong-job reviewer-sha reviewer-dirty; do

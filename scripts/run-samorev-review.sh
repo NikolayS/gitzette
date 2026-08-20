@@ -55,9 +55,11 @@ publish() {
 }
 
 terminal_published=false
+log_file=""
 # shellcheck disable=SC2317 # invoked by the EXIT trap
 cleanup() {
   rc=$?
+  rm -f "${log_file:-}"
   if [[ "$terminal_published" != true ]]; then
     publish error "samorev reviewer terminated without a terminal verdict" || true
   fi

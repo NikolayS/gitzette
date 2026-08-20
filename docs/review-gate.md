@@ -84,9 +84,10 @@ zero. The active `main-samo-only-updates` ruleset permits only immutable user ID
 repository administrator can turn forged contexts into a merge. Repository
 auto-merge is disabled and audited. The pre-apply inventory requires the only
 administrator to be NikolayS (`1345402`). After mutation, the apply script
-requires the administrator's `current_user_can_bypass` to be `never`, then
-queries both rulesets with the non-admin `samo-agent` token and requires
-`current_user_can_bypass` to be `always`. Merge does not authorize a release:
+requires the administrator's `current_user_can_bypass` to be `never`. A
+separate shell/session holding only the non-admin `samo-agent` token then
+queries both rulesets and requires `current_user_can_bypass` to be `always`.
+Merge does not authorize a release:
 the tag workflow revalidates the external exact-head evidence, and its
 deployment cannot read production credentials without a new approval from Nik
 in the non-bypassable `production` environment. Repository Actions cannot mint
@@ -220,9 +221,14 @@ permitted `main` update, so compromise of that external credential would
 collapse those two controls into one principal. Formal GitHub approval is not
 reintroduced as ceremony. The compensating controls are that the credential is
 absent from repository and environment secrets, repository Actions cannot use
-it, exact-head CI and the protected-base publisher remain mandatory, the
-administrator performs the readiness and live-policy audits, and Nik remains
-the distinct non-bypassable production approver. The repository-scoped
+it, the administrator-only policy apply never loads it, the non-admin boundary
+audit runs separately with only the `samo-agent` credential, exact-head CI and
+the protected-base publisher remain mandatory, the administrator performs the
+readiness and live-policy audits, and Nik remains the distinct non-bypassable
+production approver. An operator who deliberately combines both credentials on
+one host could still rewrite policy and then update `main`; the mandatory
+administrator re-audit before every merge and release tag is the detection
+control for that accepted host-compromise risk. The repository-scoped
 Cloudflare-secret exposure is closed immediately after this bootstrap merges:
 apply both environments first, export once, delete repository copies before
 stored-value verification, and merge #67 immediately after verification.
@@ -309,6 +315,10 @@ same SHA. The apply creates and verifies the external-user update ruleset and th
 immutable-user release-tag ruleset before it
 changes formal approval requirements to zero/false, and keeps admin enforcement,
 required technical statuses, required conversations, and force-push/deletion denial.
+The apply is administrator-only and deliberately does not load the `samo-agent`
+credential. After it completes, open a separate shell/session containing only
+the `samo-agent` token and run
+`GH_TOKEN="$samo_token" bash scripts/check-branch-protection-nonadmin.sh`.
 
 ## Full-delta review proof
 

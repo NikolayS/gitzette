@@ -38,6 +38,20 @@ api_normalized_rulesets="$(jq -c 'map(.rules |= map(if .type == "update" then de
 actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$api_normalized_rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
 [[ "$actual" == "$expected" ]] || { echo "GitHub-defaulted update rules did not normalize to policy" >&2; exit 1; }
 
+unreadable_rulesets="$(jq -c '.[0].bypass_actors=null' <<<"$rulesets")"
+if unreadable_error="$(jq -nSc --argjson protection "$protection" \
+  --argjson workflow_permissions "$workflow_permissions" \
+  --argjson rulesets "$unreadable_rulesets" \
+  -f "$root/scripts/normalize-branch-protection.jq" 2>&1)"; then
+  echo "unreadable ruleset bypass actors unexpectedly normalized" >&2
+  exit 1
+fi
+grep -q 'ruleset bypass_actors is not readable; this audit requires administrator access' \
+  <<<"$unreadable_error" || {
+  echo "unreadable ruleset bypass actors lacked the actionable diagnostic" >&2
+  exit 1
+}
+
 mutated="$(jq -c '.enforce_admins.enabled=false' <<<"$protection")"
 actual="$(jq -nSc --argjson protection "$mutated" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
 [[ "$actual" != "$expected" ]] || { echo "enforce_admins drift was not detected" >&2; exit 1; }

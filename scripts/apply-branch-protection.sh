@@ -61,12 +61,6 @@ while IFS= read -r ruleset_payload; do
   fi
 done < <(jq -c '.repository_rulesets[]' "$policy")
 
-# Prove the effective boundary too: the exact non-admin samo-agent identity must
-# be the bypass actor for both protected main updates and release tags.
-samo_token="$(env -u GH_TOKEN gh auth token --user samo-agent)"
-GH_TOKEN="$samo_token" GITHUB_REPOSITORY="$repository" \
-  "$root/scripts/check-branch-protection-nonadmin.sh"
-
 jq '.actions_workflow_permissions' "$policy" | gh api --method PUT \
   "repos/$repository/actions/permissions/workflow" --input - --silent
 

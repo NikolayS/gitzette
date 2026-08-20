@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2154 # wrangler_bin is set by require-wrangler.sh
 set -euo pipefail
-# shellcheck source=scripts/require-wrangler.sh
+# shellcheck disable=SC1091 # resolved relative to this script at runtime
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
@@ -17,8 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 local_wrangler d1 migrations apply gitzette-db --local --persist-to "$migration_state" >/dev/null
-schema_exclusions="'d1_migrations'"
-query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ($schema_exclusions) ORDER BY type,name"
+query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY type,name"
 local_wrangler d1 execute gitzette-db --local --persist-to "$migration_state" --command "$query" --json >"$migration_state/schema.json"
 "$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
 bun scripts/schema-equivalence.ts "$migration_state/schema.json" "$remote_json"

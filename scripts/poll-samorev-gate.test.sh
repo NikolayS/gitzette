@@ -44,6 +44,17 @@ grep -q 'REPOSITORY and GITHUB_REPOSITORY must name the same repository' \
   exit 1
 }
 
+actions_hook_error="$test_dir/actions-hook.err"
+if GITHUB_ACTIONS=true bash "$root/scripts/poll-samorev-gate.sh" \
+  >/dev/null 2>"$actions_hook_error"; then
+  echo "test hooks unexpectedly ran in GitHub Actions" >&2
+  exit 1
+fi
+grep -q 'samorev test hooks are forbidden in GitHub Actions' "$actions_hook_error" || {
+  echo "GitHub Actions test-hook refusal lacked its explicit diagnostic" >&2
+  exit 1
+}
+
 run_case() {
   name="$1"
   expected_rc="$2"

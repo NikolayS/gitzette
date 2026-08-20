@@ -33,6 +33,9 @@
   block_creations: (.block_creations.enabled // false),
   restrictions: (.restrictions // null),
   repository_rulesets: ($rulesets | map(
+    if .bypass_actors == null then
+      error("ruleset bypass_actors is not readable; this audit requires administrator access")
+    else . end |
     {name,target,enforcement,bypass_actors,conditions,rules} |
     .bypass_actors |= sort_by(.actor_type, .actor_id) |
     .rules |= map(

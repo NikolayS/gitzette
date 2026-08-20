@@ -16,6 +16,12 @@ samorev_target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_R
 max_attempts="${SAMOREV_MAX_ATTEMPTS:-60}"
 sleep_seconds="${SAMOREV_SLEEP_SECONDS:-30}"
 
+if [[ "${GITHUB_ACTIONS:-false}" == true ]] &&
+  { [[ -n "${SAMOREV_PUBLISH_LOG:-}" ]] || [[ -n "${SAMOREV_FETCH_FIXTURE:-}" ]]; }; then
+  echo "samorev test hooks are forbidden in GitHub Actions" >&2
+  exit 1
+fi
+
 publish_gate() {
   state="$1"
   description="$2"

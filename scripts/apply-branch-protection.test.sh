@@ -180,8 +180,6 @@ fi
 assert_file_contains "$test_dir/wrong-actor.err" 'not the complete reviewed main and release-tag policy'
 run_failure admin-bypass
 run_failure mismatch
-run_failure nonadmin-main-denied
-assert_file_contains "$test_dir/nonadmin-main-denied.err" 'lacks the required always-bypass'
 
 run_nonadmin_failure() {
   mode="$1"

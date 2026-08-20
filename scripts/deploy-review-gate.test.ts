@@ -90,6 +90,10 @@ describe("deploy review revalidation", () => {
       applyBranchPolicy.indexOf("actions/permissions/workflow"),
     );
     expect(applyBranchPolicy).toContain("current_user_can_bypass");
+    expect(applyBranchPolicy).not.toContain("auth token --user samo-agent");
+    expect(applyBranchPolicy).not.toContain("check-branch-protection-nonadmin.sh");
+    expect(documentation).toContain("administrator-only and deliberately does not load the `samo-agent`");
+    expect(documentation).toContain("separate shell/session containing only");
     expect(checkNonadminBoundary.indexOf("select(length == 2 and")).toBeLessThan(
       checkNonadminBoundary.indexOf("while IFS= read -r ruleset_name"),
     );
