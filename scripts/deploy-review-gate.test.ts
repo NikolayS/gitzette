@@ -110,9 +110,7 @@ describe("deploy review revalidation", () => {
     );
     for (const reviewedPath of [
       "`.github/workflows/**`",
-      "`scripts/check-*.sh`",
-      "`scripts/merge-reviewed-head.sh`",
-      "`scripts/apply-*.sh`",
+      "`scripts/*.sh`",
       "`scripts/normalize-branch-protection.jq`",
       "`config/main-branch-protection.json`",
       "`config/*-environment.json`",
@@ -205,18 +203,19 @@ jq -nc --arg base "$base" --arg merged "$merged" --arg merge_sha "$merge_sha" \
 `);
     await Bun.spawn(["chmod", "+x", join(bin, "git"), join(bin, "gh")]).exited;
     const sha = "a".repeat(40);
-    const execute = (mode: string, mainSha = sha): Promise<number> => Bun.spawn([
+    const execute = (mode: string, mainSha = sha, tagPusherId = "280144521"): Promise<number> => Bun.spawn([
       "bash", "-c", runBlock,
     ], {
       cwd: process.cwd(),
       env: {
         ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_SHA: sha,
         FAKE_MAIN_SHA: mainSha, FAKE_MODE: mode, GITHUB_REPOSITORY: "example/gitzette",
-        GITHUB_RUN_ID: "77", TAG_PUSHER_ID: "280144521",
+        GITHUB_RUN_ID: "77", TAG_PUSHER_ID: tagPusherId,
       },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await execute("success")).toBe(0);
+    expect(await execute("success", sha, "1345402")).not.toBe(0);
     expect(await Bun.spawn(["bash", "-c", runBlock], {
       cwd: process.cwd(),
       env: {

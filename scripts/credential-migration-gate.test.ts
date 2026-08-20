@@ -864,12 +864,16 @@ ${closeSwitch}`,
 set -euo pipefail
 case "\${1:-}" in
   sed) [[ "\${FAKE_SUDO_MODE:-normal}" != no-op-sed ]] || exit 0 ;;
-  grep) [[ "\${FAKE_SUDO_MODE:-normal}" != grep-error ]] || exit 2 ;;
   apt-get|install) printf '%s\\n' "$*" >>"$FAKE_SUDO_RECORD"; exit 0 ;;
 esac
 exec "$@"
 `);
-    await Bun.spawn(["chmod", "+x", join(aptBin, "sudo")]).exited;
+    await Bun.write(join(aptBin, "grep"), `#!/usr/bin/env bash
+set -euo pipefail
+[[ "\${FAKE_SUDO_MODE:-normal}" != grep-error ]] || exit 2
+exec /usr/bin/grep "$@"
+`);
+    await Bun.spawn(["chmod", "+x", join(aptBin, "sudo"), join(aptBin, "grep")]).exited;
     const executeImageRuntime = async (
       fixture: string,
       options: { unrecognized?: string; mode?: string; skipInstall?: boolean } = {},

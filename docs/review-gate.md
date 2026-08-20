@@ -75,8 +75,7 @@ prove both independently validated production names are installed; the external
 readiness operator runs that inventory check with repository-administration
 read access. Before
 publishing success, the external reviewer must inspect every changed
-`.github/workflows/**` file, `scripts/check-*.sh`,
-`scripts/merge-reviewed-head.sh`, `scripts/apply-*.sh`,
+`.github/workflows/**` file, every `scripts/*.sh` file,
 `scripts/normalize-branch-protection.jq`,
 `config/main-branch-protection.json`, and `config/*-environment.json` in the
 full base-to-head delta. `.github/CODEOWNERS` still
@@ -308,7 +307,7 @@ unset SAMO_TOKEN
 
 The wrapper pins samorev commit `1397e976`, resolves the exact PR head, verifies
 the protected-base publisher job, excludes only that exact pending self-check,
-and publishes `samorev` pending plus a terminal success/failure/error under
+and publishes a terminal `samorev` success/failure/error under
 immutable user ID `280144521`. Every status targets the exact publisher run;
 the PR-time evaluator and release gate both reject another target URL.
 

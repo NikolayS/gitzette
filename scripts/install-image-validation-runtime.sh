@@ -18,7 +18,7 @@ if [[ "${#apt_sources[@]}" -eq 0 ]]; then
 fi
 for apt_source in "${apt_sources[@]}"; do
   sudo sed -Ei 's#https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$apt_source"
-  if sudo grep -Eq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_source"; then
+  if grep -Eq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_source"; then
     echo "Azure Ubuntu mirror rewrite did not take effect in $apt_source" >&2
     exit 1
   else
@@ -29,7 +29,7 @@ for apt_source in "${apt_sources[@]}"; do
     fi
   fi
 done
-if sudo grep -REq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_root"; then
+if grep -REq 'https?://([a-z0-9.-]*\.)?azure\.archive\.ubuntu\.com/ubuntu' "$apt_root"; then
   echo "an unrecognized apt source still references the Azure Ubuntu mirror" >&2
   exit 1
 else

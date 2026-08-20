@@ -147,5 +147,9 @@ run_case success 0 success
 run_case report 1 failure
 run_case crash 1 error
 run_case head-change 1 error
+if grep -q 'publish pending' "$root/scripts/run-samorev-review.sh"; then
+  echo "samorev wrapper must not publish a self-observable pending status" >&2
+  exit 1
+fi
 
 echo "samorev reviewer wrapper boundary and terminal mapping tests passed"
