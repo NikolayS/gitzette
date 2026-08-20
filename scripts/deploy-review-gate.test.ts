@@ -32,6 +32,7 @@ describe("deploy review revalidation", () => {
     expect(gate).toContain("sort_by(.created_at, .id) | last");
     expect(gate).toContain('.creator.id == 280144521');
     expect(gate).toContain("gh api --paginate --slurp");
+    expect(gate.match(/gh api --paginate --slurp/g)).toHaveLength(3);
     expect(gate).not.toContain('.creator.login == "samo-agent"');
     expect(codeowners.trim()).toBe("* @samo-agent");
     expect(branchPolicy.repository_rulesets).toEqual([
@@ -180,27 +181,27 @@ if [[ "$mode" == api-error ]]; then echo "fake API failure" >&2; exit 1; fi
 case "$endpoint" in
   *actions/workflows/ci.yml/runs*)
     if [[ "$mode" == no-ci-path ]]; then
-      jq -nc --arg sha "$FAKE_SHA" '{workflow_runs:[{id:2,path:".github/workflows/attacker.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:"success"}]}'
+      jq -nc --arg sha "$FAKE_SHA" '[{workflow_runs:[{id:2,path:".github/workflows/attacker.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:"success"}]}]'
     else
       latest=success; [[ "$mode" != latest-ci-failure ]] || latest=failure
       base=main; [[ "$mode" != wrong-ci-base ]] || base=attacker
       repository=example/gitzette; [[ "$mode" != fork-ci-head ]] || repository=attacker/gitzette
-      jq -nc --arg sha "$FAKE_SHA" --arg latest "$latest" --arg base "$base" --arg repository "$repository" '{workflow_runs:[
+      jq -nc --arg sha "$FAKE_SHA" --arg latest "$latest" --arg base "$base" --arg repository "$repository" '[{workflow_runs:[
         {id:1,path:".github/workflows/ci.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-01T00:00:00Z",conclusion:"success",head_repository:{full_name:"example/gitzette"},pull_requests:[{base:{ref:"main",repo:{url:"https://api.github.com/repos/example/gitzette"}},head:{sha:$sha,repo:{url:"https://api.github.com/repos/example/gitzette"}}}]},
-        {id:2,path:".github/workflows/ci.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:$latest,head_repository:{full_name:$repository},pull_requests:[{base:{ref:$base,repo:{url:"https://api.github.com/repos/example/gitzette"}},head:{sha:$sha,repo:{url:("https://api.github.com/repos/" + $repository)}}}]}]}'
+        {id:2,path:".github/workflows/ci.yml",event:"pull_request",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:$latest,head_repository:{full_name:$repository},pull_requests:[{base:{ref:$base,repo:{url:"https://api.github.com/repos/example/gitzette"}},head:{sha:$sha,repo:{url:("https://api.github.com/repos/" + $repository)}}}]}]}]'
     fi
     ;;
   *actions/workflows/samorev-gate.yml/runs*)
     if [[ "$mode" == no-gate-path ]]; then
-      jq -nc --arg sha "$FAKE_SHA" '{workflow_runs:[{id:2,path:".github/workflows/attacker.yml",event:"pull_request_target",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:"success"}]}'
+      jq -nc --arg sha "$FAKE_SHA" '[{workflow_runs:[{id:2,path:".github/workflows/attacker.yml",event:"pull_request_target",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",conclusion:"success"}]}]'
     else
       latest=success
       [[ "$mode" != latest-gate-failure && "$mode" != later-gate-failure ]] || latest=failure
       base=main; [[ "$mode" != wrong-base ]] || base=attacker
       repository=example/gitzette; [[ "$mode" != fork-head ]] || repository=attacker/gitzette
-      jq -nc --arg sha "$FAKE_SHA" --arg latest "$latest" --arg base "$base" --arg repository "$repository" '{workflow_runs:[
+      jq -nc --arg sha "$FAKE_SHA" --arg latest "$latest" --arg base "$base" --arg repository "$repository" '[{workflow_runs:[
         {id:1,path:".github/workflows/samorev-gate.yml",event:"pull_request_target",head_sha:$sha,created_at:"2026-01-01T00:00:00Z",run_started_at:"2026-01-01T00:00:00Z",html_url:"https://github.com/example/gitzette/actions/runs/1",conclusion:"success",head_repository:{full_name:"example/gitzette"},pull_requests:[{base:{ref:"main",repo:{url:"https://api.github.com/repos/example/gitzette"}},head:{sha:$sha,repo:{url:"https://api.github.com/repos/example/gitzette"}}}]},
-        {id:2,path:".github/workflows/samorev-gate.yml",event:"pull_request_target",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",run_started_at:"2026-01-02T00:00:00Z",html_url:"https://github.com/example/gitzette/actions/runs/2",conclusion:$latest,head_repository:{full_name:$repository},pull_requests:[{base:{ref:$base,repo:{url:"https://api.github.com/repos/example/gitzette"}},head:{sha:$sha,repo:{url:("https://api.github.com/repos/" + $repository)}}}]}]}'
+        {id:2,path:".github/workflows/samorev-gate.yml",event:"pull_request_target",head_sha:$sha,created_at:"2026-01-02T00:00:00Z",run_started_at:"2026-01-02T00:00:00Z",html_url:"https://github.com/example/gitzette/actions/runs/2",conclusion:$latest,head_repository:{full_name:$repository},pull_requests:[{base:{ref:$base,repo:{url:"https://api.github.com/repos/example/gitzette"}},head:{sha:$sha,repo:{url:("https://api.github.com/repos/" + $repository)}}}]}]}]'
     fi
     ;;
   *statuses*)

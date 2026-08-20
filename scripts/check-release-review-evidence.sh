@@ -14,9 +14,11 @@ fi
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 reviewed_sha="$1"
 
-ci_runs="$(gh api "repos/$repository/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$reviewed_sha&per_page=100")"
+ci_runs="$(gh api --paginate --slurp \
+  "repos/$repository/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$reviewed_sha&per_page=100" |
+  jq -c '[.[].workflow_runs[]]')"
 ci_run="$(jq -ce --arg sha "$reviewed_sha" '
-  [.workflow_runs[] | select(.path == ".github/workflows/ci.yml" and
+  [.[] | select(.path == ".github/workflows/ci.yml" and
     .event == "pull_request" and .head_sha == $sha)] |
   sort_by(.created_at, .id) | last
 ' <<<"$ci_runs")" || {
@@ -46,9 +48,11 @@ if ! jq -e '.state == "success" and .creator.id == 280144521 and
   exit 1
 fi
 publisher_url="$(jq -er .target_url <<<"$verdict")"
-gate_runs="$(gh api "repos/$repository/actions/workflows/samorev-gate.yml/runs?event=pull_request_target&head_sha=$reviewed_sha&per_page=100")"
+gate_runs="$(gh api --paginate --slurp \
+  "repos/$repository/actions/workflows/samorev-gate.yml/runs?event=pull_request_target&head_sha=$reviewed_sha&per_page=100" |
+  jq -c '[.[].workflow_runs[]]')"
 gate_run="$(jq -ce --arg sha "$reviewed_sha" --arg url "$publisher_url" '
-  [.workflow_runs[] | select(.path == ".github/workflows/samorev-gate.yml" and
+  [.[] | select(.path == ".github/workflows/samorev-gate.yml" and
     .event == "pull_request_target" and .head_sha == $sha and .html_url == $url)] | first
 ' <<<"$gate_runs")" || {
   echo "reviewed head lacks the publisher run targeted by samorev" >&2

@@ -377,18 +377,22 @@ text matching is not the authorization proof.
    gh run watch "$VERIFY_RUN_ID" --exit-status
    verify_status=$?
    set -e
-   if ! gh variable delete CREDENTIAL_VERIFY_OPEN 2>/dev/null; then
-     remaining_verify_switches="$(gh variable list --json name --jq \
-       '[.[].name | select(. == "CREDENTIAL_VERIFY_OPEN")] | length')"
-     [[ "$remaining_verify_switches" == 0 ]]
-   fi
-   bash scripts/check-production-environment.sh
+   rollback_restored=false
    if [[ "$verify_status" != 0 ]]; then
      rollback_account_id="$(jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
      rollback_api_token="$(jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
      printf '%s' "$rollback_account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID
      printf '%s' "$rollback_api_token" | gh secret set CLOUDFLARE_API_TOKEN
      unset rollback_account_id rollback_api_token
+     rollback_restored=true
+   fi
+   if ! gh variable delete CREDENTIAL_VERIFY_OPEN 2>/dev/null; then
+     remaining_verify_switches="$(gh variable list --json name --jq \
+       '[.[].name | select(. == "CREDENTIAL_VERIFY_OPEN")] | length')"
+     [[ "$remaining_verify_switches" == 0 ]]
+   fi
+   bash scripts/check-production-environment.sh
+   if [[ "$rollback_restored" == true ]]; then
      echo "verification failed; repository rollback credentials restored" >&2
      exit 1
    fi

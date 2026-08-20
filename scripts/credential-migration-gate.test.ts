@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash, createPublicKey, generateKeyPairSync } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -195,6 +195,12 @@ describe("one-shot credential migration boundary", () => {
     expect(installStep).not.toContain("VERIFY_RUN_ID");
     expect(verifyStep).toContain('previous_verify_run_id="$(gh run list');
     expect(verifyStep).toContain('gh run watch "$VERIFY_RUN_ID"');
+    expect(verifyStep.indexOf('if [[ "$verify_status" != 0 ]]')).toBeLessThan(
+      verifyStep.indexOf("gh variable delete CREDENTIAL_VERIFY_OPEN"),
+    );
+    expect(verifyStep.indexOf("gh secret set CLOUDFLARE_API_TOKEN")).toBeLessThan(
+      verifyStep.indexOf("gh variable delete CREDENTIAL_VERIFY_OPEN"),
+    );
     expect(migrationDoc).toContain('previous_guard_run_id="$(gh run list');
     expect(migrationDoc).toContain("created an empty transfer table");
     expect(migrationDoc).toContain("empty-table recovery dispatched once");
@@ -248,10 +254,11 @@ describe("one-shot credential migration boundary", () => {
     expect(parsedPolicyGuard.permissions).toEqual({});
     expect(parsedPolicyGuard.jobs["production-policy"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(Object.keys(parsedPolicyGuard.jobs)).toEqual([
-      "production-policy", "migration-policy", "migration-switches",
+      "production-policy", "migration-policy", "migration-switches", "bootstrap-deadline",
     ]);
     expect(parsedPolicyGuard.jobs["migration-policy"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(parsedPolicyGuard.jobs["migration-switches"].permissions).toEqual({});
+    expect(parsedPolicyGuard.jobs["bootstrap-deadline"].permissions).toEqual({});
     const policyGuardRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the fixed production ref policy"))?.run;
     const productionRepositoryPinRun = parsedPolicyGuard.jobs["production-policy"].steps.find(({ name }) =>
@@ -264,12 +271,18 @@ describe("one-shot credential migration boundary", () => {
       name === "Require the canonical repository")?.run;
     const migrationRepositoryPinRun = parsedPolicyGuard.jobs["migration-switches"].steps.find(({ name }) =>
       name === "Require the canonical repository")?.run;
+    const deadlineRepositoryPinRun = parsedPolicyGuard.jobs["bootstrap-deadline"].steps.find(({ name }) =>
+      name === "Require the canonical repository")?.run;
+    const deadlineRun = parsedPolicyGuard.jobs["bootstrap-deadline"].steps.find(({ name }) =>
+      name === "Enforce the credential bootstrap deadline")?.run;
     expect(productionRepositoryPinRun).toBeDefined();
     expect(policyGuardRun).toBeDefined();
     expect(migrationGuardRun).toBeDefined();
     expect(migrationSwitchRun).toBeDefined();
     expect(migrationPolicyRepositoryPinRun).toBeDefined();
     expect(migrationRepositoryPinRun).toBeDefined();
+    expect(deadlineRepositoryPinRun).toBeDefined();
+    expect(deadlineRun).toBeDefined();
     const policyGuardRoot = await mkdtemp(join(tmpdir(), "gitzette-policy-guard-run-"));
     const fakeBash = join(policyGuardRoot, "bash");
     await Bun.write(fakeBash, `#!/bin/sh
@@ -282,7 +295,7 @@ exit "\${FAKE_CHECKER_STATUS:-0}"
         env: { ...process.env, REPOSITORY: repository },
         stdout: "pipe", stderr: "pipe",
       }).exited;
-    for (const run of [productionRepositoryPinRun, migrationPolicyRepositoryPinRun, migrationRepositoryPinRun]) {
+    for (const run of [productionRepositoryPinRun, migrationPolicyRepositoryPinRun, migrationRepositoryPinRun, deadlineRepositoryPinRun]) {
       expect(await executeRepositoryPin(run, "NikolayS/gitzette")).toBe(0);
       expect(await executeRepositoryPin(run, "attacker/gitzette")).toBe(1);
     }
@@ -319,6 +332,32 @@ exit "\${FAKE_CHECKER_STATUS:-0}"
     expect(await executeMigrationSwitchGuard("false", "")).toBe(1);
     expect(await executeMigrationSwitchGuard("", "true")).toBe(1);
     expect(await executeMigrationSwitchGuard("", "false")).toBe(1);
+    const fakeDate = join(policyGuardRoot, "date");
+    await Bun.write(fakeDate, `#!/bin/bash
+set -euo pipefail
+if [[ "$*" == "-u +%s" ]]; then printf '%s\\n' "$FAKE_NOW"; exit 0; fi
+if [[ "$1" == -u && "$2" == -d && "$4" == +%s ]]; then
+  [[ "$FAKE_DEADLINE" != invalid ]] || exit 7
+  printf '%s\\n' "$FAKE_DEADLINE"
+  exit 0
+fi
+exit 8
+`);
+    await Bun.spawn(["chmod", "+x", fakeDate]).exited;
+    const executeDeadline = (now: string, deadline: string): Promise<number> =>
+      Bun.spawn(["/bin/bash", "-c", deadlineRun ?? "exit 99"], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env, PATH: `${policyGuardRoot}:${process.env.PATH}`,
+          BOOTSTRAP_EXPIRES_AT: "2026-08-27T00:00:00Z",
+          FAKE_NOW: now, FAKE_DEADLINE: deadline,
+        },
+        stdout: "pipe", stderr: "pipe",
+      }).exited;
+    expect(await executeDeadline("100", "200")).toBe(0);
+    expect(await executeDeadline("200", "200")).toBe(1);
+    expect(await executeDeadline("200", "100")).toBe(1);
+    expect(await executeDeadline("100", "invalid")).not.toBe(0);
 
     const deploy = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deploy).toContain("tags:\n      - 'v*'");
@@ -607,8 +646,11 @@ fi
   test("bounds the temporary production schema exclusion", async () => {
     const root = await mkdtemp(join(tmpdir(), "gitzette-transfer-schema-gate-"));
     const wrangler = join(root, "wrangler");
+    const temporaryRoot = join(root, "tmp");
+    await mkdir(temporaryRoot);
     await Bun.write(wrangler, `#!/usr/bin/env bash
 set -euo pipefail
+[[ "\${FAKE_WRANGLER_STATUS:-0}" == 0 ]] || exit "$FAKE_WRANGLER_STATUS"
 if [[ "$*" == *sqlite_schema* ]]; then
   total="\${FAKE_TABLE_COUNT:-0}"
 else
@@ -617,7 +659,7 @@ fi
 printf '[{"results":[{"total":%s}]}]\\n' "$total"
 `);
     await Bun.spawn(["chmod", "+x", wrangler]).exited;
-    const execute = (migrationState: string, tableCount: string, rowCount: string): Promise<number> =>
+    const execute = (migrationState: string, tableCount: string, rowCount: string, wranglerStatus = "0"): Promise<number> =>
       Bun.spawn(["bash", "-c", `
 set -euo pipefail
 source scripts/credential-migration-schema-exclusion.sh
@@ -632,6 +674,8 @@ credential_migration_schema_exclusion
           FAKE_WRANGLER: wrangler,
           FAKE_TABLE_COUNT: tableCount,
           FAKE_ROW_COUNT: rowCount,
+          FAKE_WRANGLER_STATUS: wranglerStatus,
+          TMPDIR: temporaryRoot,
         },
         stdout: "pipe", stderr: "pipe",
       }).exited;
@@ -640,6 +684,8 @@ credential_migration_schema_exclusion
     expect(await execute("true", "1", "1")).toBe(0);
     expect(await execute("true", "1", "2")).toBe(1);
     expect(await execute("yes", "0", "0")).toBe(1);
+    expect(await execute("true", "0", "0", "9")).toBe(9);
+    expect(await readdir(temporaryRoot)).toEqual([]);
     await rm(root, { recursive: true, force: true });
   });
 
