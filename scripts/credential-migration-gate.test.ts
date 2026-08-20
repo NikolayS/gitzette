@@ -11,6 +11,7 @@ describe("one-shot credential migration boundary", () => {
     const deadlineSources: Array<[string, number]> = [
       [".github/workflows/migrate-production-credentials.yml", 3],
       [".github/workflows/credential-migration-policy-guard.yml", 1],
+      ["scripts/apply-credential-migration-environment.sh", 1],
       ["scripts/apply-production-environment.sh", 1],
       ["scripts/check-production-environment.sh", 1],
       ["scripts/credential-migration-schema-exclusion.sh", 2],
@@ -203,7 +204,8 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("#67 restores the `v*`-only policy");
     expect(migrationDoc).toContain("guard intentionally reports any early tightening as drift");
     expect(migrationDoc).toContain("#67 removes the exclusion after dropping the");
-    expect(migrationDoc).toContain("readability block from `.github/workflows/ci.yml`");
+    expect(migrationDoc).toContain("credential-migration environment sub-block from the permanent\n   `policy-api-readability` job");
+    expect(migrationDoc).toContain("retain that job,\n   its production-environment probe, and its required status-check entry");
     for (const schemaGate of [
       "scripts/check-production-applied-schema.sh",
       "scripts/check-production-drift.sh",
@@ -258,6 +260,8 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("dispatch_export_recovery empty-table");
     expect(migrationDoc).toContain("dispatch_export_recovery absent-table");
     expect(migrationDoc).toContain("Production D1 REST batch preflight OK");
+    expect(migrationDoc).toContain('{sql:"select ?1 as bound",params:["probe"]}');
+    expect(migrationDoc).toContain('.result[1].results == [{bound:"probe"}]');
     expect(migrationDoc).toContain("select count(*) as total from sqlite_schema");
     expect(migrationDoc).toContain("live Worker-bound application D1 database");
     expect(migrationDoc).toContain('account_id="a3265e0d0db71fdece29365819452f00"');
@@ -268,12 +272,13 @@ describe("one-shot credential migration boundary", () => {
       migrationDoc.indexOf('shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"'),
     );
     expect(migrationDoc).toContain("select.json count.json drop.json prove-drop.json");
-    expect(migrationDoc).toContain("switch-residue job is expected red during an open export switch");
+    expect(migrationDoc).toContain("separate switch\n   guard is expected red during an open export switch");
     expect(migrationDoc).toContain("dedicated child Bash process");
     expect(migrationDoc).toContain("unset HISTFILE; set +o history");
     expect(migrationDoc).toContain("Each violation must exit nonzero");
     for (const teardownItem of [
-      "credential-migration-policy-guard.yml", "credential-migration-environment.json",
+      "credential-migration-policy-guard.yml", "credential-migration-switch-guard.yml",
+      "credential-migration-environment.json",
       "credential-migration-gate.test.ts",
       "check-credential-migration-inventory.sh",
       "credential-migration-schema-exclusion.sh",
@@ -294,22 +299,27 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain('map(select(.name == $current.name))');
     expect(migrationDoc).toContain('.updated_at // "") <');
     expect(migrationDoc).not.toContain('.updated_at // "") <=');
-    const postCleanupStart = migrationDoc.indexOf("After cleanup, re-run the inventory audit");
+    const postCleanupStart = migrationDoc.indexOf("After cleanup,\n   re-run the inventory audit");
     const postCleanupEnd = migrationDoc.indexOf("The migration workflow fails closed", postCleanupStart);
     const postCleanup = migrationDoc.slice(postCleanupStart, postCleanupEnd);
     expect(postCleanup).toContain("bash scripts/check-credential-migration-inventory.sh");
     expect(postCleanup).toContain("gh workflow run credential-migration-policy-guard.yml --ref main");
+    expect(postCleanup).toContain("gh workflow run credential-migration-switch-guard.yml --ref main");
     expect(postCleanup).toContain('gh run watch "$CLEANUP_GUARD_RUN_ID" --exit-status');
+    expect(postCleanup).toContain('gh run watch "$CLEANUP_SWITCH_GUARD_RUN_ID" --exit-status');
     expect(postCleanup).toContain("repository-scoped\n   switch residue");
     expect(postCleanup).toContain("environment-scoped\n   credential inventory");
 
     const policyGuard = await Bun.file(".github/workflows/credential-migration-policy-guard.yml").text();
+    const switchGuard = await Bun.file(".github/workflows/credential-migration-switch-guard.yml").text();
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {
       on: { schedule: Array<{ cron: string }> };
       permissions: Record<string, string>;
       jobs: Record<string, { permissions: Record<string, string>; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, unknown> }> }>;
     };
+    const parsedSwitchGuard = Bun.YAML.parse(switchGuard) as typeof parsedPolicyGuard;
     expect(parsedPolicyGuard.on.schedule).toEqual([{ cron: "*/5 * * * *" }]);
+    expect(parsedSwitchGuard.on.schedule).toEqual([{ cron: "2-59/5 * * * *" }]);
     expect(policyGuard).toContain("bash scripts/check-production-environment.sh");
     expect(policyGuard).toContain("bash scripts/check-credential-migration-environment.sh");
     expect(policyGuard).toContain("CRITICAL: production ref policy is outside the reviewed deadline-bound main plus release-tag policy");
@@ -318,21 +328,25 @@ describe("one-shot credential migration boundary", () => {
     expect(policyGuard).toContain("CRITICAL: credential-migration no longer requires Nik-only approval with self-review blocked");
     expect(policyGuard).toContain('[[ "$REPOSITORY" == "NikolayS/gitzette" ]]');
     expect(policyGuard).not.toContain("github.event.repository.fork");
-    expect(policyGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
-    expect(policyGuard).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
-    expect(policyGuard).toContain('a credential migration switch remains defined');
+    expect(policyGuard).not.toContain("CREDENTIAL_EXPORT_OPEN");
+    expect(policyGuard).not.toContain("CREDENTIAL_VERIFY_OPEN");
+    expect(switchGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
+    expect(switchGuard).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
+    expect(switchGuard).toContain('a credential migration switch remains defined');
     expect(policyGuard).toContain("BOOTSTRAP_EXPIRES_AT: 2026-08-27T00:00:00Z");
     expect(policyGuard).toContain("credential bootstrap deadline expired");
-    expect(policyGuard).toContain("  migration-switches:");
+    expect(policyGuard).not.toContain("  migration-switches:");
     expect(policyGuard).not.toContain("if: ${{ github.repository == 'NikolayS/gitzette' }}");
     expect(parsedPolicyGuard.permissions).toEqual({});
     expect(parsedPolicyGuard.jobs["production-policy"].permissions).toEqual({ actions: "read", contents: "read" });
     expect(Object.keys(parsedPolicyGuard.jobs)).toEqual([
-      "production-policy", "migration-policy", "migration-switches", "bootstrap-deadline",
+      "production-policy", "migration-policy", "bootstrap-deadline",
     ]);
     expect(parsedPolicyGuard.jobs["migration-policy"].permissions).toEqual({ actions: "read", contents: "read" });
-    expect(parsedPolicyGuard.jobs["migration-switches"].permissions).toEqual({});
     expect(parsedPolicyGuard.jobs["bootstrap-deadline"].permissions).toEqual({});
+    expect(parsedSwitchGuard.permissions).toEqual({});
+    expect(Object.keys(parsedSwitchGuard.jobs)).toEqual(["migration-switches"]);
+    expect(parsedSwitchGuard.jobs["migration-switches"].permissions).toEqual({});
     for (const jobName of ["production-policy", "migration-policy"]) {
       const checkout = parsedPolicyGuard.jobs[jobName].steps.find(({ uses }) => uses?.startsWith("actions/checkout@"));
       expect(checkout?.with).toEqual({ "persist-credentials": false, ref: "main" });
@@ -343,11 +357,11 @@ describe("one-shot credential migration boundary", () => {
       name === "Require the canonical repository")?.run;
     const migrationGuardRun = parsedPolicyGuard.jobs["migration-policy"].steps.find(({ name }) =>
       name?.startsWith("Audit the credential migration approval boundary"))?.run;
-    const migrationSwitchRun = parsedPolicyGuard.jobs["migration-switches"].steps.find(({ name }) =>
-      name?.startsWith("Fail if a credential migration switch remains open"))?.run;
     const migrationPolicyRepositoryPinRun = parsedPolicyGuard.jobs["migration-policy"].steps.find(({ name }) =>
       name === "Require the canonical repository")?.run;
-    const migrationRepositoryPinRun = parsedPolicyGuard.jobs["migration-switches"].steps.find(({ name }) =>
+    const migrationSwitchRun = parsedSwitchGuard.jobs["migration-switches"].steps.find(({ name }) =>
+      name?.startsWith("Fail if a credential migration switch remains open"))?.run;
+    const migrationRepositoryPinRun = parsedSwitchGuard.jobs["migration-switches"].steps.find(({ name }) =>
       name === "Require the canonical repository")?.run;
     const deadlineRepositoryPinRun = parsedPolicyGuard.jobs["bootstrap-deadline"].steps.find(({ name }) =>
       name === "Require the canonical repository")?.run;
@@ -356,8 +370,8 @@ describe("one-shot credential migration boundary", () => {
     expect(productionRepositoryPinRun).toBeDefined();
     expect(policyGuardRun).toBeDefined();
     expect(migrationGuardRun).toBeDefined();
-    expect(migrationSwitchRun).toBeDefined();
     expect(migrationPolicyRepositoryPinRun).toBeDefined();
+    expect(migrationSwitchRun).toBeDefined();
     expect(migrationRepositoryPinRun).toBeDefined();
     expect(deadlineRepositoryPinRun).toBeDefined();
     expect(deadlineRun).toBeDefined();
@@ -951,8 +965,10 @@ ${closeSwitch}`,
       required_status_checks: { checks: Array<{ context: string }> };
     };
     expect(protection.required_status_checks.checks.filter(({ context }) => context === jobName)).toHaveLength(1);
-    expect(ciSource).toContain('.repository_rulesets[0].target == "branch"');
-    expect(ciSource).toContain('.repository_rulesets[0].conditions.ref_name == {"exclude":[],"include":["refs/heads/main"]}');
+    expect(ciSource).toContain("bash scripts/check-branch-protection-policy-file.sh config/main-branch-protection.json");
+    const branchPolicyValidator = await Bun.file("scripts/check-branch-protection-policy-file.sh").text();
+    expect(branchPolicyValidator).toContain('.repository_rulesets[0].target == "branch"');
+    expect(branchPolicyValidator).toContain('.repository_rulesets[0].conditions.ref_name == {"exclude":[],"include":["refs/heads/main"]}');
 
     const root = await mkdtemp(join(tmpdir(), "gitzette-policy-api-readability-"));
     const gh = join(root, "gh");
@@ -1440,15 +1456,24 @@ case "$endpoint" in
 esac
 `);
     await Bun.spawn(["chmod", "+x", gh]).exited;
-    const run = async (mode: string, record: string): Promise<number> => {
+    const date = join(bin, "date");
+    await Bun.write(date, `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *" -d "* ]]; then printf '100\\n'; else printf '%s\\n' "\${FAKE_NOW_EPOCH:-99}"; fi
+`);
+    await Bun.spawn(["chmod", "+x", date]).exited;
+    const run = async (mode: string, record: string, nowEpoch = "99"): Promise<number> => {
       await mkdir(record);
       const child = Bun.spawn(["bash", "scripts/apply-credential-migration-environment.sh"], {
         cwd: process.cwd(),
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode, FAKE_RECORD: record },
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: mode, FAKE_RECORD: record, FAKE_NOW_EPOCH: nowEpoch },
         stdout: "pipe", stderr: "pipe",
       });
       return child.exited;
     };
+    const expired = join(root, "expired");
+    expect(await run("correct", expired, "100")).toBe(1);
+    expect(await Bun.file(join(expired, "put.json")).exists()).toBe(false);
     const stale = join(root, "stale");
     expect(await run("stale", stale)).toBe(0);
     expect(JSON.parse(await Bun.file(join(stale, "put.json")).text()).can_admins_bypass).toBeUndefined();

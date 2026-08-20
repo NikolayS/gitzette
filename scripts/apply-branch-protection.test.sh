@@ -157,12 +157,22 @@ if bash "$root/scripts/check-branch-protection-policy-file.sh" "$one_ruleset_pol
   echo "one-ruleset policy unexpectedly applied" >&2
   exit 1
 fi
-assert_file_contains "$one_ruleset_record.err" 'must define exactly the main and release-tag rulesets'
+assert_file_contains "$one_ruleset_record.err" 'not the complete reviewed main and release-tag policy'
 [[ ! -e "$one_ruleset_record.mutations" && ! -e "$one_ruleset_record.classic" ]]
 if grep -q 'possibly partial live policy' "$one_ruleset_record.err"; then
   echo "local policy precondition armed the partial-apply audit" >&2
   exit 1
 fi
+
+wrong_actor_policy="$test_dir/wrong-actor.json"
+jq '.repository_rulesets[0].bypass_actors[0].actor_id = 1' \
+  "$root/config/main-branch-protection.json" >"$wrong_actor_policy"
+if bash "$root/scripts/check-branch-protection-policy-file.sh" "$wrong_actor_policy" \
+  >"$test_dir/wrong-actor.out" 2>"$test_dir/wrong-actor.err"; then
+  echo "wrong-actor policy unexpectedly passed validation" >&2
+  exit 1
+fi
+assert_file_contains "$test_dir/wrong-actor.err" 'not the complete reviewed main and release-tag policy'
 run_failure admin-bypass
 run_failure mismatch
 run_failure nonadmin-main-denied

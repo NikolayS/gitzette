@@ -156,13 +156,17 @@ text matching is not the authorization proof.
    account_id="a3265e0d0db71fdece29365819452f00"
    database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
    batch_probe_request="$(mktemp)"
-   jq -n '{batch:[{sql:"select 1 as batch_probe"}]}' >"$batch_probe_request"
+   jq -n '{batch:[
+     {sql:"select 1 as batch_probe"},
+     {sql:"select ?1 as bound",params:["probe"]}
+   ]}' >"$batch_probe_request"
    curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
      -H 'Content-Type: application/json' --data-binary "@$batch_probe_request" \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
      <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -e '.success == true and (.result | length == 1) and
-       .result[0].success == true and .result[0].results == [{batch_probe:1}]' >/dev/null
+     jq -e '.success == true and (.result | length == 2) and
+       .result[0].success == true and .result[0].results == [{batch_probe:1}] and
+       .result[1].success == true and .result[1].results == [{bound:"probe"}]' >/dev/null
    rm -f "$batch_probe_request"
    unset d1_token
    echo "Production D1 REST batch preflight OK"
@@ -170,7 +174,12 @@ text matching is not the authorization proof.
      --workflow=credential-migration-policy-guard.yml --branch main \
      --event workflow_dispatch --limit 1 \
      --json databaseId --jq '.[0].databaseId // 0')"
+   previous_switch_guard_run_id="$(gh run list \
+     --workflow=credential-migration-switch-guard.yml --branch main \
+     --event workflow_dispatch --limit 1 \
+     --json databaseId --jq '.[0].databaseId // 0')"
    gh workflow run credential-migration-policy-guard.yml --ref main
+   gh workflow run credential-migration-switch-guard.yml --ref main
    POLICY_GUARD_RUN_ID=""
    for _ in {1..20}; do
      candidate="$(gh run list --workflow=credential-migration-policy-guard.yml \
@@ -184,17 +193,32 @@ text matching is not the authorization proof.
    done
    : "${POLICY_GUARD_RUN_ID:?new preflight guard run was not observed}"
    gh run watch "$POLICY_GUARD_RUN_ID" --exit-status
+   SWITCH_GUARD_RUN_ID=""
+   for _ in {1..20}; do
+     candidate="$(gh run list --workflow=credential-migration-switch-guard.yml \
+       --branch main --event workflow_dispatch \
+       --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+     if [[ "$candidate" -gt "$previous_switch_guard_run_id" ]]; then
+       SWITCH_GUARD_RUN_ID="$candidate"
+       break
+     fi
+     sleep 2
+   done
+   : "${SWITCH_GUARD_RUN_ID:?new preflight switch guard run was not observed}"
+   gh run watch "$SWITCH_GUARD_RUN_ID" --exit-status
    ```
 
-   The read-only `select 1` call is a mandatory live preflight of the exact
-   production D1 REST `{batch}` request shape using the D1-only operator token;
+   The two-entry read-only call is a mandatory live preflight of both the
+   production D1 REST `{batch}` request shape and per-entry `params` binding
+   using the D1-only operator token;
    record its timestamp before opening either switch. The following guard
    dispatch must also be green before the scheduled guard is relied on;
-   API-read failures exit separately from policy drift. Its independent
-   `production-policy`, `migration-policy`, and `migration-switches` jobs prove
-   the fixed production policy, the Nik-only migration approval boundary, and
-   that neither repository-scoped
-   migration switch is nonempty. The adjacent inventory command uses the
+   API-read failures exit separately from policy drift. The independent
+   `production-policy` and `migration-policy` jobs prove the fixed production
+   policy and Nik-only migration approval boundary. The separately scheduled
+   switch guard proves neither repository-scoped migration switch is nonempty;
+   an expected open switch therefore cannot mask the first policy-drift failure
+   transition. The adjacent inventory command uses the
    operator's administrator token to prove the credential-migration environment
    has no variables or secrets, the production environment has no variables
    that can shadow the verification switch, and its secrets stay within the
@@ -591,15 +615,15 @@ text matching is not the authorization proof.
    bash scripts/check-production-environment.sh
    ```
 
-   A best-effort scheduled guard also runs approximately every five minutes on
-   GitHub's scheduler. Its independent `production-policy` and
+   Best-effort policy and switch guards run on separate schedules approximately
+   every five minutes. The policy guard's independent `production-policy` and
    `migration-policy` jobs check the temporary fixed `main` plus `v*` policy and
    the Nik-only credential-migration approval boundary, so one failure never
-   masks the other. Policy drift is never an expected result. Its separate
-   switch-residue job is expected red during an open export switch or the
-   legitimate production approval wait.
-   After cleanup, re-run the inventory audit, then explicitly dispatch that
-   guard and require it to turn green:
+   masks the other. Policy drift is never an expected result. The separate switch
+   guard is expected red during an open export switch or the legitimate production
+   approval wait without masking policy workflow transitions. After cleanup,
+   re-run the inventory audit, then explicitly dispatch both guards and require
+   them to turn green:
 
    ```bash
    set -euo pipefail
@@ -610,7 +634,12 @@ text matching is not the authorization proof.
      --workflow=credential-migration-policy-guard.yml --branch main \
      --event workflow_dispatch --limit 1 \
      --json databaseId --jq '.[0].databaseId // 0')"
+   previous_cleanup_switch_guard_run_id="$(gh run list \
+     --workflow=credential-migration-switch-guard.yml --branch main \
+     --event workflow_dispatch --limit 1 \
+     --json databaseId --jq '.[0].databaseId // 0')"
    gh workflow run credential-migration-policy-guard.yml --ref main
+   gh workflow run credential-migration-switch-guard.yml --ref main
    CLEANUP_GUARD_RUN_ID=""
    for _ in {1..20}; do
      candidate="$(gh run list --workflow=credential-migration-policy-guard.yml \
@@ -624,10 +653,23 @@ text matching is not the authorization proof.
    done
    : "${CLEANUP_GUARD_RUN_ID:?new post-cleanup guard run was not observed}"
    gh run watch "$CLEANUP_GUARD_RUN_ID" --exit-status
+   CLEANUP_SWITCH_GUARD_RUN_ID=""
+   for _ in {1..20}; do
+     candidate="$(gh run list --workflow=credential-migration-switch-guard.yml \
+       --branch main --event workflow_dispatch \
+       --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+     if [[ "$candidate" -gt "$previous_cleanup_switch_guard_run_id" ]]; then
+       CLEANUP_SWITCH_GUARD_RUN_ID="$candidate"
+       break
+     fi
+     sleep 2
+   done
+   : "${CLEANUP_SWITCH_GUARD_RUN_ID:?new post-cleanup switch guard run was not observed}"
+   gh run watch "$CLEANUP_SWITCH_GUARD_RUN_ID" --exit-status
    ```
 
-   a red result after the verify run is no longer waiting is lingering
-   switch residue. The explicit post-cleanup dispatch proves repository-scoped
+   A red switch-guard result after the verify run is no longer waiting is
+   lingering switch residue. The explicit post-cleanup dispatch proves repository-scoped
    switch residue is absent; the inventory audit proves the environment-scoped
    credential inventory. Together, not schedule timing, they close this
    operational window. GitHub schedules are
@@ -683,6 +725,7 @@ text matching is not the authorization proof.
 8. Through the exact-head review gate, delete
    `.github/workflows/migrate-production-credentials.yml`,
    `.github/workflows/credential-migration-policy-guard.yml`,
+   `.github/workflows/credential-migration-switch-guard.yml`,
    `config/credential-migration-environment.json`,
    all corresponding apply/check scripts, including
    `scripts/check-credential-migration-inventory.sh`,
@@ -707,10 +750,12 @@ text matching is not the authorization proof.
    schema query before deleting the helper itself,
    remove the temporary manual-migration notice from
    `docs/production-migrations.md`,
-   remove the transient credential-migration
-   readability block from `.github/workflows/ci.yml`, and audit the ordinary exact-schema policy before
+   remove only the credential-migration environment sub-block from the permanent
+   `policy-api-readability` job in `.github/workflows/ci.yml`; retain that job,
+   its production-environment probe, and its required status-check entry. Audit
+   the ordinary exact-schema policy before
    any later release. Run and record the final green guard
-   before deleting its workflow; after merge, prove the two
+   before deleting its workflow; after merge, prove the three
    workflow files and temporary configs/scripts are absent from `main` and the
    live environment plus both variables return not found.
    Retain `scripts/get-github-environment.sh`: it is a shared helper used by

@@ -198,10 +198,11 @@ The verifier's green result is evidence only together with recorded
 `REQUIRE_NO_REPOSITORY_CREDENTIALS=true` inventory output from the same
 dispatch/approval window; GitHub's secret fallback makes the workflow result
 insufficient by itself.
-The independent scheduled guard always checks that same fixed policy. The
-switch-residue job remains red while either switch is open, and the runbook
-requires a green manual guard dispatch after each switch closes because GitHub
-schedules are best-effort. A green cleanup run is not evidence that the bootstrap workflow or
+The independent scheduled policy guard always checks that same fixed policy. A
+separately scheduled switch guard remains red while either switch is open, so
+an expected switch failure cannot mask the policy workflow's first drift
+transition. The runbook requires green manual dispatches of both guards after
+each switch closes because GitHub schedules are best-effort. A green cleanup run is not evidence that the bootstrap workflow or
 environment has been removed; #67 verifies that separate teardown, removes the
 temporary `main` branch policy, and restores the `v*`-only production baseline.
 The D1

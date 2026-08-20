@@ -11,6 +11,13 @@ repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url
 policy="$root/config/credential-migration-environment.json"
 environment=credential-migration
 created_environment=false
+bootstrap_expires_at=2026-08-27T00:00:00Z
+now_epoch="$(date -u +%s)"
+deadline_epoch="$(date -u -d "$bootstrap_expires_at" +%s)"
+if (( now_epoch >= deadline_epoch )); then
+  echo "credential migration bootstrap expired; complete the #67 teardown instead of recreating its environment" >&2
+  exit 1
+fi
 
 error_file="$(mktemp)"
 trap 'rm -f "$error_file"' EXIT
