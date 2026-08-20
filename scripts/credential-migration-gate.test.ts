@@ -106,9 +106,11 @@ describe("one-shot credential migration boundary", () => {
     const applyProduction = await Bun.file("scripts/apply-production-environment.sh").text();
     const checkProduction = await Bun.file("scripts/check-production-environment.sh").text();
     const guardedShellScripts = [
+      "apply-branch-protection.sh",
       "apply-branch-protection.test.sh",
       "apply-credential-migration-environment.sh",
       "apply-production-environment.sh",
+      "check-branch-protection.sh",
       "check-branch-protection-nonadmin.sh",
       "check-branch-protection-policy-file.sh",
       "check-credential-migration-environment.sh",

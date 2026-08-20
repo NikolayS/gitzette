@@ -21,6 +21,8 @@ jq -e '
   .required_pull_request_reviews.dismiss_stale_reviews == false and
   .required_pull_request_reviews.required_approving_review_count == 0 and
   .required_pull_request_reviews.require_last_push_approval == false and
+  .required_pull_request_reviews.dismissal_restrictions == {"users":[],"teams":[]} and
+  .required_pull_request_reviews.bypass_pull_request_allowances == {"users":[],"teams":[],"apps":[]} and
   .allow_auto_merge == false and
   .actions_workflow_permissions == {"default_workflow_permissions":"read","can_approve_pull_request_reviews":false} and
   .restrictions == null and .lock_branch == false and

@@ -178,6 +178,26 @@ if bash "$root/scripts/check-branch-protection-policy-file.sh" "$wrong_actor_pol
   exit 1
 fi
 assert_file_contains "$test_dir/wrong-actor.err" 'not the complete reviewed main and release-tag policy'
+
+review_bypass_policy="$test_dir/review-bypass.json"
+jq '.required_pull_request_reviews.bypass_pull_request_allowances.users=["attacker"]' \
+  "$root/config/main-branch-protection.json" >"$review_bypass_policy"
+if bash "$root/scripts/check-branch-protection-policy-file.sh" "$review_bypass_policy" \
+  >"$test_dir/review-bypass.out" 2>"$test_dir/review-bypass.err"; then
+  echo "review-bypass policy unexpectedly passed validation" >&2
+  exit 1
+fi
+assert_file_contains "$test_dir/review-bypass.err" 'not the complete reviewed main and release-tag policy'
+
+dismissal_policy="$test_dir/dismissal.json"
+jq '.required_pull_request_reviews.dismissal_restrictions.teams=["attacker"]' \
+  "$root/config/main-branch-protection.json" >"$dismissal_policy"
+if bash "$root/scripts/check-branch-protection-policy-file.sh" "$dismissal_policy" \
+  >"$test_dir/dismissal.out" 2>"$test_dir/dismissal.err"; then
+  echo "dismissal policy unexpectedly passed validation" >&2
+  exit 1
+fi
+assert_file_contains "$test_dir/dismissal.err" 'not the complete reviewed main and release-tag policy'
 run_failure admin-bypass
 run_failure mismatch
 

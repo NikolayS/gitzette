@@ -16,9 +16,11 @@ review. Any push after a verdict invalidates it: merge requires a new
 terminal-clean samorev verdict on the exact current head, and a green pipeline
 is never a substitute.
 
-Because `policy-api-readability` is required, every merge also depends on the
-live GitHub environments API being readable and the `production` environment
-existing. Repair or recreate that environment from the canonical config with
+For canonical same-repository PRs, required `policy-api-readability` makes the
+merge depend on the live GitHub environments API being readable and the
+`production` environment existing. Fork and non-canonical PRs satisfy this
+context vacuously, but `scripts/merge-reviewed-head.sh` rejects them before any
+merge. Repair or recreate that environment from the canonical config with
 `scripts/apply-production-environment.sh`, then rerun CI. If an API outage makes
 that impossible, merging waits for the API to recover. Removing the required
 context is not an approved break-glass path: it would weaken the reviewed gate

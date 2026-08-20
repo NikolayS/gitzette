@@ -117,7 +117,15 @@ describe("deploy review revalidation", () => {
     expect(documentation).toContain("single-person availability dependency");
     expect(documentation).toContain("incident/change record naming a specific substitute reviewer");
     expect(documentation).toContain("Never edit the live reviewer set without first");
-    expect(documentation).toContain("`policy-api-readability` is required");
+    expect(documentation).toContain(
+      "For canonical same-repository PRs, required `policy-api-readability`",
+    );
+    expect(documentation).toContain(
+      "Fork and non-canonical PRs satisfy this\ncontext vacuously",
+    );
+    expect(documentation).toContain(
+      "`scripts/merge-reviewed-head.sh` rejects them",
+    );
     expect(documentation).toContain("`scripts/apply-production-environment.sh`");
     expect(documentation).toContain("not an approved break-glass path");
     expect(documentation).toContain("`scripts/check-branch-protection.sh`");
