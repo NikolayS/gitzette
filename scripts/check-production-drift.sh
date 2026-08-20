@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2154 # wrangler_bin is set by require-wrangler.sh
 set -euo pipefail
-# shellcheck disable=SC1091 # resolved relative to this script at runtime
+# shellcheck source=./require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
 
 # This is a one-time pre-cutover baseline gate. After cutover, Wrangler's D1

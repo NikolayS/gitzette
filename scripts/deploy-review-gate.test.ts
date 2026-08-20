@@ -14,6 +14,8 @@ describe("deploy review revalidation", () => {
     const documentation = await Bun.file("docs/review-gate.md").text();
     const branchPolicy = JSON.parse(await Bun.file("config/main-branch-protection.json").text());
     const applyBranchPolicy = await Bun.file("scripts/apply-branch-protection.sh").text();
+    const checkBranchPolicy = await Bun.file("scripts/check-branch-protection.sh").text();
+    const mergeReviewedHead = await Bun.file("scripts/merge-reviewed-head.sh").text();
     const validateBranchPolicy = await Bun.file("scripts/check-branch-protection-policy-file.sh").text();
     const checkNonadminBoundary = await Bun.file("scripts/check-branch-protection-nonadmin.sh").text();
     const reviewerWrapper = await Bun.file("scripts/run-samorev-review.sh").text();
@@ -94,6 +96,15 @@ describe("deploy review revalidation", () => {
     expect(applyBranchPolicy).not.toContain("check-branch-protection-nonadmin.sh");
     expect(documentation).toContain("administrator-only and deliberately does not load the `samo-agent`");
     expect(documentation).toContain("separate shell/session containing only");
+    expect(checkBranchPolicy.indexOf("check-branch-protection-policy-file.sh")).toBeLessThan(
+      checkBranchPolicy.indexOf("expected=\"$(jq"),
+    );
+    expect(mergeReviewedHead).toContain('check-release-review-evidence.sh" "$head_sha"');
+    expect(mergeReviewedHead).toContain('check-branch-protection.sh"');
+    expect(mergeReviewedHead).toContain('--match-head-commit "$head_sha"');
+    expect(mergeReviewedHead.indexOf("check-release-review-evidence.sh")).toBeLessThan(
+      mergeReviewedHead.indexOf("gh pr merge"),
+    );
     expect(checkNonadminBoundary.indexOf("select(length == 2 and")).toBeLessThan(
       checkNonadminBoundary.indexOf("while IFS= read -r ruleset_name"),
     );

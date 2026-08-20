@@ -119,6 +119,8 @@ describe("one-shot credential migration boundary", () => {
       "check-reviewer-credential-isolation.sh",
       "get-github-environment.sh",
       "install-image-validation-runtime.sh",
+      "merge-reviewed-head.sh",
+      "merge-reviewed-head.test.sh",
       "run-samorev-review.sh",
       "run-samorev-review.test.sh",
     ];
@@ -841,7 +843,7 @@ ${closeSwitch}`,
     expect(job).toBeDefined();
     expect(job["timeout-minutes"]).toBe(2);
     expect(job.permissions).toEqual({ actions: "read", contents: "read" });
-    expect(ci.jobs.typecheck?.["timeout-minutes"]).toBe(15);
+    expect(ci.jobs.typecheck?.["timeout-minutes"]).toBe(30);
     const imageRuntime = ci.jobs.typecheck?.steps.find(({ name }) => name === "Install image validation runtime")?.run ?? "";
     expect(imageRuntime).toBe("bash scripts/install-image-validation-runtime.sh");
     const aptHarnessRoot = await mkdtemp(join(tmpdir(), "gitzette-apt-runtime-"));

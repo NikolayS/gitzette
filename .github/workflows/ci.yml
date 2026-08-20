@@ -47,7 +47,7 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -63,7 +63,7 @@ jobs:
       - name: Verify generated Worker binding types
         run: bun run check:worker-types
       - run: bun run test:all
-      - run: shellcheck scripts/*.sh
+      - run: shellcheck --source-path=SCRIPTDIR scripts/*.sh
       - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
       # High/critical advisories block merges.
       - run: bun audit --audit-level=high

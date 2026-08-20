@@ -152,8 +152,12 @@ requires another exact-head review cycle.
 
 The ordinary `pull_request` CI workflow runs all PR-controlled code in the PR
 cache scope with a read-only token, no repository secrets, and no persisted Git
-credential. The `pull_request_target` publisher executes only protected-main
-code. Until the one-shot recovery completes, the Cloudflare credentials are
+credential. Its required build job has a 30-minute fail-closed timeout. Exact
+head `f09b463` completed the full job in 1 minute 39 seconds after an immediately
+preceding 45-second CI failure, so the cap retains substantial measured mirror
+and test headroom without permitting an unbounded job. The
+`pull_request_target` publisher executes only protected-main code. Until the
+one-shot recovery completes, the Cloudflare credentials are
 repository-scoped and therefore potentially readable by any same-repository
 workflow job. The bootstrap adds exactly one new intentional reader,
 `.github/workflows/migrate-production-credentials.yml`, gated by the temporary
@@ -300,13 +304,17 @@ the PR-time evaluator and release gate both reject another target URL.
 
 Only after that exact-head review exits zero, CI is green, conversations are
 resolved, and the readiness review confirms the same head SHA may the PR merge.
-With the administrator's default `gh` credential, run
-`bash scripts/check-release-review-evidence.sh HEAD_SHA` from the clean exact
-reviewed head immediately before
-merge; a green checks UI is not evidence. Then merge through `GH_TOKEN="$(gh
-auth token --user samo-agent)" gh pr merge`, never through the administrator
-credential. Never grant `samo-agent` admin access to make an
-administration-scoped inventory call pass.
+With the administrator's default `gh` credential and `GH_TOKEN` unset, run
+`bash scripts/merge-reviewed-head.sh NUMBER` from the clean exact reviewed head;
+a green checks UI is not evidence. The wrapper resolves and pins the PR head,
+runs the immutable review-evidence and administrator live-policy audits, loads
+the `samo-agent` credential only afterward, verifies immutable ID `280144521`
+and its non-admin bypass view, rechecks the PR head, and performs the merge with
+`--match-head-commit`. This deliberately combines the two operator credentials
+only inside the one fail-closed merge transaction covered by the accepted host
+risk above. Never grant `samo-agent` admin access to make an
+administration-scoped inventory call pass, and never invoke `gh pr merge`
+directly.
 A GitHub `APPROVED` review is not required evidence; the reviewed branch policy
 requires a pull request with zero approvals instead. For the bootstrap that
 changes this policy, run `bash scripts/apply-branch-protection.sh` from the

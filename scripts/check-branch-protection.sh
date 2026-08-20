@@ -2,6 +2,8 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+"$root/scripts/check-branch-protection-policy-file.sh" \
+  "$root/config/main-branch-protection.json"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
 expected="$(jq -Sc '
   del(.audit_command,.allow_auto_merge) |

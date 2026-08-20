@@ -17,6 +17,11 @@ repository="${GITHUB_REPOSITORY:-NikolayS/gitzette}"
 pr_number="$1"
 publisher_run_id="$2"
 publisher_check_run_id="$3"
+expected_reviewer_id=280144521
+if [[ "$(gh api user --jq .id)" != "$expected_reviewer_id" ]]; then
+  echo "GH_TOKEN is not the samo-agent identity (immutable ID 280144521)" >&2
+  exit 1
+fi
 reviewer_sha=1397e9762c3f7b0f6230260ca4960241dfb38bf2
 if [[ "$(git -C "$SAMOREV_HOME" rev-parse HEAD)" != "$reviewer_sha" ]]; then
   echo "samorev must be checked out at $reviewer_sha" >&2

@@ -27,6 +27,11 @@ cat >"$test_dir/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 mode="${FAKE_MODE:-success}"
+if [[ "${1:-}" == api && "${2:-}" == user ]]; then
+  [[ "$mode" != wrong-token ]] || { printf '1\n'; exit 0; }
+  printf '280144521\n'
+  exit 0
+fi
 if [[ "${1:-}" == pr ]]; then
   printf '{"headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","url":"https://github.com/example/gitzette/pull/68"}\n'
   exit 0
@@ -126,7 +131,7 @@ run_case() {
   }
 }
 
-for mode in wrong-path wrong-event fork wrong-head wrong-pr wrong-job reviewer-sha reviewer-dirty; do
+for mode in wrong-token wrong-path wrong-event fork wrong-head wrong-pr wrong-job reviewer-sha reviewer-dirty; do
   run_case "$mode" 1
 done
 run_case success 0 success
