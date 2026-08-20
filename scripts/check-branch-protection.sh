@@ -26,12 +26,24 @@ if [[ "$actual_auto_merge" != "$expected_auto_merge" ]]; then
 fi
 protection="$(gh api "repos/$repository/branches/main/protection")"
 workflow_permissions="$(gh api "repos/$repository/actions/permissions/workflow")"
-ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=true&per_page=100" | jq -c 'add')"
+if ! ruleset_summaries="$(gh api --paginate --slurp \
+  "repos/$repository/rulesets?includes_parents=true&per_page=100" |
+  jq -ce 'add // [] | select(type == "array")')"; then
+  echo "unable to enumerate rulesets: repository ruleset summary response is invalid" >&2
+  exit 3
+fi
+if ! jq -e 'all(.[]; ._links.self.href | type == "string")' \
+  <<<"$ruleset_summaries" >/dev/null; then
+  echo "unable to enumerate rulesets: a ruleset summary lacks its API URL" >&2
+  exit 3
+fi
+ruleset_urls="$(jq -r '.[]._links.self.href' <<<"$ruleset_summaries")"
 rulesets='[]'
 while IFS= read -r ruleset_url; do
+  [[ -n "$ruleset_url" ]] || continue
   ruleset="$(gh api "$ruleset_url")"
   rulesets="$(jq -c --argjson ruleset "$ruleset" '. + [$ruleset]' <<<"$rulesets")"
-done < <(jq -r '.[]._links.self.href' <<<"$ruleset_summaries")
+done <<<"$ruleset_urls"
 actual="$(jq -nSc --argjson protection "$protection" --argjson workflow_permissions "$workflow_permissions" --argjson rulesets "$rulesets" -f "$root/scripts/normalize-branch-protection.jq")"
 
 if [[ "$actual" != "$expected" ]]; then

@@ -104,4 +104,26 @@ grep -q 'repository allow_auto_merge differs' "$stub_dir/err" || {
   exit 1
 }
 
+cat >"$stub_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+  *'repos/example/gitzette --jq .allow_auto_merge'*) printf 'false\n' ;;
+  *'repos/example/gitzette/branches/main/protection'*) printf '{}\n' ;;
+  *'repos/example/gitzette/actions/permissions/workflow'*) printf '{}\n' ;;
+  *'repos/example/gitzette/rulesets?includes_parents=true&per_page=100'*) printf '[{"invalid":true}]\n' ;;
+  *) exit 91 ;;
+esac
+EOF
+chmod +x "$stub_dir/gh"
+if GITHUB_REPOSITORY=example/gitzette PATH="$stub_dir:$PATH" \
+  bash "$root/scripts/check-branch-protection.sh" >"$stub_dir/out" 2>"$stub_dir/err"; then
+  echo "malformed ruleset summaries were not rejected" >&2
+  exit 1
+fi
+grep -q 'unable to enumerate rulesets' "$stub_dir/err" || {
+  echo "malformed ruleset summaries lacked the actionable diagnostic" >&2
+  exit 1
+}
+
 echo "branch-protection normalization and security-field tests passed"

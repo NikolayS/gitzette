@@ -273,6 +273,9 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("dispatch_export_recovery empty-table");
     expect(migrationDoc).toContain("dispatch_export_recovery absent-table");
     expect(migrationDoc).toContain("never leave CREDENTIAL_EXPORT_OPEN set for more than five minutes");
+    expect(migrationDoc).toContain("the deadline only turns the migration and guard workflows red and does not\n   narrow the live environment automatically");
+    expect(migrationDoc).toContain("scripts/production-environment-policy.test.ts");
+    expect(await Bun.file("scripts/production-environment-policy.test.ts").exists()).toBe(true);
     expect(migrationDoc).toContain("Production D1 REST batch preflight OK");
     expect(migrationDoc).toContain('application_database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"');
     expect(migrationDoc).toContain("unset application_database_id d1_token");

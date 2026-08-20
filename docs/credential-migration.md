@@ -727,6 +727,14 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
+   operator_token_file="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
+   token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$operator_token_file" || true)"
+   [[ "$token_count" == 1 ]]
+   d1_token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$operator_token_file")"
+   [[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
+   account_id="a3265e0d0db71fdece29365819452f00"
+   : "${RUN_ID:?set the exact export run ID}"
+   migration_dir="${MIGRATION_KEY_DIR:?set the private directory}/run-$RUN_ID-1"
    transfer_database_name="gitzette-credential-transfer-2026-08"
    database_id="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
      --connect-timeout 10 --max-time 30 --config - \
@@ -781,6 +789,13 @@ text matching is not the authorization proof.
    live environment plus both variables return not found.
    Retain `scripts/get-github-environment.sh`: it is a shared helper used by
    the permanent production-environment audit and apply scripts.
+   Before deleting `scripts/credential-migration-gate.test.ts`, retain
+   `scripts/production-environment-policy.test.ts`; it independently covers
+   `scripts/get-github-environment.sh`, the permanent production environment
+   apply/check pair, `scripts/install-image-validation-runtime.sh`, and the
+   `policy-api-readability` job. Keep that named test under the existing
+   `scripts/*.test.ts` expansion in `test:runner`; deleting or renaming it must
+   make `test:all` fail until equivalent retained coverage is wired in.
    Do not remove the temporary `main` production branch policy before the #67
    teardown merges. The fixed widened policy is the reviewed verification path,
    so its guard intentionally reports any early tightening as drift; #67 must
@@ -789,7 +804,10 @@ text matching is not the authorization proof.
    #67 is expected to merge before the enforced
    `2026-08-27T00:00:00Z` deadline. If it does not, run
    `scripts/apply-production-environment.sh --restore-baseline` immediately;
-   this narrowing path remains available after expiry and does not depend on a
+   the deadline only turns the migration and guard workflows red and does not
+   narrow the live environment automatically. The deadline guard's dated
+   failure message is the operator reminder for this exact command. This
+   narrowing path remains available after expiry and does not depend on a
    scheduled workflow firing.
    Tighten `scripts/check-reviewer-credential-isolation.sh` at the same time:
    repository Actions variables must be empty and repository Actions secrets

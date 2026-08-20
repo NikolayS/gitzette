@@ -134,6 +134,8 @@ describe("deploy review revalidation", () => {
     expect(documentation).toContain("Like every PR CI context it is head-controlled");
     expect(documentation).toContain("one merge-button or direct-CLI action by the\n`samo-agent` credential");
     expect(documentation).toContain("Formal GitHub approval is not restored");
+    expect(documentation).toContain("does not automatically narrow the live\n`production` deployment policy");
+    expect(documentation).toContain("scripts/apply-production-environment.sh --restore-baseline");
     expect(documentation).toContain(
       "`scripts/merge-reviewed-head.sh` rejects them",
     );

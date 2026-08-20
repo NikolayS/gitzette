@@ -29,6 +29,14 @@ context is not an approved break-glass path: it would weaken the reviewed gate
 while the credential window is open. Record the outage, keep #67 ready, and
 rerun CI plus `scripts/check-branch-protection.sh` when the API is readable.
 
+The credential-bootstrap deadline does not automatically narrow the live
+`production` deployment policy. At `2026-08-27T00:00:00Z` the migration and
+guard workflows turn red and refuse further bootstrap operations; the dated
+operator reminder is that failure itself, which names the required immediate
+command: `scripts/apply-production-environment.sh --restore-baseline`. A red
+deadline guard therefore means production still needs that explicit narrowing,
+not that GitHub has already removed `main`.
+
 The external runner uses the separate `samo-agent` credential. It runs a
 blocking Tanya301/samorev review, re-resolves the PR head after the reviewer
 exits, and only then publishes `samorev: success`, `failure`, or `error` against
