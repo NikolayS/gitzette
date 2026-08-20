@@ -2,8 +2,6 @@
 set -euo pipefail
 # shellcheck source=scripts/require-wrangler.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/require-wrangler.sh"
-# shellcheck source=scripts/credential-migration-schema-exclusion.sh
-source "$(dirname -- "${BASH_SOURCE[0]}")/credential-migration-schema-exclusion.sh"
 
 # This is a one-time pre-cutover baseline gate. After cutover, Wrangler's D1
 # migration ledger records and applies reviewed migrations; this script does not
@@ -24,8 +22,6 @@ cleanup() {
   rm -f "$remote_json" "$cutover_json" "$ledger_json" "$collision_json"
 }
 trap cleanup EXIT
-
-credential_migration_assert_transfer_state
 
 # The captured fixture is the pre-migration production state and therefore is
 # only valid for the 0000/0001 cutover. Once D1 records any migration, Wrangler's
@@ -67,8 +63,7 @@ fi
 
 local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --file fixtures/production-baseline-2026-08-15.sql >/dev/null
 schema_exclusions="'d1_migrations'"
-schema_exclusion_predicate="$(credential_migration_schema_exclusion)"
-query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ($schema_exclusions)$schema_exclusion_predicate ORDER BY type,name"
+query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ($schema_exclusions) ORDER BY type,name"
 local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
 "$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
 

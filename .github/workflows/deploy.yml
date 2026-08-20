@@ -76,15 +76,11 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Temporary bootstrap flag; removed by #67 after credential migration.
-          CREDENTIAL_MIGRATION_IN_PROGRESS: true
       - name: Re-assert the live schema before deploying the Worker
         run: bash scripts/check-production-schema.sh
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Temporary bootstrap flag; removed by #67 after credential migration.
-          CREDENTIAL_MIGRATION_IN_PROGRESS: true
       - name: Deploy only after secrets, migrations, and live schema verification
         run: ./node_modules/.bin/wrangler deploy
         env:

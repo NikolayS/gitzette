@@ -308,6 +308,8 @@ case "$endpoint" in
   *environments?per_page=100)
     if [[ "\${FAKE_MODE:-ok}" == production-missing ]]; then
       printf '[{"environments":[{"name":"credential-migration"}]}]\n'
+    elif [[ "\${FAKE_MODE:-ok}" == invalid-environment-name ]]; then
+      printf '[{"environments":[{"name":"production"},{"name":"unsafe name"}]}]\n'
     else
       printf '[{"environments":[{"name":"production"},{"name":"credential-migration"}]}]\n'
     fi
@@ -361,6 +363,15 @@ esac
     expect(await run("dependabot")).toBe(1);
     expect(await run("environment-variable")).toBe(1);
     expect(await run("admin")).toBe(1);
+    const invalidEnvironment = Bun.spawn(["bash", "scripts/check-reviewer-credential-isolation.sh"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "invalid-environment-name" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const invalidEnvironmentStderr = await new Response(invalidEnvironment.stderr).text();
+    expect(await invalidEnvironment.exited).toBe(1);
+    expect(invalidEnvironmentStderr).toContain("environment name cannot be safely audited: unsafe name");
+    expect(invalidEnvironmentStderr).not.toContain("unable to read");
     const apiError = Bun.spawn(["bash", "scripts/check-reviewer-credential-isolation.sh"], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${root}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_MODE: "api-error" },

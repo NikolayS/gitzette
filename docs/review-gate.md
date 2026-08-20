@@ -174,19 +174,20 @@ fails early because `scripts/check-release-tag-actor.sh` requires both
 `samo-agent` ID `280144521`. Production `prevent_self_review` remains a separate
 approval-time control.
 
-The exporter writes only RSA-4096-OAEP ciphertext to a transient table in the
-live Worker-bound application D1 database; no public Actions artifact is
-created. That encryption is the stored value's only confidentiality boundary:
-a Worker data-exposure path could leak ciphertext, but not plaintext, during
-the bootstrap window. It is not an authenticity boundary: a D1 write path could
+The exporter creates a dedicated D1 database that is never bound to the public
+Worker and writes only RSA-4096-OAEP ciphertext to its transient table; no
+public Actions artifact is created. That encryption is the stored value's only
+confidentiality boundary. It is not an authenticity boundary: an account-level D1 write path could
 replace ciphertext. The operator therefore proves the row identity, timestamp,
 and full ciphertext unchanged across two reads and binds the timestamp to the
 export window with a 120-second cross-provider clock-skew tolerance. Those checks
 protect against row replacement, duplication, and between-read mutation; the
 account-ID equality pin plus exact-account Worker token probe is the control that
 rejects substituted ciphertext containing attacker-selected credentials. The
-committed Cloudflare account and D1 database IDs are deliberately non-confidential
-identifiers used for exact-target binding. The account ID remains in the encrypted
+committed Cloudflare account and application D1 database IDs are deliberately
+non-confidential identifiers used for exact-target binding. The transfer database
+is resolved by its fixed reviewed name and deleted after stored-value verification.
+The account ID remains in the encrypted
 pair only to preserve and verify the existing two-secret runtime interface; only
 the API token depends on OAEP for confidentiality. Stored-value
 verification uses a workflow-dispatch run pinned to the exact protected `main`
@@ -199,14 +200,18 @@ The verifier's green result is evidence only together with recorded
 dispatch/approval window; GitHub's secret fallback makes the workflow result
 insufficient by itself.
 The independent scheduled policy guard always checks that same fixed policy. A
-separately scheduled switch guard remains red while either switch is open, so
-an expected switch failure cannot mask the policy workflow's first drift
-transition. The runbook requires green manual dispatches of both guards after
-each switch closes because GitHub schedules are best-effort. A green cleanup run is not evidence that the bootstrap workflow or
+separately scheduled switch guard observes repository-scoped switches and
+remains red while either is open, so an expected switch failure cannot mask the
+policy workflow's first drift transition. Environment variables can shadow
+repository variables inside protected jobs, so the switch guard alone cannot
+prove the effective switches are closed. The runbook requires green manual
+dispatches of both guards plus recorded output from
+`scripts/check-credential-migration-inventory.sh` after each switch closes;
+that inventory audit proves both environments contain no shadowing variables.
+GitHub schedules are best-effort. A green cleanup run is not evidence that the bootstrap workflow or
 environment has been removed; #67 verifies that separate teardown, removes the
 temporary `main` branch policy, and restores the `v*`-only production baseline.
-The D1
-transfer table remains as a durable consumed-once marker until repository
+The dedicated D1 transfer table remains as a durable consumed-once marker until repository
 credential copies are gone and stored-value verification succeeds.
 
 Nik explicitly accepts one bootstrap residual risk: immutable user ID

@@ -62,6 +62,10 @@ if [[ "$(jq '[.[] | select(.name == "production")] | length' <<<"$environments")
   exit 1
 fi
 while IFS= read -r environment; do
+  if [[ ! "$environment" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "environment name cannot be safely audited: $environment" >&2
+    exit 1
+  fi
   secrets="$(read_api "$environment environment secrets" --paginate --slurp "repos/$repository/environments/$environment/secrets?per_page=100" | jq -c 'map(.secrets) | add // []')"
   variables="$(read_api "$environment environment variables" --paginate --slurp "repos/$repository/environments/$environment/variables?per_page=100" | jq -c 'map(.variables) | add // []')"
   if [[ "$(jq length <<<"$variables")" -ne 0 ]]; then

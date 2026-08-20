@@ -4,10 +4,10 @@ This bootstrap moves the existing Cloudflare repository secrets into the
 protected `production` environment. Plaintext exists only inside the approved
 export job and a dedicated child Bash process on the operator host. The job
 encrypts it with the reviewed RSA-4096 public key and writes only ciphertext to
-a transient table in the live Worker-bound application D1 database. The only
-confidentiality control on that stored value is RSA-4096-OAEP: a Worker data
-exposure path could leak ciphertext, but not plaintext, during the bootstrap
-window. RSA does not authenticate the stored row. Retrieval therefore proves
+a transient table in a dedicated D1 database created by the one-shot export.
+That database is never bound to the public Worker. The only confidentiality
+control on the stored value is RSA-4096-OAEP. RSA does not authenticate the
+stored row. Retrieval therefore proves
 the row identity, timestamp, and full ciphertext unchanged across two reads and
 binds its timestamp to the completed export-run window with a documented clock-skew
 tolerance. The account-ID equality check and exact-account Worker token probe,
@@ -52,7 +52,14 @@ token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$OPERATOR_TOKEN_FILE" || true)"
 d1_token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$OPERATOR_TOKEN_FILE")"
 [[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
 account_id="a3265e0d0db71fdece29365819452f00"
-database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
+transfer_database_name="gitzette-credential-transfer-2026-08"
+database_id="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
+  --connect-timeout 10 --max-time 30 --config - \
+  "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database?name=$transfer_database_name" \
+  <<<"header = \"Authorization: Bearer $d1_token\"" |
+  jq -er --arg name "$transfer_database_name" '
+    select(.success == true) | [.result[] | select(.name == $name)] |
+    select(length == 1) | .[0].uuid')"
 migration_dir="$MIGRATION_KEY_DIR/run-$RUN_ID-1"
 test -s "$migration_dir/credentials.bin"
 test -s "$MIGRATION_KEY_DIR/production-migration-private.pem"
@@ -137,10 +144,11 @@ text matching is not the authorization proof.
    environment and hard-fails if the API reports bypass enabled. Nik must disable
    it in the UI, rerun the apply command, and pass the checker before opening a switch.
 
-   The export creates the temporary `credential_migration_transfer` table as a
-   durable consumed-once marker. Production schema gates exclude only that exact
-   table during this bootstrap; #67 removes the exclusion after dropping the
-   table and proves the ordinary exact-schema gate again.
+   The export creates a dedicated, non-Worker-bound D1 database named
+   `gitzette-credential-transfer-2026-08`; its temporary
+   `credential_migration_transfer` table is the durable consumed-once marker.
+   Production schema gates remain strict throughout the bootstrap because the
+   transfer database is not the application database.
 
    ```bash
    set -euo pipefail
@@ -238,12 +246,8 @@ text matching is not the authorization proof.
    After both applies, production policy does not change during export or
    verification; any checker failure is therefore real drift.
 
-   Throughout this temporary window, prefix every manual `bun run db:migrate`
-   invocation with `CREDENTIAL_MIGRATION_IN_PROGRESS=true`. Without that exact
-   value, the ordinary schema gates correctly reject the temporary transfer
-   table as drift. Do not run `bun run db:bootstrap` or
-   `scripts/bootstrap-production-db.sh`: bootstrap requires a completely empty
-   database and correctly rejects the transfer table.
+   Production migration and schema commands remain unchanged and strict during
+   this window; they never inspect or exclude the dedicated transfer database.
 
 2. Open the independently removable switch and dispatch exactly one export as
    immutable runner ID `280144521` (`samo-agent`). Workflow concurrency only
@@ -294,6 +298,7 @@ text matching is not the authorization proof.
      [[ "$remaining_export_switches" == 0 ]]
    fi
    bash scripts/check-credential-migration-environment.sh
+   bash scripts/check-credential-migration-inventory.sh
    ```
 
 4. Immediately after the single export succeeds, close the switch before a
@@ -309,12 +314,12 @@ text matching is not the authorization proof.
    response was lost, do not rerun that workflow run. Close the switch and query
    the exact `RUN_ID`. When a row exists, decrypt it and never replay the export.
    A table containing zero rows means the multi-query request stopped between
-   table creation and insert. The block below records that incident, drops only
-   the verified empty transfer table with the D1-only token, proves it absent,
+   table creation and insert. The block below records that incident, deletes only
+   the exact dedicated transfer database with the D1-only token, proves it absent,
    reopens the switch, and dispatches exactly one new run for a fresh Nik
-   approval. A proven-absent table means the job failed before the D1 write; it
-   is recoverable by the same one-time re-dispatch without a drop because no row
-   or consumed-once marker exists. This does not consume the one-shot authority,
+   approval. A proven-absent table means the job failed after creating the
+   dedicated database but before its table write; the recovery path deletes that
+   exact empty database before the same one-time re-dispatch. This does not consume the one-shot authority,
    and the rerun button remains forbidden by `run_attempt != 1`; recovery always
    creates one fresh dispatch and one fresh Nik approval. Any unexpected row or
    nonzero count other than one remains a hard stop with repository rollback
@@ -350,6 +355,7 @@ text matching is not the authorization proof.
        '[.[].name | select(. == "CREDENTIAL_EXPORT_OPEN")] | length')"
      [[ "$remaining_export_switches" == 0 ]]
    fi
+   bash scripts/check-credential-migration-inventory.sh
    jq -e '(.conclusion == "success" or .conclusion == "failure") and
      .event == "workflow_dispatch" and
      .workflowName == "Migrate production credential scope" and
@@ -364,7 +370,14 @@ text matching is not the authorization proof.
    d1_token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$operator_token_file")"
    [[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
    account_id="a3265e0d0db71fdece29365819452f00"
-   database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
+   transfer_database_name="gitzette-credential-transfer-2026-08"
+   database_id="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
+     --connect-timeout 10 --max-time 30 --config - \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database?name=$transfer_database_name" \
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
+     jq -er --arg name "$transfer_database_name" '
+       select(.success == true) | [.result[] | select(.name == $name)] |
+       select(length == 1) | .[0].uuid')"
    migration_dir="$MIGRATION_KEY_DIR/run-$RUN_ID-1"
    install -d -m 0700 "$migration_dir"
    incident_record_file="${INCIDENT_RECORD_FILE:?set a durable operator incident record outside MIGRATION_KEY_DIR}"
@@ -379,6 +392,17 @@ text matching is not the authorization proof.
      printf '%s export run %s requires %s recovery\n' \
        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" "$recovery_state" \
        >>"$incident_record_real"
+     curl --fail --silent --show-error --request DELETE \
+       --connect-timeout 10 --max-time 30 --config - \
+       "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id" \
+       <<<"header = \"Authorization: Bearer $d1_token\"" |
+       jq -e '.success == true' >/dev/null
+     curl --fail --silent --show-error --retry 2 --retry-all-errors \
+       --connect-timeout 10 --max-time 30 --config - \
+       "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database?name=$transfer_database_name" \
+       <<<"header = \"Authorization: Bearer $d1_token\"" |
+       jq -e --arg name "$transfer_database_name" '
+         .success == true and ([.result[] | select(.name == $name)] | length == 0)' >/dev/null
      bash scripts/check-credential-migration-environment.sh
      bash scripts/check-credential-migration-inventory.sh
      gh variable set CREDENTIAL_EXPORT_OPEN --body true
@@ -413,19 +437,6 @@ text matching is not the authorization proof.
           (.transfer_ciphertext | type == "string" and length > 0)))')"
    transfer_rows="$(jq -r .total_rows <<<"$transfer_snapshot")"
    if [[ "$transfer_rows" == 0 ]]; then
-     jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
-     curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
-       -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
-       "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
-       <<<"header = \"Authorization: Bearer $d1_token\"" |
-       jq -e '.success == true and (.result | length == 1) and .result[0].success == true' >/dev/null
-     jq -n '{sql:"select count(*) as remaining from sqlite_schema where type = \u0027table\u0027 and name = \u0027credential_migration_transfer\u0027"}' \
-       >"$migration_dir/prove-drop.json"
-     curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
-       -H 'Content-Type: application/json' --data-binary "@$migration_dir/prove-drop.json" \
-       "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
-       <<<"header = \"Authorization: Bearer $d1_token\"" |
-       jq -e '.success == true and .result[0].results[0].remaining == 0' >/dev/null
      dispatch_export_recovery empty-table
    fi
    [[ "$transfer_rows" == 1 ]]
@@ -467,6 +478,10 @@ text matching is not the authorization proof.
      (.CLOUDFLARE_API_TOKEN | type == "string" and length > 0)' >/dev/null
    gh api --method DELETE "repos/NikolayS/gitzette/actions/runs/$RUN_ID/logs"
    ```
+
+   Record the post-close inventory output with the export run ID. The green
+   repository-scoped switch guard is insufficient without this proof that
+   neither protected environment shadows the closed switch.
 
 5. Without printing values or writing plaintext, install both fields in the
    `production` environment. Independently prove the environment-scoped names
@@ -696,14 +711,13 @@ text matching is not the authorization proof.
    The migration workflow fails closed at `2026-08-27T00:00:00Z` before initial
    authorization and again after either environment approval. The temporary
    policy guard reports the same deadline. At that instant the production
-   environment checker requires the safer `v*`-only state, the production
-   environment apply script refuses to re-add `main`, and the production schema
-   helper prints an explicit expiry diagnostic and returns to the ordinary
-   strict schema comparison. Any remaining bootstrap workflow or policy then is
+   environment checker requires the safer `v*`-only state and the production
+   environment apply script refuses to re-add `main`. Production schema
+   comparison remains strict before and after that deadline. Any remaining bootstrap workflow or policy then is
    an incident, not an extension; teardown must remove the guard only together
    with the migration surface.
 
-7. After successful read-capability verification, drop the transfer table and
+7. After successful read-capability verification, delete the dedicated transfer database and
    remove nonessential local material, but retain the encrypted private key and
    `credentials.bin` rollback ciphertext until the first production deploy and
    mandatory smoke test succeed. The API probe above does not prove the token's
@@ -711,24 +725,19 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
-   jq -n '{sql:"drop table credential_migration_transfer"}' >"$migration_dir/drop.json"
-   curl --fail --silent --show-error \
+   curl --fail --silent --show-error --request DELETE \
      --connect-timeout 10 --max-time 30 --config - \
-     -H 'Content-Type: application/json' --data-binary "@$migration_dir/drop.json" \
-     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id" \
      <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -e '.success == true and (.result | length == 1) and .result[0].success == true' >/dev/null
-   jq -n '{sql:"select count(*) as remaining from sqlite_schema where type = \u0027table\u0027 and name = \u0027credential_migration_transfer\u0027"}' \
-     >"$migration_dir/prove-drop.json"
-   curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
-     -H 'Content-Type: application/json' --data-binary "@$migration_dir/prove-drop.json" \
-     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     jq -e '.success == true' >/dev/null
+   curl --fail --silent --show-error --retry 2 --retry-all-errors \
+     --connect-timeout 10 --max-time 30 --config - \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database?name=$transfer_database_name" \
      <<<"header = \"Authorization: Bearer $d1_token\"" |
-     jq -e '.success == true and (.result | length == 1) and
-       .result[0].success == true and (.result[0].results | length == 1) and
-       .result[0].results[0].remaining == 0' >/dev/null
+     jq -e --arg name "$transfer_database_name" '
+       .success == true and ([.result[] | select(.name == $name)] | length == 0)' >/dev/null
    unset plaintext ciphertext account_id api_token d1_token
-   for material in table-count.json select.json count.json drop.json prove-drop.json; do
+   for material in table-count.json select.json count.json; do
      [[ ! -f "$migration_dir/$material" ]] || shred -u "$migration_dir/$material"
    done
    test -s "$migration_dir/credentials.bin"
@@ -741,8 +750,7 @@ text matching is not the authorization proof.
    `.github/workflows/credential-migration-switch-guard.yml`,
    `config/credential-migration-environment.json`,
    all corresponding apply/check scripts, including
-   `scripts/check-credential-migration-inventory.sh`,
-   `scripts/credential-migration-schema-exclusion.sh`, and
+   `scripts/check-credential-migration-inventory.sh` and
    `scripts/credential-migration-gate.test.ts`. Delete the live
    `credential-migration` environment and both repository variables
    `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Remove the temporary
@@ -752,17 +760,6 @@ text matching is not the authorization proof.
    remove the temporary deadline branches from
    `scripts/apply-production-environment.sh` and
    `scripts/check-production-environment.sh`,
-   remove `CREDENTIAL_MIGRATION_IN_PROGRESS` from `deploy.yml` so all three
-   production schema gates again require the transfer table to be absent,
-   and remove the temporary helper integration from
-   `scripts/check-production-drift.sh`,
-   `scripts/check-production-applied-schema.sh`, and
-   `scripts/check-production-schema.sh`: delete each helper's ShellCheck/source
-   lines and `credential_migration_assert_transfer_state` call, then delete the
-   `schema_exclusion_predicate` assignment and its interpolation from each
-   schema query before deleting the helper itself,
-   remove the temporary manual-migration notice from
-   `docs/production-migrations.md`,
    remove only the credential-migration environment sub-block from the permanent
    `policy-api-readability` job in `.github/workflows/ci.yml`; retain that job,
    its production-environment probe, and its required status-check entry. Audit
@@ -777,7 +774,7 @@ text matching is not the authorization proof.
    teardown merges. The fixed widened policy is the reviewed verification path,
    so its guard intentionally reports any early tightening as drift; #67 must
    restore the safer `v*`-only policy atomically with removal of the bootstrap
-   workflows, switches, environment, and schema exclusion.
+   workflows, switches, and environment.
    #67 is expected to merge before the enforced
    `2026-08-27T00:00:00Z` deadline. If it does not, run
    `scripts/apply-production-environment.sh --restore-baseline` immediately;
