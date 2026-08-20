@@ -13,15 +13,22 @@ else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
 created_environment=false
-if [[ "$#" -ne 0 ]]; then
-  echo "usage: $0" >&2
-  exit 2
-fi
+restore_baseline=false
+case "$#:$*" in
+  0:) ;;
+  1:--restore-baseline) restore_baseline=true ;;
+  *) echo "usage: $0 [--restore-baseline]" >&2; exit 2 ;;
+esac
 policy="$root/config/production-environment.json"
+if [[ "$restore_baseline" == true ]]; then
+  effective_policy="$(jq -c '.branch_policies |= map(select(.name != "main" or .type != "branch"))' "$policy")"
+else
+  effective_policy="$(jq -c . "$policy")"
+fi
 bootstrap_expires_at="2026-08-27T00:00:00Z"
 if (( $(date -u +%s) >= $(date -u -d "$bootstrap_expires_at" +%s) )) &&
-  jq -e 'any(.branch_policies[]?; .name == "main" and .type == "branch")' "$policy" >/dev/null; then
-  echo "temporary production main admission expired at $bootstrap_expires_at; restore the v*-only policy through the reviewed teardown" >&2
+  jq -e 'any(.branch_policies[]?; .name == "main" and .type == "branch")' <<<"$effective_policy" >/dev/null; then
+  echo "temporary production main admission expired at $bootstrap_expires_at; run $0 --restore-baseline" >&2
   exit 1
 fi
 
@@ -47,7 +54,7 @@ fi
 # GitHub exposes can_admins_bypass in GET responses but does not accept it in
 # this PUT body. The preflight above refuses a bypassable existing environment;
 # the checker below proves that PUT preserved the disabled setting.
-jq '{wait_timer,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' "$policy" |
+jq '{wait_timer,prevent_self_review,reviewers:[.reviewers[]|{type,id}],deployment_branch_policy}' <<<"$effective_policy" |
   gh api --method PUT "repos/$repository/environments/production" --input - --silent
 
 if ! post_apply_environment="$(gh api "repos/$repository/environments/production" 2>"$error_file")"; then
@@ -64,8 +71,8 @@ if [[ "$(jq -r .can_admins_bypass <<<"$post_apply_environment")" != false ]]; th
   exit 1
 fi
 
-expected_policies="$(jq -c '.branch_policies' "$policy")"
-if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies "$policy")" == true ]]; then
+expected_policies="$(jq -c '.branch_policies' <<<"$effective_policy")"
+if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies <<<"$effective_policy")" == true ]]; then
   live="$(gh api --paginate --slurp "repos/$repository/environments/production/deployment-branch-policies?per_page=100" | jq -c 'map(.branch_policies) | add // []')"
   stale_policy_ids="$(jq -r --argjson expected "$expected_policies" '
     group_by([.name,.type])[] as $group |
@@ -88,4 +95,8 @@ if [[ "$(jq -r .deployment_branch_policy.custom_branch_policies "$policy")" == t
   done <<<"$desired_policies"
 fi
 
-"$root/scripts/check-production-environment.sh"
+if [[ "$restore_baseline" == true ]]; then
+  "$root/scripts/check-production-environment.sh" --restore-baseline
+else
+  "$root/scripts/check-production-environment.sh"
+fi

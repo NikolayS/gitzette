@@ -33,8 +33,18 @@ if [[ -z "$creator_id" || "$creator_id" != "$reviewer_id" ]]; then
   echo "samorev status has unexpected creator: $creator ($creator_id)" >&2
   exit 3
 fi
-if [[ -n "$not_before" && ( -z "$created_at" || "$created_at" < "$not_before" ) ]]; then
-  exit 2
+if [[ -n "$not_before" ]]; then
+  if ! not_before_epoch="$(date -u -d "$not_before" +%s)"; then
+    echo "SAMOREV_NOT_BEFORE is not a valid timestamp" >&2
+    exit 5
+  fi
+  if [[ -z "$created_at" ]] || ! created_at_epoch="$(date -u -d "$created_at" +%s)"; then
+    echo "samorev status has an invalid created_at timestamp" >&2
+    exit 3
+  fi
+  if (( created_at_epoch < not_before_epoch )); then
+    exit 2
+  fi
 fi
 if [[ "$actual_target_url" != "$target_url" ]]; then
   echo "samorev status targets the wrong publisher: $actual_target_url (expected $target_url)" >&2

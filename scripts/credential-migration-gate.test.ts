@@ -432,6 +432,7 @@ exit 8
     expect(deploy).not.toContain("workflow_dispatch");
     const productionConsumers: string[] = [];
     const repositoryCredentialConsumers: string[] = [];
+    const reusableWorkflowCredentialConsumers: string[] = [];
     for await (const name of new Bun.Glob("*.{yml,yaml}").scan(".github/workflows")) {
       const path = `.github/workflows/${name}`;
       const parsedWorkflow = Bun.YAML.parse(await Bun.file(path).text()) as {
@@ -450,7 +451,9 @@ exit 8
           expect(environment).not.toContain("${{");
         }
         if (environment === "production") productionConsumers.push(path);
-        if (JSON.stringify(job).includes("secrets.CLOUDFLARE_")) {
+        const reusableWorkflowCredentialConsumer = job.uses !== undefined && job.secrets !== undefined;
+        if (reusableWorkflowCredentialConsumer) reusableWorkflowCredentialConsumers.push(`${path}:${jobName}`);
+        if (JSON.stringify(job).includes("secrets.CLOUDFLARE_") || reusableWorkflowCredentialConsumer) {
           const repositoryExporter = path === ".github/workflows/migrate-production-credentials.yml" &&
             jobName === "export-encrypted-credentials";
           expect(
@@ -468,6 +471,7 @@ exit 8
     expect(repositoryCredentialConsumers).toEqual([
       ".github/workflows/migrate-production-credentials.yml:export-encrypted-credentials",
     ]);
+    expect(reusableWorkflowCredentialConsumers).toEqual([]);
 
     const authorizeRun = parsed.jobs["authorize-export"].steps.find(({ name }) => name?.startsWith("Require"))?.run;
     const revalidateRun = parsed.jobs["export-encrypted-credentials"].steps.find(({ name }) => name?.startsWith("Revalidate"))?.run;
@@ -710,7 +714,7 @@ fi
     const migrationDoc = await Bun.file("docs/credential-migration.md").text();
     const bashBlocks = [...migrationDoc.matchAll(/^[ \t]*```bash[ \t]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm)]
       .map((match) => match[1] ?? "");
-    expect(bashBlocks).toHaveLength(14);
+    expect(bashBlocks).toHaveLength(15);
 
     const runbookRoot = await mkdtemp(join(tmpdir(), "gitzette-migration-runbook-"));
     try {
@@ -890,7 +894,7 @@ ${closeSwitch}`,
       stdout: "pipe", stderr: "pipe",
     }).exited;
     for (const [migrationSwitch, expectedCount] of [
-      ["CREDENTIAL_EXPORT_OPEN", 1],
+      ["CREDENTIAL_EXPORT_OPEN", 2],
       ["CREDENTIAL_VERIFY_OPEN", 2],
     ] as const) {
       const closePattern = new RegExp(
@@ -1143,8 +1147,8 @@ set -euo pipefail
 if [[ "$*" == *" -d "* ]]; then printf '100\\n'; else printf '%s\\n' "\${FAKE_NOW_EPOCH:-99}"; fi
 `);
     await Bun.spawn(["chmod", "+x", date]).exited;
-    const run = async (adminBypass = false, create = false, nowEpoch = "99"): Promise<number> => Bun.spawn([
-      "bash", "scripts/apply-production-environment.sh",
+    const run = async (adminBypass = false, create = false, nowEpoch = "99", restoreBaseline = false): Promise<number> => Bun.spawn([
+      "bash", "scripts/apply-production-environment.sh", ...(restoreBaseline ? ["--restore-baseline"] : []),
     ], {
       cwd: process.cwd(),
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: "example/gitzette", FAKE_STATE: state, FAKE_ADMIN_BYPASS: String(adminBypass), FAKE_CREATE: String(create), FAKE_NOW_EPOCH: nowEpoch },
@@ -1162,13 +1166,17 @@ if [[ "$*" == *" -d "* ]]; then printf '100\\n'; else printf '%s\\n' "\${FAKE_NO
     expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
     expect(await run(false, false, "100")).toBe(1);
     expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
+    expect(await run(false, false, "100", true)).toBe(0);
+    expect(await Bun.file(`${state}.put-count`).text()).toBe("xx");
+    expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name)).toEqual(["v*"]);
 
     const applySource = await Bun.file("scripts/apply-production-environment.sh").text();
     expect(applySource).toContain("temporary production main admission expired");
     expect(applySource).toContain('any(.branch_policies[]?; .name == "main" and .type == "branch")');
+    expect(applySource).toContain("--restore-baseline");
     const policyBlock = applySource.slice(
       applySource.indexOf('expected_policies='),
-      applySource.lastIndexOf('\n"$root/scripts/check-production-environment.sh"'),
+      applySource.lastIndexOf('\nif [[ "$restore_baseline" == true ]]'),
     );
     const protectedPolicy = join(root, "protected-policy.json");
     await Bun.write(protectedPolicy, JSON.stringify({
@@ -1181,6 +1189,7 @@ if [[ "$*" == *" -d "* ]]; then printf '100\\n'; else printf '%s\\n' "\${FAKE_NO
     const protectedBlock = Bun.spawn([
       "bash", "-c", `set -euo pipefail
 policy="$FAKE_POLICY"
+effective_policy="$(jq -c . "$policy")"
 repository=example/gitzette
 gh() { "$FAKE_GH" "$@"; }
 ${policyBlock}`,

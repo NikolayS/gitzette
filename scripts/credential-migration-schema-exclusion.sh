@@ -13,7 +13,7 @@ credential_migration_assert_transfer_state() {
   deadline_epoch="$(date -u -d "$bootstrap_expires_at" +%s)"
   now_epoch="$(date -u +%s)"
   if (( now_epoch >= deadline_epoch )); then
-    echo "Credential migration schema exclusion expired at $bootstrap_expires_at; enforcing the ordinary strict schema"
+    echo "Credential migration schema exclusion expired at $bootstrap_expires_at; enforcing the ordinary strict schema" >&2
     return 0
   fi
 
@@ -63,9 +63,9 @@ credential_migration_assert_transfer_state() {
         echo "credential migration transfer table contains more than one row or invalid evidence" >&2
         return 1
       fi
-      echo "Credential migration transfer assertion OK: table has $row_count row(s)"
+      echo "Credential migration transfer assertion OK: table has $row_count row(s)" >&2
     else
-      echo "Credential migration transfer assertion OK: table is absent"
+      echo "Credential migration transfer assertion OK: table is absent" >&2
     fi
   )
 }

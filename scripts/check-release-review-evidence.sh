@@ -68,7 +68,12 @@ if ! jq -e --arg sha "$reviewed_sha" --arg repository "$repository" '
   exit 1
 fi
 publisher_started_at="$(jq -er .run_started_at <<<"$gate_run")"
-if [[ "$(jq -er .created_at <<<"$verdict")" < "$publisher_started_at" ]]; then
+if ! publisher_started_epoch="$(date -u -d "$publisher_started_at" +%s)" ||
+  ! verdict_created_epoch="$(date -u -d "$(jq -er .created_at <<<"$verdict")" +%s)"; then
+  echo "publisher or samorev evidence has an invalid timestamp" >&2
+  exit 1
+fi
+if (( verdict_created_epoch < publisher_started_epoch )); then
   echo "samorev verdict predates its targeted publisher run" >&2
   exit 1
 fi

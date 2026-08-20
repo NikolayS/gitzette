@@ -256,6 +256,20 @@ text matching is not the authorization proof.
    immediately before approval; do not approve if either the run identity or
    the environment check differs from the recorded evidence.
 
+   On any abort or operator shell interruption after opening the export switch,
+   close it before investigating or retrying anything, prove it absent, and
+   re-audit the migration environment immediately:
+
+   ```bash
+   set -euo pipefail
+   if ! gh variable delete CREDENTIAL_EXPORT_OPEN 2>/dev/null; then
+     remaining_export_switches="$(gh variable list --json name --jq \
+       '[.[].name | select(. == "CREDENTIAL_EXPORT_OPEN")] | length')"
+     [[ "$remaining_export_switches" == 0 ]]
+   fi
+   bash scripts/check-credential-migration-environment.sh
+   ```
+
 4. Immediately after the single export succeeds, close the switch before a
    queued duplicate can start, then retrieve the exact run's ciphertext through the
    D1-only token. Decrypt locally without printing plaintext. Only after valid
@@ -661,7 +675,8 @@ text matching is not the authorization proof.
    `credential-migration` environment and both repository variables
    `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Remove the temporary
    `main` branch entry from
-   `config/production-environment.json`, apply the restored `v*`-only policy,
+   `config/production-environment.json`, apply the restored `v*`-only policy
+   with `scripts/apply-production-environment.sh --restore-baseline`,
    remove the temporary deadline branches from
    `scripts/apply-production-environment.sh` and
    `scripts/check-production-environment.sh`,
@@ -689,6 +704,11 @@ text matching is not the authorization proof.
    so its guard intentionally reports any early tightening as drift; #67 must
    restore the safer `v*`-only policy atomically with removal of the bootstrap
    workflows, switches, environment, and schema exclusion.
+   #67 is expected to merge before the enforced
+   `2026-08-27T00:00:00Z` deadline. If it does not, run
+   `scripts/apply-production-environment.sh --restore-baseline` immediately;
+   this narrowing path remains available after expiry and does not depend on a
+   scheduled workflow firing.
    Tighten `scripts/check-reviewer-credential-isolation.sh` at the same time:
    repository Actions variables must be empty and repository Actions secrets
    may contain only the reviewed `CLAUDE_CODE_OAUTH_TOKEN` after migration,

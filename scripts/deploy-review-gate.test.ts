@@ -101,7 +101,7 @@ describe("deploy review revalidation", () => {
     expect(documentation).toContain("Never edit the live reviewer set without first");
     expect(documentation).toContain("`policy-api-readability` is required");
     expect(documentation).toContain("`scripts/apply-production-environment.sh`");
-    expect(documentation).toContain("incident-recorded last resort");
+    expect(documentation).toContain("not an approved break-glass path");
     expect(documentation).toContain("`scripts/check-branch-protection.sh`");
     const agentNotes = await Bun.file("CLAUDE.md").text();
     expect(agentNotes).not.toContain("admin-only update ruleset");

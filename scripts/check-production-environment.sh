@@ -12,15 +12,17 @@ if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 else
   repository="$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
 fi
-if [[ "$#" -ne 0 ]]; then
-  echo "usage: $0" >&2
-  exit 2
-fi
+restore_baseline=false
+case "$#:$*" in
+  0:) ;;
+  1:--restore-baseline) restore_baseline=true ;;
+  *) echo "usage: $0 [--restore-baseline]" >&2; exit 2 ;;
+esac
 policy="$root/config/production-environment.json"
 bootstrap_expires_at="2026-08-27T00:00:00Z"
 deadline_epoch="$(date -u -d "$bootstrap_expires_at" +%s)"
 now_epoch="$(date -u +%s)"
-if (( now_epoch >= deadline_epoch )); then
+if [[ "$restore_baseline" == true ]] || (( now_epoch >= deadline_epoch )); then
   expected="$(jq -Sc '
     .branch_policies |= map(select(.name != "main" or .type != "branch")) |
     .reviewers |= sort_by(.id) | .branch_policies |= sort_by(.name,.type)

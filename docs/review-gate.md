@@ -20,11 +20,10 @@ Because `policy-api-readability` is required, every merge also depends on the
 live GitHub environments API being readable and the `production` environment
 existing. Repair or recreate that environment from the canonical config with
 `scripts/apply-production-environment.sh`, then rerun CI. If an API outage makes
-that impossible and an urgent teardown cannot wait, a repository administrator
-may remove only this required context as an incident-recorded last resort; the
-external `samo-agent` update boundary and every other gate remain mandatory.
-Restore the context immediately afterward and re-audit the complete live policy
-with `scripts/check-branch-protection.sh`.
+that impossible, merging waits for the API to recover. Removing the required
+context is not an approved break-glass path: it would weaken the reviewed gate
+while the credential window is open. Record the outage, keep #67 ready, and
+rerun CI plus `scripts/check-branch-protection.sh` when the API is readable.
 
 The external runner uses the separate `samo-agent` credential. It publishes
 `samorev: pending`, runs a blocking Tanya301/samorev review of the exact head,
