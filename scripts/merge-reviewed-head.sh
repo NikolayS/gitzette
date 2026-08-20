@@ -27,10 +27,14 @@ if [[ -n "$(git -C "$root" status --porcelain --untracked-files=all)" ]]; then
   exit 1
 fi
 
-pr="$(gh pr view "$pr_number" --repo "$repository" --json headRefOid,state,baseRefName,headRepository)"
+pr="$(gh pr view "$pr_number" --repo "$repository" \
+  --json headRefOid,state,baseRefName,headRepository,headRepositoryOwner,isCrossRepository)"
 head_sha="$(jq -er .headRefOid <<<"$pr")"
 if ! jq -e --arg repository "$repository" '
-  .state == "OPEN" and .baseRefName == "main" and .headRepository.nameWithOwner == $repository
+  .state == "OPEN" and
+  .baseRefName == "main" and
+  .isCrossRepository == false and
+  ((.headRepositoryOwner.login + "/" + .headRepository.name) == $repository)
 ' <<<"$pr" >/dev/null; then
   echo "PR must be an open same-repository change targeting main" >&2
   exit 1

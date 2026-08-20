@@ -1,0 +1,16 @@
+{
+  "baseRefName": "main",
+  "headRefOid": "6f0fe992d15a4d4ce7fe37fcc70d9281477b1455",
+  "headRepository": {
+    "id": "R_kgDORs3m_Q",
+    "name": "gitzette",
+    "nameWithOwner": "NikolayS/gitzette"
+  },
+  "headRepositoryOwner": {
+    "id": "MDQ6VXNlcjEzNDU0MDI=",
+    "login": "NikolayS",
+    "name": "Nik Samokhvalov"
+  },
+  "isCrossRepository": false,
+  "state": "OPEN"
+}

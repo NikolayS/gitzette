@@ -274,6 +274,9 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("dispatch_export_recovery absent-table");
     expect(migrationDoc).toContain("never leave CREDENTIAL_EXPORT_OPEN set for more than five minutes");
     expect(migrationDoc).toContain("Production D1 REST batch preflight OK");
+    expect(migrationDoc).toContain('application_database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"');
+    expect(migrationDoc).toContain("unset application_database_id d1_token");
+    expect(migrationDoc.match(/\[\[ "\$database_id" != "4a3624d7-7de8-46d5-91f5-7ee79856ccaa" \]\]/g)?.length).toBe(2);
     expect(migrationDoc).toContain('{sql:"select ?1 as bound",params:["probe"]}');
     expect(migrationDoc).toContain('.result[1].results == [{bound:"probe"}]');
     expect(migrationDoc).toContain("select count(*) as total from sqlite_schema");

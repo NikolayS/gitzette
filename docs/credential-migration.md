@@ -162,7 +162,7 @@ text matching is not the authorization proof.
    d1_token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$operator_token_file")"
    [[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
    account_id="a3265e0d0db71fdece29365819452f00"
-   database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
+   application_database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
    batch_probe_request="$(mktemp)"
    jq -n '{batch:[
      {sql:"select 1 as batch_probe"},
@@ -170,13 +170,13 @@ text matching is not the authorization proof.
    ]}' >"$batch_probe_request"
    curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
      -H 'Content-Type: application/json' --data-binary "@$batch_probe_request" \
-     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$application_database_id/query" \
      <<<"header = \"Authorization: Bearer $d1_token\"" |
      jq -e '.success == true and (.result | length == 2) and
        .result[0].success == true and .result[0].results == [{batch_probe:1}] and
        .result[1].success == true and .result[1].results == [{bound:"probe"}]' >/dev/null
    rm -f "$batch_probe_request"
-   unset d1_token
+   unset application_database_id d1_token
    echo "Production D1 REST batch preflight OK"
    previous_guard_run_id="$(gh run list \
      --workflow=credential-migration-policy-guard.yml --branch main \
@@ -392,6 +392,7 @@ text matching is not the authorization proof.
      printf '%s export run %s requires %s recovery\n' \
        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" "$recovery_state" \
        >>"$incident_record_real"
+     [[ "$database_id" != "4a3624d7-7de8-46d5-91f5-7ee79856ccaa" ]]
      curl --fail --silent --show-error --request DELETE \
        --connect-timeout 10 --max-time 30 --config - \
        "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id" \
@@ -726,6 +727,15 @@ text matching is not the authorization proof.
 
    ```bash
    set -euo pipefail
+   transfer_database_name="gitzette-credential-transfer-2026-08"
+   database_id="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
+     --connect-timeout 10 --max-time 30 --config - \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database?name=$transfer_database_name" \
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
+     jq -er --arg name "$transfer_database_name" '
+       select(.success == true) | [.result[] | select(.name == $name)] |
+       select(length == 1) | .[0].uuid')"
+   [[ "$database_id" != "4a3624d7-7de8-46d5-91f5-7ee79856ccaa" ]]
    curl --fail --silent --show-error --request DELETE \
      --connect-timeout 10 --max-time 30 --config - \
      "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id" \

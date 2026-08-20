@@ -7,6 +7,7 @@ fi
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+live_pr_fixture="$root/fixtures/github-pr-view-live-2026-08-20.json"
 test_dir="$(mktemp -d)"
 trap 'rm -rf "$test_dir"' EXIT
 mkdir -p "$test_dir/repo/scripts" "$test_dir/bin"
@@ -28,7 +29,7 @@ case "$*" in
   *'status --porcelain --untracked-files=all'*)
     [[ "${FAKE_MODE:-success}" != dirty ]] || printf ' M dirty\n'
     ;;
-  *'rev-parse HEAD'*) printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' ;;
+  *'rev-parse HEAD'*) jq -r .headRefOid "${FAKE_PR_FIXTURE:?}" ;;
   *) exit 91 ;;
 esac
 EOF
@@ -54,16 +55,23 @@ fi
 if [[ "${1:-}" == pr && "${2:-}" == view ]]; then
   if [[ "$*" == *'--jq .headRefOid'* ]]; then
     [[ "$mode" != head-change ]] || { printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'; exit 0; }
-    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+    jq -r .headRefOid "${FAKE_PR_FIXTURE:?}"
   else
+    [[ "$*" == *'--json headRefOid,state,baseRefName,headRepository,headRepositoryOwner,isCrossRepository'* ]] || exit 92
     state=OPEN
     base=main
-    head_repository=example/gitzette
+    owner=example
+    is_cross=false
     [[ "$mode" != closed ]] || state=CLOSED
     [[ "$mode" != wrong-base ]] || base=develop
-    [[ "$mode" != fork ]] || head_repository=fork/gitzette
-    jq -nc --arg state "$state" --arg base "$base" --arg head_repository "$head_repository" \
-      '{headRefOid:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",state:$state,baseRefName:$base,headRepository:{nameWithOwner:$head_repository}}'
+    [[ "$mode" != fork ]] || { owner=fork; is_cross=true; }
+    jq -c --arg state "$state" --arg base "$base" --arg owner "$owner" \
+      --argjson is_cross "$is_cross" '
+        .state = $state |
+        .baseRefName = $base |
+        .headRepositoryOwner.login = $owner |
+        .isCrossRepository = $is_cross
+      ' "${FAKE_PR_FIXTURE:?}"
   fi
   exit 0
 fi
@@ -83,11 +91,13 @@ run_case() {
   actual_rc=0
   if [[ "$mode" == preset-token ]]; then
     GH_TOKEN=preset GITHUB_REPOSITORY=example/gitzette FAKE_MODE="$mode" \
+      FAKE_PR_FIXTURE="$live_pr_fixture" \
       FAKE_RECORD="$record" PATH="$test_dir/bin:$PATH" \
       bash "$test_dir/repo/scripts/merge-reviewed-head.sh" 68 \
       >"$test_dir/$mode.out" 2>"$test_dir/$mode.err" || actual_rc=$?
   else
     env -u GH_TOKEN GITHUB_REPOSITORY=example/gitzette FAKE_MODE="$mode" \
+      FAKE_PR_FIXTURE="$live_pr_fixture" \
       FAKE_RECORD="$record" PATH="$test_dir/bin:$PATH" \
       bash "$test_dir/repo/scripts/merge-reviewed-head.sh" 68 \
       >"$test_dir/$mode.out" 2>"$test_dir/$mode.err" || actual_rc=$?
@@ -104,7 +114,8 @@ expected_order=$'check-release-review-evidence.sh\ncheck-branch-protection.sh\nc
   echo "merge wrapper did not run evidence, admin policy, and non-admin policy in order" >&2
   exit 1
 }
-grep -q -- '--merge --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+expected_head="$(jq -r .headRefOid "$live_pr_fixture")"
+grep -q -- "--merge --match-head-commit $expected_head" \
   "$test_dir/success.record" || {
   echo "merge wrapper did not bind the merge to the reviewed head" >&2
   exit 1
