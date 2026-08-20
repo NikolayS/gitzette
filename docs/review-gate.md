@@ -137,10 +137,9 @@ code. Until the one-shot recovery completes, the Cloudflare credentials are
 repository-scoped and therefore potentially readable by any same-repository
 workflow job. The bootstrap adds exactly one new intentional reader,
 `.github/workflows/migrate-production-credentials.yml`, gated by the temporary
-Nik-only, self-review-blocked, protected-branch-only `credential-migration`
+Nik-only, self-review-blocked, explicit-main-only `credential-migration`
 environment, with `refs/heads/main` separately pinned by `authorize-export`.
-Protected `main` is currently the only admitted export ref; adding another
-protected branch would expand the environment and requires a fresh review. It
+The environment checker enumerates that sole `main` branch policy. It
 does not narrow the existing repository-secret exposure, which is why #67 must
 close the window immediately after verification. The canonical, mechanically
 checkable #67 teardown list is step 8 of `docs/credential-migration.md`; this
@@ -189,6 +188,22 @@ the distinct non-bypassable production approver. The repository-scoped
 Cloudflare-secret exposure is closed immediately after this bootstrap merges:
 apply both environments first, export once, delete repository copies before
 stored-value verification, and merge #67 immediately after verification.
+
+Nik's role as the sole ordinary `production` approver is an accepted
+single-person availability dependency; it is deliberately separate from the
+`samo-agent` tag sender and cannot self-approve that sender's deployment. If Nik
+is unavailable, the release waits unless a repository administrator opens an
+incident/change record naming a specific substitute reviewer by immutable user
+ID. Adding that reviewer requires a normal reviewed PR updating
+`config/production-environment.json`, exact-head CI and terminal-clean samorev,
+merge through the `samo-agent` boundary, then
+`scripts/apply-production-environment.sh` and
+`scripts/check-production-environment.sh` with their output attached to the
+incident. The tag remains `samo-agent`-only and self-review remains blocked.
+After the emergency deploy, remove the substitute through the same reviewed
+code-and-live-policy sequence. Never edit the live reviewer set without first
+changing the canonical config, and never disable `prevent_self_review` as
+break-glass.
 
 ## Artifact cleanup recovery
 

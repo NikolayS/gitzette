@@ -21,6 +21,12 @@ if [[ "$(jq -er .user.id <<<"$permission")" != "$expected_id" ||
   exit 1
 fi
 ruleset_summaries="$(gh api --paginate --slurp "repos/$repository/rulesets?includes_parents=false&per_page=100" | jq -c 'add // []')"
+if ! ruleset_names="$(jq -cer \
+  '[.repository_rulesets[].name] | select(length == 2 and (unique | length) == 2)' \
+  "$root/config/main-branch-protection.json")"; then
+  echo "reviewed policy must define exactly two repository rulesets" >&2
+  exit 1
+fi
 while IFS= read -r ruleset_name; do
   ruleset_ids="$(jq -r --arg name "$ruleset_name" '.[] | select(.name == $name) | .id' <<<"$ruleset_summaries")"
   if [[ "$(wc -w <<<"$ruleset_ids")" -ne 1 ]]; then
@@ -32,5 +38,5 @@ while IFS= read -r ruleset_name; do
     echo "samo-agent lacks the required always-bypass for $ruleset_name" >&2
     exit 1
   fi
-done < <(jq -r '.repository_rulesets[].name' "$root/config/main-branch-protection.json")
+done < <(jq -r '.[]' <<<"$ruleset_names")
 echo "External boundary OK: only samo-agent ID 280144521 can update main or mutate release tags"

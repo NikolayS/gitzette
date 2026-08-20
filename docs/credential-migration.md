@@ -135,6 +135,24 @@ text matching is not the authorization proof.
    bash scripts/check-production-environment.sh
    bash scripts/apply-credential-migration-environment.sh
    bash scripts/check-credential-migration-inventory.sh
+   operator_token_file="${OPERATOR_TOKEN_FILE:?set the private D1 token file}"
+   token_count="$(grep -c '^CLOUDFLARE_API_TOKEN=' "$operator_token_file" || true)"
+   [[ "$token_count" == 1 ]]
+   d1_token="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$operator_token_file")"
+   [[ -n "$d1_token" && "$d1_token" != *$'\n'* ]]
+   account_id="a3265e0d0db71fdece29365819452f00"
+   database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
+   batch_probe_request="$(mktemp)"
+   jq -n '{batch:[{sql:"select 1 as batch_probe"}]}' >"$batch_probe_request"
+   curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --config - \
+     -H 'Content-Type: application/json' --data-binary "@$batch_probe_request" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
+     jq -e '.success == true and (.result | length == 1) and
+       .result[0].success == true and .result[0].results == [{batch_probe:1}]' >/dev/null
+   rm -f "$batch_probe_request"
+   unset d1_token
+   echo "Production D1 REST batch preflight OK"
    previous_guard_run_id="$(gh run list \
      --workflow=credential-migration-policy-guard.yml --branch main \
      --event workflow_dispatch --limit 1 \
@@ -155,8 +173,11 @@ text matching is not the authorization proof.
    gh run watch "$POLICY_GUARD_RUN_ID" --exit-status
    ```
 
-   This preflight dispatch must be green before the scheduled guard is relied
-   on; API-read failures exit separately from policy drift. Its independent
+   The read-only `select 1` call is a mandatory live preflight of the exact
+   production D1 REST `{batch}` request shape using the D1-only operator token;
+   record its timestamp before opening either switch. The following guard
+   dispatch must also be green before the scheduled guard is relied on;
+   API-read failures exit separately from policy drift. Its independent
    `production-policy`, `migration-policy`, and `migration-switches` jobs prove
    the fixed production policy, the Nik-only migration approval boundary, and
    that neither repository-scoped
@@ -240,8 +261,13 @@ text matching is not the authorization proof.
    table creation and insert. The block below records that incident, drops only
    the verified empty transfer table with the D1-only token, proves it absent,
    reopens the switch, and dispatches exactly one new run for a fresh Nik
-   approval. Any absent table, unexpected row, or nonzero count other than one
-   remains a hard stop with repository rollback copies intact.
+   approval. A proven-absent table means the job failed before the D1 write; it
+   is recoverable by the same one-time re-dispatch without a drop because no row
+   or consumed-once marker exists. This does not consume the one-shot authority,
+   and the rerun button remains forbidden by `run_attempt != 1`; recovery always
+   creates one fresh dispatch and one fresh Nik approval. Any unexpected row or
+   nonzero count other than one remains a hard stop with repository rollback
+   copies intact.
 
    The reviewed Cloudflare D1 `/query` contract accepts either a single
    `{sql, params}` object or a `{batch}` array of query objects. The exporter uses
@@ -267,6 +293,30 @@ text matching is not the authorization proof.
    database_id="4a3624d7-7de8-46d5-91f5-7ee79856ccaa"
    migration_dir="$MIGRATION_KEY_DIR/run-$RUN_ID-1"
    install -d -m 0700 "$migration_dir"
+   dispatch_export_recovery() {
+     local recovery_state="$1"
+     bash scripts/check-credential-migration-environment.sh
+     bash scripts/check-credential-migration-inventory.sh
+     gh variable set CREDENTIAL_EXPORT_OPEN --body true
+     GH_TOKEN="$(gh auth token --user samo-agent)" \
+       gh workflow run migrate-production-credentials.yml --ref main -f operation=export
+     echo "$recovery_state recovery dispatched once; stop and obtain the new exact run ID" >&2
+     exit 1
+   }
+   jq -n '{sql:"select count(*) as total from sqlite_schema where type = \u0027table\u0027 and name = \u0027credential_migration_transfer\u0027"}' \
+     >"$migration_dir/table-count.json"
+   transfer_table_count="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
+     --connect-timeout 10 --max-time 30 --config - \
+     -H 'Content-Type: application/json' --data-binary "@$migration_dir/table-count.json" \
+     "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
+     <<<"header = \"Authorization: Bearer $d1_token\"" |
+     jq -er 'select(.success == true) | .result[0] | select(.success == true) |
+       .results[0].total | select(. == 0 or . == 1)')"
+   if [[ "$transfer_table_count" == 0 ]]; then
+     printf '%s export run %s failed before creating the transfer table\n' \
+       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" >>"$migration_dir/incident.log"
+     dispatch_export_recovery absent-table
+   fi
    jq -n '{sql:"select count(*) as total_rows from credential_migration_transfer"}' \
      >"$migration_dir/count.json"
    transfer_rows="$(curl --fail --silent --show-error --retry 2 --retry-all-errors \
@@ -291,13 +341,7 @@ text matching is not the authorization proof.
        "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
        <<<"header = \"Authorization: Bearer $d1_token\"" |
        jq -e '.success == true and .result[0].results[0].remaining == 0' >/dev/null
-     bash scripts/check-credential-migration-environment.sh
-     bash scripts/check-credential-migration-inventory.sh
-     gh variable set CREDENTIAL_EXPORT_OPEN --body true
-     GH_TOKEN="$(gh auth token --user samo-agent)" \
-       gh workflow run migrate-production-credentials.yml --ref main -f operation=export
-     echo "empty-table recovery dispatched once; stop and obtain the new exact run ID" >&2
-     exit 1
+     dispatch_export_recovery empty-table
    fi
    [[ "$transfer_rows" == 1 ]]
    jq -n --arg run_id "$RUN_ID" '{

@@ -58,4 +58,4 @@ if [[ "$actual" != "$expected" ]]; then
   echo "actual:   $actual" >&2
   exit 1
 fi
-echo "Credential migration environment OK: Nik-only approval, self-review blocked, protected branches only"
+echo "Credential migration environment OK: Nik-only approval, self-review blocked, main only"

@@ -72,8 +72,8 @@ describe("one-shot credential migration boundary", () => {
     expect(policy.can_admins_bypass).toBe(false);
     expect(policy.prevent_self_review).toBe(true);
     expect(policy.reviewers.map(({ id }) => id)).toEqual([1345402]);
-    expect(policy.branch_policies).toEqual([]);
-    expect(policy.deployment_branch_policy).toEqual({ protected_branches: true, custom_branch_policies: false });
+    expect(policy.branch_policies).toEqual([{ name: "main", type: "branch" }]);
+    expect(policy.deployment_branch_policy).toEqual({ protected_branches: false, custom_branch_policies: true });
     const productionPolicy = JSON.parse(await Bun.file("config/production-environment.json").text()) as {
       can_admins_bypass: boolean;
       prevent_self_review: boolean;
@@ -146,7 +146,7 @@ describe("one-shot credential migration boundary", () => {
       previousExportSwitchOffset = exportSwitchOffset;
     }
     expect(migrationDoc.indexOf("gh variable delete CREDENTIAL_EXPORT_OPEN")).toBeLessThan(
-      migrationDoc.indexOf('operator_token_file="${OPERATOR_TOKEN_FILE'),
+      migrationDoc.lastIndexOf('operator_token_file="${OPERATOR_TOKEN_FILE'),
     );
     expect(migrationDoc).toContain("gh variable set CREDENTIAL_VERIFY_OPEN --body true");
     expect(migrationDoc.lastIndexOf("bash scripts/check-production-environment.sh", migrationDoc.indexOf("gh variable set CREDENTIAL_VERIFY_OPEN"))).toBeGreaterThan(-1);
@@ -217,7 +217,10 @@ describe("one-shot credential migration boundary", () => {
     );
     expect(migrationDoc).toContain('previous_guard_run_id="$(gh run list');
     expect(migrationDoc).toContain("created an empty transfer table");
-    expect(migrationDoc).toContain("empty-table recovery dispatched once");
+    expect(migrationDoc).toContain("dispatch_export_recovery empty-table");
+    expect(migrationDoc).toContain("dispatch_export_recovery absent-table");
+    expect(migrationDoc).toContain("Production D1 REST batch preflight OK");
+    expect(migrationDoc).toContain("select count(*) as total from sqlite_schema");
     expect(migrationDoc).toContain("sqlite_schema where type = \\u0027table\\u0027");
     expect(migrationDoc.indexOf("mandatory smoke test both succeed")).toBeLessThan(
       migrationDoc.indexOf('shred -u "$MIGRATION_KEY_DIR/production-migration-private.pem"'),
@@ -1059,12 +1062,12 @@ case "$endpoint" in
         echo "gh: Not Found (HTTP 404)" >&2; exit 1
         ;;
     esac
-    reviewer_id=1345402; reviewer_login=NikolayS; prevent=true; admin_bypass=false; wait_timer=0; protected=true; custom=false
+    reviewer_id=1345402; reviewer_login=NikolayS; prevent=true; admin_bypass=false; wait_timer=0; protected=false; custom=true
     [[ "\${FAKE_MODE:-ok}" != reviewer ]] || { reviewer_id=280144521; reviewer_login=samo-agent; }
     [[ "\${FAKE_MODE:-ok}" != self-review ]] || prevent=false
     [[ "\${FAKE_MODE:-ok}" != admin-bypass ]] || admin_bypass=true
     [[ "\${FAKE_MODE:-ok}" != wait-timer ]] || wait_timer=5
-    [[ "\${FAKE_MODE:-ok}" != custom-branch-policy ]] || { protected=false; custom=true; }
+    [[ "\${FAKE_MODE:-ok}" != protected-branch-policy ]] || { protected=true; custom=false; }
     extra='[]'
     [[ "\${FAKE_MODE:-ok}" != extra-reviewer ]] || extra='[{"type":"User","reviewer":{"id":280144521,"login":"samo-agent"}}]'
     jq -n --argjson id "$reviewer_id" --arg login "$reviewer_login" --argjson prevent "$prevent" \
@@ -1077,9 +1080,11 @@ case "$endpoint" in
   *environments?per_page=100) printf '%s\n' '[{"environments":[]}]' ;;
   *deployment-branch-policies*)
     if [[ "\${FAKE_MODE:-ok}" == extra-policy ]]; then
-      printf '%s\\n' '[{"branch_policies":[{"name":"other","type":"branch"}]}]'
-    else
+      printf '%s\\n' '[{"branch_policies":[{"name":"main","type":"branch"},{"name":"other","type":"branch"}]}]'
+    elif [[ "\${FAKE_MODE:-ok}" == no-policy ]]; then
       printf '%s\\n' '[{"branch_policies":[]}]'
+    else
+      printf '%s\\n' '[{"branch_policies":[{"name":"main","type":"branch"}]}]'
     fi
     ;;
   *credential-migration/variables*)
@@ -1124,11 +1129,11 @@ esac
     expect(await run("ok")).toBe(0);
     expect(await run("reviewer")).toBe(1);
     expect(await run("self-review")).toBe(1);
-    expect(await run("extra-policy")).toBe(0);
+    expect(await run("extra-policy")).toBe(1);
     expect(await run("extra-reviewer")).toBe(1);
-    expect(await run("no-policy")).toBe(0);
+    expect(await run("no-policy")).toBe(1);
     expect(await run("wait-timer")).toBe(1);
-    expect(await run("custom-branch-policy")).toBe(1);
+    expect(await run("protected-branch-policy")).toBe(1);
     expect(await run("admin-bypass")).toBe(1);
     expect(await run("missing")).toBe(4);
     expect(await run("auth")).toBe(3);
@@ -1232,23 +1237,22 @@ case "$endpoint" in
       exit 1
     fi
     bypass=false; [[ "\${FAKE_MODE:-correct}" != missing && "\${FAKE_MODE:-correct}" != bypass ]] || bypass=true
-    protected=true; custom=false
-    if [[ ! -f "$FAKE_RECORD/installed" && ( "\${FAKE_MODE:-correct}" == stale || "\${FAKE_MODE:-correct}" == duplicate ) ]]; then
-      protected=false; custom=true
-    fi
+    protected=false; custom=true
     jq -nc --argjson bypass "$bypass" --argjson protected "$protected" --argjson custom "$custom" '{can_admins_bypass:$bypass,protection_rules:[{type:"required_reviewers",prevent_self_review:true,reviewers:[{type:"User",reviewer:{id:1345402,login:"NikolayS"}}]}],deployment_branch_policy:{protected_branches:$protected,custom_branch_policies:$custom}}'
     ;;
   *environments?per_page=100) printf '%s\n' '[{"environments":[]}]' ;;
   *deployment-branch-policies*)
     count_file="$FAKE_RECORD/policy-count"; count=0; [[ ! -f "$count_file" ]] || count="$(<"$count_file")"; count=$((count + 1)); printf '%s' "$count" >"$count_file"
-    if [[ "$count" -ge 2 ]]; then
+    if [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 1 ]]; then
+      printf '%s\\n' '[{"branch_policies":[{"id":9,"name":"other","type":"branch"}]}]'
+    elif [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 2 ]]; then
+      printf '%s\\n' '[{"branch_policies":[]}]'
+    elif [[ "\${FAKE_MODE:-correct}" == missing && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[]}]'
     elif [[ "\${FAKE_MODE:-correct}" == duplicate && "$count" -eq 1 ]]; then
       printf '%s\\n' '[{"branch_policies":[{"id":10,"name":"main","type":"branch"},{"id":11,"name":"main","type":"branch"}]}]'
-    elif [[ "\${FAKE_MODE:-correct}" == stale && "$count" -eq 1 ]]; then
-      printf '%s\\n' '[{"branch_policies":[{"id":9,"name":"other","type":"branch"}]}]'
     else
-      printf '%s\\n' '[{"branch_policies":[]}]'
+      printf '%s\\n' '[{"branch_policies":[{"id":10,"name":"main","type":"branch"}]}]'
     fi
     ;;
   *credential-migration/variables*) printf '%s\\n' '[{"variables":[]}]' ;;
@@ -1270,7 +1274,7 @@ esac
     expect(await run("stale", stale)).toBe(0);
     expect(JSON.parse(await Bun.file(join(stale, "put.json")).text()).can_admins_bypass).toBeUndefined();
     expect(await Bun.file(join(stale, "delete.log")).text()).toContain("deployment-branch-policies/9");
-    expect(await Bun.file(join(stale, "post.log")).exists()).toBe(false);
+    expect(await Bun.file(join(stale, "post.log")).text()).toContain("name=main");
 
     const correct = join(root, "correct");
     expect(await run("correct", correct)).toBe(0);
@@ -1279,8 +1283,8 @@ esac
 
     const duplicate = join(root, "duplicate");
     expect(await run("duplicate", duplicate)).toBe(0);
-    expect(await Bun.file(join(duplicate, "delete.log")).text()).toContain("deployment-branch-policies/10");
     expect(await Bun.file(join(duplicate, "delete.log")).text()).toContain("deployment-branch-policies/11");
+    expect(await Bun.file(join(duplicate, "delete.log")).text()).not.toContain("deployment-branch-policies/10");
     expect(await Bun.file(join(duplicate, "post.log")).exists()).toBe(false);
 
     const bypass = join(root, "bypass");

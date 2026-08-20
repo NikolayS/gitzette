@@ -14,6 +14,7 @@ describe("deploy review revalidation", () => {
     const documentation = await Bun.file("docs/review-gate.md").text();
     const branchPolicy = JSON.parse(await Bun.file("config/main-branch-protection.json").text());
     const applyBranchPolicy = await Bun.file("scripts/apply-branch-protection.sh").text();
+    const checkNonadminBoundary = await Bun.file("scripts/check-branch-protection-nonadmin.sh").text();
     const reviewerWrapper = await Bun.file("scripts/run-samorev-review.sh").text();
     const tagActorGate = "scripts/check-release-tag-actor.sh";
     expect(workflow).toContain('set -euo pipefail');
@@ -86,12 +87,18 @@ describe("deploy review revalidation", () => {
       applyBranchPolicy.indexOf("actions/permissions/workflow"),
     );
     expect(applyBranchPolicy).toContain("current_user_can_bypass");
+    expect(checkNonadminBoundary.indexOf("select(length == 2 and")).toBeLessThan(
+      checkNonadminBoundary.indexOf("while IFS= read -r ruleset_name"),
+    );
     expect(documentation).toContain("every changed enforcement script under\n`scripts/check-*.sh`");
     expect(documentation).toContain("Actions bot's immutable ID, not `280144521`");
     expect(documentation).toContain("GitHub Actions and repository administrators are\nnot bypass actors");
     expect(documentation).toContain("Administrator policy authorization is explicit");
     expect(documentation).toContain("intentionally removed formal GitHub\npull-request approval as evidence");
     expect(documentation).toContain("Nik explicitly accepts one bootstrap residual risk");
+    expect(documentation).toContain("single-person availability dependency");
+    expect(documentation).toContain("incident/change record naming a specific substitute reviewer");
+    expect(documentation).toContain("Never edit the live reviewer set without first");
     const agentNotes = await Bun.file("CLAUDE.md").text();
     expect(agentNotes).not.toContain("admin-only update ruleset");
     expect(agentNotes).toContain("Only the external\n`samo-agent` identity (ID `280144521`) may update `main`");
