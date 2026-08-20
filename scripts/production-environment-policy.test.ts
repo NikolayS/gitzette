@@ -51,6 +51,7 @@ exec /usr/bin/grep "$@"
       await Bun.write(record, "");
       const env = {
         ...process.env,
+        GITHUB_ACTIONS: "false",
         PATH: `${aptBin}:${process.env.PATH}`,
         APT_ROOT: aptRoot,
         FAKE_SUDO_MODE: options.mode ?? "normal",
