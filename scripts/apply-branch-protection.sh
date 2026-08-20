@@ -3,13 +3,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository="${GITHUB_REPOSITORY:-$(gh repo view "$(git -C "$root" remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)}"
-policy="${BRANCH_PROTECTION_POLICY:-$root/config/main-branch-protection.json}"
+policy="$root/config/main-branch-protection.json"
 
 # Validate the complete local policy before arming the partial-mutation audit.
-if [[ "$(jq '.repository_rulesets | length' "$policy")" -ne 2 ]]; then
-  echo "branch policy must define exactly the main and release-tag rulesets" >&2
-  exit 1
-fi
+"$root/scripts/check-branch-protection-policy-file.sh" "$policy"
 owner_type="$(gh api "repos/$repository" --jq .owner.type)"
 
 audit_partial_apply() {

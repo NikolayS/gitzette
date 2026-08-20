@@ -1128,6 +1128,7 @@ case "$method:$endpoint" in
   GET:*environments?per_page=100) printf '[{"environments":[]}]\n' ;;
   GET:*deployment-branch-policies*) jq -c '[{branch_policies:.}]' "$FAKE_STATE" ;;
   POST:*deployment-branch-policies*)
+    printf '%s:%s\n' "$name" "$type" >>"$FAKE_STATE.post-log"
     next_id="$(jq '[.[].id] | max + 1' "$FAKE_STATE")"
     jq --argjson id "$next_id" --arg name "$name" --arg type "$type" '. + [{id:$id,name:$name,type:$type}]' "$FAKE_STATE" >"$FAKE_STATE.next"
     mv "$FAKE_STATE.next" "$FAKE_STATE"
@@ -1166,9 +1167,15 @@ if [[ "$*" == *" -d "* ]]; then printf '100\\n'; else printf '%s\\n' "\${FAKE_NO
     expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
     expect(await run(false, false, "100")).toBe(1);
     expect(await Bun.file(`${state}.put-count`).text()).toBe("x");
+    await rm(`${state}.post-log`, { force: true });
     expect(await run(false, false, "100", true)).toBe(0);
     expect(await Bun.file(`${state}.put-count`).text()).toBe("xx");
     expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name)).toEqual(["v*"]);
+    expect(await Bun.file(`${state}.post-log`).exists()).toBe(false);
+    expect(await run(false, false, "100", true)).toBe(0);
+    expect(await Bun.file(`${state}.put-count`).text()).toBe("xxx");
+    expect(JSON.parse(await Bun.file(state).text()).map(({ name }: { name: string }) => name)).toEqual(["v*"]);
+    expect(await Bun.file(`${state}.post-log`).exists()).toBe(false);
 
     const applySource = await Bun.file("scripts/apply-production-environment.sh").text();
     expect(applySource).toContain("temporary production main admission expired");

@@ -152,9 +152,7 @@ run_failure multiple
 one_ruleset_policy="$test_dir/one-ruleset.json"
 jq 'del(.repository_rulesets[1])' "$root/config/main-branch-protection.json" >"$one_ruleset_policy"
 one_ruleset_record="$test_dir/one-ruleset"
-if GITHUB_REPOSITORY=example/gitzette FAKE_MODE=success FAKE_RECORD="$one_ruleset_record" \
-  FAKE_POLICY="$one_ruleset_policy" BRANCH_PROTECTION_POLICY="$one_ruleset_policy" \
-  PATH="$test_dir:$PATH" bash "$root/scripts/apply-branch-protection.sh" \
+if bash "$root/scripts/check-branch-protection-policy-file.sh" "$one_ruleset_policy" \
   >"$one_ruleset_record.out" 2>"$one_ruleset_record.err"; then
   echo "one-ruleset policy unexpectedly applied" >&2
   exit 1

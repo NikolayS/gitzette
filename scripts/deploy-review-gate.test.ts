@@ -14,6 +14,7 @@ describe("deploy review revalidation", () => {
     const documentation = await Bun.file("docs/review-gate.md").text();
     const branchPolicy = JSON.parse(await Bun.file("config/main-branch-protection.json").text());
     const applyBranchPolicy = await Bun.file("scripts/apply-branch-protection.sh").text();
+    const validateBranchPolicy = await Bun.file("scripts/check-branch-protection-policy-file.sh").text();
     const checkNonadminBoundary = await Bun.file("scripts/check-branch-protection-nonadmin.sh").text();
     const reviewerWrapper = await Bun.file("scripts/run-samorev-review.sh").text();
     const tagActorGate = "scripts/check-release-tag-actor.sh";
@@ -77,9 +78,11 @@ describe("deploy review revalidation", () => {
     expect(reviewerWrapper).toContain("publish error");
     expect(reviewerWrapper).toContain('>"$log_file" 2>&1');
     expect(reviewerWrapper).not.toContain('> >(tee "$log_file")');
-    expect(applyBranchPolicy.indexOf("repository_rulesets | length")).toBeLessThan(
+    expect(applyBranchPolicy.indexOf("check-branch-protection-policy-file.sh")).toBeLessThan(
       applyBranchPolicy.indexOf("{allow_auto_merge}"),
     );
+    expect(validateBranchPolicy).toContain("repository_rulesets | length");
+    expect(applyBranchPolicy).not.toContain("BRANCH_PROTECTION_POLICY");
     expect(applyBranchPolicy.indexOf("trap audit_partial_apply EXIT")).toBeLessThan(
       applyBranchPolicy.indexOf("{allow_auto_merge}"),
     );
