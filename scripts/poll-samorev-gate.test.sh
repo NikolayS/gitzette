@@ -64,7 +64,7 @@ run_case() {
   printf '%s\n' "$@" >"$fixture"
   : >"$SAMOREV_PUBLISH_LOG"
   actual_rc=0
-  SAMOREV_FETCH_FIXTURE="$fixture" SAMOREV_MAX_ATTEMPTS="$#" \
+  GITHUB_ACTIONS=false SAMOREV_FETCH_FIXTURE="$fixture" SAMOREV_MAX_ATTEMPTS="$#" \
     bash "$root/scripts/poll-samorev-gate.sh" >/dev/null 2>&1 || actual_rc=$?
   [[ "$actual_rc" == "$expected_rc" ]] || { echo "$name returned $actual_rc, expected $expected_rc" >&2; exit 1; }
   [[ "$(tail -1 "$SAMOREV_PUBLISH_LOG")" == "$expected_terminal" ]] || { echo "$name published the wrong terminal status" >&2; exit 1; }
@@ -88,7 +88,7 @@ run_case exhausted 1 'failure|samorev did not finish within the polling window' 
 
 : >"$SAMOREV_PUBLISH_LOG"
 actual_rc=0
-IS_DRAFT=true SAMOREV_FETCH_FIXTURE=/dev/null SAMOREV_MAX_ATTEMPTS=1 \
+GITHUB_ACTIONS=false IS_DRAFT=true SAMOREV_FETCH_FIXTURE=/dev/null SAMOREV_MAX_ATTEMPTS=1 \
   bash "$root/scripts/poll-samorev-gate.sh" >/dev/null 2>&1 || actual_rc=$?
 [[ "$actual_rc" == 1 && "$(tail -1 "$SAMOREV_PUBLISH_LOG")" == 'failure|Draft PRs are not eligible for review' ]] || {
   echo "draft short-circuit failed" >&2
