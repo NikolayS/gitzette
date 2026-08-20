@@ -94,8 +94,14 @@ for attempt in $(seq 1 "$max_attempts"); do
       publish_terminal success "immutable-reviewer samorev verdict passed"
       exit 0
       ;;
-    1|3)
-      publish_terminal failure "samorev verdict failed identity or outcome validation"
+    1)
+      printf '%s\n' "$verdict_diagnostic" >&2
+      publish_terminal failure "samorev reviewer reported failure"
+      exit 1
+      ;;
+    3)
+      printf '%s\n' "$verdict_diagnostic" >&2
+      publish_terminal failure "samorev verdict failed identity validation"
       exit 1
       ;;
     2)
@@ -110,15 +116,18 @@ for attempt in $(seq 1 "$max_attempts"); do
       malformed_failures=$((malformed_failures + 1))
       last_non_terminal_reason=malformed
       if [[ "$malformed_failures" -ge 3 ]]; then
+        printf '%s\n' "$verdict_diagnostic" >&2
         publish_terminal error "samorev status response was malformed three times"
         exit 1
       fi
       ;;
     5)
+      printf '%s\n' "$verdict_diagnostic" >&2
       publish_terminal error "samorev verdict evaluator is misconfigured"
       exit 1
       ;;
     *)
+      printf '%s\n' "$verdict_diagnostic" >&2
       publish_terminal error "samorev verdict evaluator failed unexpectedly"
       exit 1
       ;;

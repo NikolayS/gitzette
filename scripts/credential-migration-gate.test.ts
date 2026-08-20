@@ -38,7 +38,7 @@ describe("one-shot credential migration boundary", () => {
         if?: string;
         environment?: string | { name?: unknown };
         permissions?: Record<string, string>;
-        steps: Array<{ name?: string; run?: string }>;
+        steps: Array<{ name?: string; run?: string; env?: Record<string, unknown> }>;
       }>;
     };
     expect(Object.keys(parsed.on)).toEqual(["workflow_dispatch"]);
@@ -52,7 +52,16 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
     expect(workflow).toContain("MIGRATION_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
-    expect(workflow.match(/BOOTSTRAP_EXPIRES_AT: 2026-08-27T00:00:00Z/g)).toHaveLength(3);
+    expect(workflow.match(/BOOTSTRAP_EXPIRES_AT: '2026-08-27T00:00:00Z'/g)).toHaveLength(3);
+    const migrationDeadlines = Object.values(parsed.jobs).flatMap(({ steps }) =>
+      steps.flatMap(({ env }) => env?.BOOTSTRAP_EXPIRES_AT ?? []),
+    );
+    expect(migrationDeadlines).toEqual([
+      "2026-08-27T00:00:00Z",
+      "2026-08-27T00:00:00Z",
+      "2026-08-27T00:00:00Z",
+    ]);
+    expect(migrationDeadlines.every((value) => typeof value === "string")).toBe(true);
     expect(workflow).toContain("both production environment credentials must be present");
     expect(workflow).toContain("secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID");
     expect(workflow).toContain("secrets.PRODUCTION_CLOUDFLARE_API_TOKEN");
@@ -340,7 +349,7 @@ describe("one-shot credential migration boundary", () => {
     const parsedPolicyGuard = Bun.YAML.parse(policyGuard) as {
       on: { schedule: Array<{ cron: string }> };
       permissions: Record<string, string>;
-      jobs: Record<string, { permissions: Record<string, string>; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, unknown> }> }>;
+      jobs: Record<string, { permissions: Record<string, string>; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, unknown>; env?: Record<string, unknown> }> }>;
     };
     const parsedSwitchGuard = Bun.YAML.parse(switchGuard) as typeof parsedPolicyGuard;
     const parsedDeadlineGuard = Bun.YAML.parse(deadlineGuard) as typeof parsedPolicyGuard;
@@ -360,7 +369,12 @@ describe("one-shot credential migration boundary", () => {
     expect(switchGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
     expect(switchGuard).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
     expect(switchGuard).toContain('a credential migration switch remains defined');
-    expect(deadlineGuard).toContain("BOOTSTRAP_EXPIRES_AT: 2026-08-27T00:00:00Z");
+    expect(deadlineGuard).toContain("BOOTSTRAP_EXPIRES_AT: '2026-08-27T00:00:00Z'");
+    const guardDeadlines = Object.values(parsedDeadlineGuard.jobs).flatMap(({ steps }) =>
+      steps.flatMap(({ env }) => env?.BOOTSTRAP_EXPIRES_AT ?? []),
+    );
+    expect(guardDeadlines).toEqual(["2026-08-27T00:00:00Z"]);
+    expect(typeof guardDeadlines[0]).toBe("string");
     expect(deadlineGuard).toContain("credential bootstrap deadline expired");
     expect(policyGuard).not.toContain("  migration-switches:");
     expect(policyGuard).not.toContain("if: ${{ github.repository == 'NikolayS/gitzette' }}");

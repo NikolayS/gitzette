@@ -63,9 +63,10 @@ run_case() {
   shift 3
   printf '%s\n' "$@" >"$fixture"
   : >"$SAMOREV_PUBLISH_LOG"
+  output="$test_dir/$name.output"
   actual_rc=0
   GITHUB_ACTIONS=false SAMOREV_FETCH_FIXTURE="$fixture" SAMOREV_MAX_ATTEMPTS="$#" \
-    bash "$root/scripts/poll-samorev-gate.sh" >/dev/null 2>&1 || actual_rc=$?
+    bash "$root/scripts/poll-samorev-gate.sh" >"$output" 2>&1 || actual_rc=$?
   [[ "$actual_rc" == "$expected_rc" ]] || { echo "$name returned $actual_rc, expected $expected_rc" >&2; exit 1; }
   [[ "$(tail -1 "$SAMOREV_PUBLISH_LOG")" == "$expected_terminal" ]] || { echo "$name published the wrong terminal status" >&2; exit 1; }
 }
@@ -78,8 +79,16 @@ wrong_target='[[{"context":"samorev","state":"success","created_at":"2026-08-16T
 run_case transport 1 'error|GitHub status API failed three consecutive times' __FAIL__ __FAIL__ __FAIL__
 run_case malformed 1 'error|samorev status response was malformed three times' not-json not-json not-json
 run_case interleaved 0 'success|immutable-reviewer samorev verdict passed' __FAIL__ "$pending" __FAIL__ "$success"
-run_case failed-verdict 1 'failure|samorev verdict failed identity or outcome validation' "$failure"
-run_case forged-creator 1 'failure|samorev verdict failed identity or outcome validation' "$forged"
+run_case failed-verdict 1 'failure|samorev reviewer reported failure' "$failure"
+grep -q 'samorev reported failure' "$test_dir/failed-verdict.output" || {
+  echo "failed verdict diagnostic was suppressed" >&2
+  exit 1
+}
+run_case forged-creator 1 'failure|samorev verdict failed identity validation' "$forged"
+grep -q 'samorev status has unexpected creator: forged (1)' "$test_dir/forged-creator.output" || {
+  echo "forged creator diagnostic was suppressed" >&2
+  exit 1
+}
 run_case superseded-publisher 0 'success|immutable-reviewer samorev verdict passed' "$wrong_target" "$success"
 run_case wrong-target-exhausted 1 'failure|latest samorev verdict targeted a different publisher run' "$wrong_target" "$wrong_target"
 run_case wrong-target-then-malformed 1 'failure|latest samorev status response was malformed' "$wrong_target" not-json
