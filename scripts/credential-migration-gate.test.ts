@@ -132,7 +132,16 @@ describe("one-shot credential migration boundary", () => {
     expect(migrationDoc).toContain("token_count=\"$(grep -c");
     expect(migrationDoc).not.toContain("export CLOUDFLARE_API_TOKEN");
     expect(migrationDoc).toContain("concurrency only\n   serializes accidental duplicates");
-    expect(migrationDoc.lastIndexOf("bash scripts/check-credential-migration-environment.sh", migrationDoc.indexOf("gh variable set CREDENTIAL_EXPORT_OPEN"))).toBeGreaterThan(-1);
+    const exportSwitchOffsets = [...migrationDoc.matchAll(/gh variable set CREDENTIAL_EXPORT_OPEN/g)]
+      .map((match) => match.index);
+    expect(exportSwitchOffsets).toHaveLength(2);
+    let previousExportSwitchOffset = -1;
+    for (const exportSwitchOffset of exportSwitchOffsets) {
+      const precedingWindow = migrationDoc.slice(previousExportSwitchOffset + 1, exportSwitchOffset);
+      expect(precedingWindow).toContain("bash scripts/check-credential-migration-environment.sh");
+      expect(precedingWindow).toContain("bash scripts/check-credential-migration-inventory.sh");
+      previousExportSwitchOffset = exportSwitchOffset;
+    }
     expect(migrationDoc.indexOf("gh variable delete CREDENTIAL_EXPORT_OPEN")).toBeLessThan(
       migrationDoc.indexOf('operator_token_file="${OPERATOR_TOKEN_FILE'),
     );
@@ -157,9 +166,17 @@ describe("one-shot credential migration boundary", () => {
       "scripts/check-production-schema.sh",
     ]) {
       const gate = await Bun.file(schemaGate).text();
-      expect(gate).toContain("credential_migration_transfer");
-      expect(gate).toContain("if [[ -f config/credential-migration-environment.json ]]");
+      expect(gate).toContain("credential-migration-schema-exclusion.sh");
+      expect(gate).toContain("credential_migration_assert_transfer_state");
+      expect(gate).toContain("credential_migration_schema_exclusion");
     }
+    const schemaExclusion = await Bun.file("scripts/credential-migration-schema-exclusion.sh").text();
+    expect(schemaExclusion).toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
+    expect(schemaExclusion).toContain(". >= 0 and . <= 1");
+    expect(schemaExclusion).toContain("credential_migration_transfer");
+    expect(workflow).not.toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
+    const deployWorkflow = await Bun.file(".github/workflows/deploy.yml").text();
+    expect(deployWorkflow.match(/CREDENTIAL_MIGRATION_IN_PROGRESS: true/g)).toHaveLength(2);
     expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("[[ \"$verify_status\" == 0 ]]")).toBeLessThan(
       migrationDoc.lastIndexOf("drop table credential_migration_transfer"),
@@ -194,6 +211,8 @@ describe("one-shot credential migration boundary", () => {
       "credential-migration-policy-guard.yml", "credential-migration-environment.json",
       "credential-migration-gate.test.ts",
       "check-credential-migration-inventory.sh",
+      "credential-migration-schema-exclusion.sh",
+      "CREDENTIAL_MIGRATION_IN_PROGRESS",
       "CREDENTIAL_EXPORT_OPEN", "CREDENTIAL_VERIFY_OPEN",
     ]) expect(migrationDoc).toContain(teardownItem);
     expect(migrationDoc).toContain("Retain `scripts/get-github-environment.sh`");
@@ -222,6 +241,8 @@ describe("one-shot credential migration boundary", () => {
     expect(policyGuard).toContain("EXPORT_OPEN: ${{ vars.CREDENTIAL_EXPORT_OPEN }}");
     expect(policyGuard).toContain("VERIFY_OPEN: ${{ vars.CREDENTIAL_VERIFY_OPEN }}");
     expect(policyGuard).toContain('a credential migration switch remains defined');
+    expect(policyGuard).toContain("BOOTSTRAP_EXPIRES_AT: 2026-08-27T00:00:00Z");
+    expect(policyGuard).toContain("credential bootstrap deadline expired");
     expect(policyGuard).toContain("  migration-switches:");
     expect(policyGuard).not.toContain("if: ${{ github.repository == 'NikolayS/gitzette' }}");
     expect(parsedPolicyGuard.permissions).toEqual({});
@@ -509,6 +530,7 @@ fi
     expect(d1Request.batch[0].params).toBeUndefined();
     expect(d1Request.batch[1].sql).toContain("insert into credential_migration_transfer");
     expect(d1Request.batch[1].sql).toContain("datetime('now')");
+    expect(d1Request.batch[1].sql).toContain("where not exists");
     expect(d1Request.batch[1].params[0]).toBe("77");
     expect(d1Request.batch[1].params[1]).toBe(Buffer.from(await Bun.file(encryptedPath).arrayBuffer()).toString("base64"));
     const transferDb = new Database(":memory:");
@@ -520,6 +542,8 @@ fi
       ciphertext: d1Request.batch[1].params[1],
       created_at: expect.any(String),
     });
+    transferDb.prepare(d1Request.batch[1].sql).run("88", "second-ciphertext");
+    expect(transferDb.query("select count(*) as total from credential_migration_transfer").get()).toEqual({ total: 1 });
     expect(() => {
       for (const statement of d1Request.batch) {
         transferDb.prepare(statement.sql).run(...(statement.params ?? []));
@@ -578,6 +602,45 @@ fi
     } finally {
       await rm(runbookRoot, { recursive: true, force: true });
     }
+  });
+
+  test("bounds the temporary production schema exclusion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gitzette-transfer-schema-gate-"));
+    const wrangler = join(root, "wrangler");
+    await Bun.write(wrangler, `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *sqlite_schema* ]]; then
+  total="\${FAKE_TABLE_COUNT:-0}"
+else
+  total="\${FAKE_ROW_COUNT:-0}"
+fi
+printf '[{"results":[{"total":%s}]}]\\n' "$total"
+`);
+    await Bun.spawn(["chmod", "+x", wrangler]).exited;
+    const execute = (migrationState: string, tableCount: string, rowCount: string): Promise<number> =>
+      Bun.spawn(["bash", "-c", `
+set -euo pipefail
+source scripts/credential-migration-schema-exclusion.sh
+wrangler_bin="$FAKE_WRANGLER"
+credential_migration_assert_transfer_state
+credential_migration_schema_exclusion
+`], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          CREDENTIAL_MIGRATION_IN_PROGRESS: migrationState,
+          FAKE_WRANGLER: wrangler,
+          FAKE_TABLE_COUNT: tableCount,
+          FAKE_ROW_COUNT: rowCount,
+        },
+        stdout: "pipe", stderr: "pipe",
+      }).exited;
+    expect(await execute("false", "1", "2")).toBe(0);
+    expect(await execute("true", "0", "0")).toBe(0);
+    expect(await execute("true", "1", "1")).toBe(0);
+    expect(await execute("true", "1", "2")).toBe(1);
+    expect(await execute("yes", "0", "0")).toBe(1);
+    await rm(root, { recursive: true, force: true });
   });
 
   test("closes both migration switches idempotently on operator re-entry", async () => {

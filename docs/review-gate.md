@@ -150,6 +150,8 @@ protected `production` environment; tag-triggered deploys require that
 environment's approval. Release tags must be pushed by immutable `samo-agent`
 ID `280144521`, leaving Nik as the distinct sole production approver; a tag
 pushed by Nik or repository Actions fails before deployment.
+Failed Deploy runs must also be rerun by `samo-agent`; a rerun triggered by Nik
+fails early because production prevents the triggering actor from self-review.
 
 The exporter writes only RSA-encrypted ciphertext to a transient table in the
 private D1 database; no public Actions artifact is created. Stored-value
@@ -158,6 +160,10 @@ tip. GitHub records that immutable run SHA before the production approval wait,
 and the workflow re-resolves `main` before and after approval. During the
 bootstrap, production admits only reviewed `main` and `v*` refs, so
 verification never widens policy and cancellation cannot strand broader access.
+The verifier's green result is evidence only together with recorded
+`REQUIRE_NO_REPOSITORY_CREDENTIALS=true` inventory output from the same
+dispatch/approval window; GitHub's secret fallback makes the workflow result
+insufficient by itself.
 The independent scheduled guard always checks that same fixed policy. The
 switch-residue job remains red while either switch is open, and the runbook
 requires a green manual guard dispatch after each switch closes because GitHub

@@ -249,6 +249,8 @@ text matching is not the authorization proof.
        "https://api.cloudflare.com/client/v4/accounts/$account_id/d1/database/$database_id/query" \
        <<<"header = \"Authorization: Bearer $d1_token\"" |
        jq -e '.success == true and .result[0].results[0].remaining == 0' >/dev/null
+     bash scripts/check-credential-migration-environment.sh
+     bash scripts/check-credential-migration-inventory.sh
      gh variable set CREDENTIAL_EXPORT_OPEN --body true
      GH_TOKEN="$(gh auth token --user samo-agent)" \
        gh workflow run migrate-production-credentials.yml --ref main -f operation=export
@@ -336,6 +338,12 @@ text matching is not the authorization proof.
    `samo-agent` ID `280144521`, and the non-bypassable production environment
    requires Nik ID `1345402` to approve that exact run. Same-repository Actions
    workflows possess neither identity.
+
+   A green verifier is valid evidence only when paired with the recorded
+   `REQUIRE_NO_REPOSITORY_CREDENTIALS=true` inventory output from the same
+   dispatch/approval window. The workflow token cannot enumerate repository
+   secret names, so the run alone cannot distinguish an environment value from
+   GitHub's same-named repository-secret fallback.
 
    ```bash
    set -euo pipefail
@@ -447,6 +455,11 @@ text matching is not the authorization proof.
    Record its run ID next to the pre-verification run ID and reconcile every red
    scheduled run between them to this single verification window.
 
+   The temporary policy guard mechanically expires this bootstrap at
+   `2026-08-27T00:00:00Z`. Any remaining bootstrap workflow or policy at that
+   deadline is an incident, not an extension; teardown must remove the guard
+   only together with the migration surface.
+
 7. After successful read-capability verification, drop the transfer table and
    remove nonessential local material, but retain the encrypted private key and
    `credentials.bin` rollback ciphertext until the first production deploy and
@@ -485,13 +498,15 @@ text matching is not the authorization proof.
    `config/credential-migration-environment.json`,
    all corresponding apply/check scripts, including
    `scripts/check-credential-migration-inventory.sh`,
+   `scripts/credential-migration-schema-exclusion.sh`, and
    `scripts/credential-migration-gate.test.ts`. Delete the live
    `credential-migration` environment and both repository variables
    `CREDENTIAL_EXPORT_OPEN` and `CREDENTIAL_VERIFY_OPEN`. Remove the temporary
    `main` branch entry from
    `config/production-environment.json`, apply the restored `v*`-only policy,
-   remove the `credential_migration_transfer` exclusions from all three
-   production schema gates, remove the transient credential-migration
+   remove `CREDENTIAL_MIGRATION_IN_PROGRESS` from `deploy.yml` so all three
+   production schema gates again require the transfer table to be absent,
+   remove the transient credential-migration
    readability block from `.github/workflows/ci.yml`, and audit the ordinary exact-schema policy before
    any later release. Run and record the final green guard
    before deleting its workflow; after merge, prove the two

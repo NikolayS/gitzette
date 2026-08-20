@@ -6,8 +6,8 @@ if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 set -euo pipefail
 
-if [[ "$#" -ne 1 || "$1" != 280144521 ]]; then
-  echo "release tags must be pushed by samo-agent so Nik can approve production" >&2
+if [[ "$#" -ne 2 || "$1" != 280144521 || "$2" != 280144521 ]]; then
+  echo "release tags and Deploy reruns must be triggered by samo-agent so Nik can approve production" >&2
   exit 1
 fi
-echo "Release tag actor OK: immutable samo-agent ID 280144521"
+echo "Release tag and triggering actor OK: immutable samo-agent ID 280144521"
