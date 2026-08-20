@@ -43,6 +43,7 @@ assert_drift() {
 
 assert_drift bypass "$(jq -c '.required_pull_request_reviews.bypass_pull_request_allowances={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 assert_drift dismissal "$(jq -c '.required_pull_request_reviews.dismissal_restrictions={users:[{login:"attacker"}],teams:[]}' <<<"$protection")"
+assert_drift pull-request-requirement-removed "$(jq -c 'del(.required_pull_request_reviews)' <<<"$protection")"
 assert_drift restrictions "$(jq -c '.restrictions={users:[{login:"attacker"}],teams:[],apps:[]}' <<<"$protection")"
 assert_drift missing-ruleset "$protection" '[]'
 assert_drift actions-bypass "$protection" "$(jq -c '.[0].bypass_actors += [{actor_id:15368,actor_type:"Integration",bypass_mode:"always"}]' <<<"$rulesets")"

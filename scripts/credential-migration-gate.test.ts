@@ -177,6 +177,7 @@ describe("one-shot credential migration boundary", () => {
     expect(workflow).not.toContain("CREDENTIAL_MIGRATION_IN_PROGRESS");
     const deployWorkflow = await Bun.file(".github/workflows/deploy.yml").text();
     expect(deployWorkflow.match(/CREDENTIAL_MIGRATION_IN_PROGRESS: true/g)).toHaveLength(2);
+    expect(deployWorkflow.match(/Temporary bootstrap flag; removed by #67/g)).toHaveLength(2);
     expect(migrationDoc).toContain("On any abort or operator");
     expect(migrationDoc.indexOf("[[ \"$verify_status\" == 0 ]]")).toBeLessThan(
       migrationDoc.lastIndexOf("drop table credential_migration_transfer"),
@@ -414,7 +415,8 @@ elif [[ "$arguments" == *'/actions/runs/'* ]]; then
 elif [[ "$arguments" == *'/commits/main'* ]]; then
   printf '{"sha":"%s"}\\n' "\${FAKE_MAIN_SHA:-exact-sha}"
 else
-  printf '{"success":%s,"result":[{"success":%s},{"success":%s}]}\\n' "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_CF_SUCCESS:-true}"
+  printf '{"success":%s,"result":[{"success":%s},{"success":%s,"meta":{"changes":%s}}]}\\n' \
+    "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_CF_SUCCESS:-true}" "\${FAKE_D1_CHANGES:-1}"
 fi
 `);
     await Bun.spawn(["chmod", "+x", curl]).exited;
@@ -524,6 +526,9 @@ fi
     expect(await Bun.spawn(["bash", "-c", executableExport], {
       env: { ...exportEnv, CLOUDFLARE_ACCOUNT_ID: "wrong-account" }, stdout: "pipe", stderr: "pipe",
     }).exited).toBe(1);
+    expect(await Bun.spawn(["bash", "-c", executableExport], {
+      env: { ...exportEnv, FAKE_D1_CHANGES: "0" }, stdout: "pipe", stderr: "pipe",
+    }).exited).toBe(1);
     const encryptedPath = join(throwawayRoot, "gitzette-credential-migration", "credentials.bin");
     const decrypted = Bun.spawnSync({
       cmd: ["openssl", "pkeyutl", "-decrypt", "-inkey", privatePath,
@@ -537,8 +542,10 @@ fi
       CLOUDFLARE_ACCOUNT_ID: "a3265e0d0db71fdece29365819452f00",
       CLOUDFLARE_API_TOKEN: "exact-token",
     });
+    expect(migrationDoc).not.toContain('<<<"$plaintext"');
+    expect(migrationDoc).toContain('export TMPDIR="$MIGRATION_KEY_DIR"');
     const plaintextAccessors = [...migrationDoc.matchAll(
-      /jq -j -e -r (\.[A-Za-z_][A-Za-z0-9_]*) <<<"\$plaintext"/g,
+      /printf '%s' "\$plaintext" \| jq -j -e -r (\.[A-Za-z_][A-Za-z0-9_]*)/g,
     )].map((match) => match[1] ?? "");
     expect(plaintextAccessors).toHaveLength(4);
     expect(new Set(plaintextAccessors)).toEqual(new Set([
@@ -726,6 +733,7 @@ ${closeSwitch}`,
     const ci = Bun.YAML.parse(ciSource) as {
       jobs: Record<string, {
         "timeout-minutes"?: number;
+        permissions?: Record<string, string>;
         steps: Array<{ name?: string; run?: string }>;
       }>;
     };
@@ -733,6 +741,7 @@ ${closeSwitch}`,
     const job = ci.jobs[jobName];
     expect(job).toBeDefined();
     expect(job["timeout-minutes"]).toBe(2);
+    expect(job.permissions).toEqual({ actions: "read", contents: "read" });
     expect(ci.jobs.typecheck?.["timeout-minutes"]).toBe(15);
     const runBlock = job.steps.find(({ name }) => name === "Prove policy guard API readability")?.run;
     expect(runBlock).toBeDefined();

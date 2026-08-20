@@ -16,8 +16,8 @@ describe("deploy review revalidation", () => {
     expect(workflow).toContain('set -euo pipefail');
     expect(workflow).toContain('bash scripts/check-release-review-evidence.sh "$reviewed_sha"');
     expect(workflow).toContain("TAG_PUSHER_ID: ${{ github.actor_id }}");
-    expect(workflow).toContain("TRIGGERING_ACTOR_LOGIN: ${{ github.triggering_actor }}");
-    expect(workflow).toContain('triggering_actor_id="$(gh api "users/$TRIGGERING_ACTOR_LOGIN" --jq .id)"');
+    expect(workflow).toContain('triggering_actor_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .triggering_actor.id)"');
+    expect(workflow).not.toContain("TRIGGERING_ACTOR_LOGIN");
     expect(workflow).toContain('bash scripts/check-release-tag-actor.sh "$TAG_PUSHER_ID" "$triggering_actor_id"');
     expect(workflow).not.toContain('/reviews\")');
     expect(workflow).not.toContain('.state == "APPROVED"');
@@ -138,7 +138,10 @@ exit 91
 `);
 await Bun.write(join(bin, "gh"), `#!/usr/bin/env bash
 set -euo pipefail
-if [[ "$*" == *"users/"* ]]; then printf '%s\\n' 280144521; exit 0; fi
+if [[ "$*" == *"/actions/runs/"* ]]; then
+  printf '%s\\n' "\${FAKE_TRIGGERING_ACTOR_ID:-280144521}"
+  exit 0
+fi
 base=main; merged=2026-01-01T00:00:00Z; merge_sha="$GITHUB_SHA"
 case "\${FAKE_MODE:-success}" in
   none) printf '[]\\n'; exit 0 ;;
@@ -157,11 +160,20 @@ jq -nc --arg base "$base" --arg merged "$merged" --arg merge_sha "$merge_sha" \
       env: {
         ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_SHA: sha,
         FAKE_MAIN_SHA: mainSha, FAKE_MODE: mode, GITHUB_REPOSITORY: "example/gitzette",
-        TAG_PUSHER_ID: "280144521", TRIGGERING_ACTOR_LOGIN: "samo-agent",
+        GITHUB_RUN_ID: "77", TAG_PUSHER_ID: "280144521",
       },
       stdout: "pipe", stderr: "pipe",
     }).exited;
     expect(await execute("success")).toBe(0);
+    expect(await Bun.spawn(["bash", "-c", runBlock], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_SHA: sha,
+        FAKE_MAIN_SHA: sha, FAKE_MODE: "success", GITHUB_REPOSITORY: "example/gitzette",
+        GITHUB_RUN_ID: "77", TAG_PUSHER_ID: "280144521", FAKE_TRIGGERING_ACTOR_ID: "1",
+      },
+      stdout: "pipe", stderr: "pipe",
+    }).exited).not.toBe(0);
     expect(await execute("success", "c".repeat(40))).not.toBe(0);
     expect(await execute("none")).not.toBe(0);
     expect(await execute("unmerged")).not.toBe(0);

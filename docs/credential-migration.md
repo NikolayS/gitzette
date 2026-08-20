@@ -48,6 +48,7 @@ text matching is not the authorization proof.
      echo "MIGRATION_KEY_DIR must be tmpfs or an operator-verified encrypted volume" >&2
      exit 1
    fi
+   export TMPDIR="$MIGRATION_KEY_DIR"
    private_key="$MIGRATION_KEY_DIR/production-migration-private.pem"
    encrypted_key="$MIGRATION_KEY_DIR/production-migration-private.encrypted.pem"
    test -s "$private_key"
@@ -275,10 +276,9 @@ text matching is not the authorization proof.
      -inkey "$MIGRATION_KEY_DIR/production-migration-private.pem" \
      -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
      -pkeyopt rsa_mgf1_md:sha256 -in "$migration_dir/credentials.bin")"
-   jq -e 'type == "object" and
+   printf '%s' "$plaintext" | jq -e 'type == "object" and
      (.CLOUDFLARE_ACCOUNT_ID | type == "string" and length > 0) and
-     (.CLOUDFLARE_API_TOKEN | type == "string" and length > 0)' \
-     <<<"$plaintext" >/dev/null
+     (.CLOUDFLARE_API_TOKEN | type == "string" and length > 0)' >/dev/null
    gh api --method DELETE "repos/NikolayS/gitzette/actions/runs/$RUN_ID/logs"
    ```
 
@@ -293,8 +293,8 @@ text matching is not the authorization proof.
    environment_secrets_before="$(gh api --paginate --slurp \
      'repos/NikolayS/gitzette/environments/production/secrets?per_page=100' |
      jq -c 'map(.secrets) | add // []')"
-   exported_account_id="$(jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
-   api_token="$(jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
+   exported_account_id="$(printf '%s' "$plaintext" | jq -j -e -r .CLOUDFLARE_ACCOUNT_ID)"
+   api_token="$(printf '%s' "$plaintext" | jq -j -e -r .CLOUDFLARE_API_TOKEN)"
    [[ "$exported_account_id" == "$account_id" ]] || {
      echo "exported account ID is not the reviewed Worker account" >&2
      exit 1
@@ -379,8 +379,8 @@ text matching is not the authorization proof.
    set -e
    rollback_restored=false
    if [[ "$verify_status" != 0 ]]; then
-     rollback_account_id="$(jq -j -e -r .CLOUDFLARE_ACCOUNT_ID <<<"$plaintext")"
-     rollback_api_token="$(jq -j -e -r .CLOUDFLARE_API_TOKEN <<<"$plaintext")"
+     rollback_account_id="$(printf '%s' "$plaintext" | jq -j -e -r .CLOUDFLARE_ACCOUNT_ID)"
+     rollback_api_token="$(printf '%s' "$plaintext" | jq -j -e -r .CLOUDFLARE_API_TOKEN)"
      printf '%s' "$rollback_account_id" | gh secret set CLOUDFLARE_ACCOUNT_ID
      printf '%s' "$rollback_api_token" | gh secret set CLOUDFLARE_API_TOKEN
      unset rollback_account_id rollback_api_token
