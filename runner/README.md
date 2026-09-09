@@ -14,6 +14,11 @@ secret, AI API keys, TARS state, messaging configuration, or a tool-capable
 agent session. The OpenClaw config denies every agent tool; text and images use
 the direct `openclaw infer` capability surface. It intentionally contains no
 Gateway block, and the systemd service never starts a Gateway process.
+
+The shipped configuration uses keyed `agents.entries` for OpenClaw 2026.9.2.
+Image selection is explicit on each `infer image generate --model` call; do not
+restore the retired `agents.defaults.imageGenerationModel` setting. Validate the
+configuration with the installed OpenClaw before attempting OAuth activation.
 Public commit messages and PR/issue titles are untrusted third-party input. They
 are serialized inside the hostile-evidence delimiter, never interpolated into a
 shell, and reach an agent with `tools.deny=["*"]`, no channels, elevation off,

@@ -13,7 +13,7 @@ describe("OpenClaw CLI boundary", () => {
       channels: Record<string, unknown>;
       agents: {
         defaults: { sandbox: { mode: string; scope: string; workspaceAccess: string } };
-        list: { tools: { deny: string[] } }[];
+        entries: Record<string, { tools: { deny: string[] } }>;
       };
     };
     expect(document.tools).toEqual({ deny: ["*"], elevated: { enabled: false } });
@@ -23,8 +23,8 @@ describe("OpenClaw CLI boundary", () => {
       scope: "agent",
       workspaceAccess: "none",
     });
-    expect(document.agents.list).toHaveLength(1);
-    expect(document.agents.list[0].tools).toEqual({ deny: ["*"] });
+    expect(Object.keys(document.agents.entries)).toEqual(["main"]);
+    expect(document.agents.entries.main.tools).toEqual({ deny: ["*"] });
   });
 
   test("uses an argv array, verifies the image envelope, and strips secrets", async () => {
