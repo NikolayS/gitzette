@@ -83,7 +83,7 @@ describe("OpenClaw CLI boundary", () => {
       return Bun.spawn([
         "/usr/bin/printf",
         "%s",
-        JSON.stringify({ ok: true, provider: "openai", model: "gpt-5.6-sol", outputs: [{ text: JSON.stringify(output) }] }),
+        JSON.stringify({ ok: true, provider: "openai", model: "gpt-6-astra", outputs: [{ text: JSON.stringify(output) }] }),
       ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     }) as typeof Bun.spawn;
     const evidence: EvidenceBundle = {

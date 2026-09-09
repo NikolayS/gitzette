@@ -146,3 +146,15 @@ The dedicated ChatGPT OAuth subscription is not an API-key billing account, so
 the old API-dollar ledger does not represent its cost model. If the account
 moves to metered billing, disable the runner until a reviewed monetary budget
 gate is added.
+
+## Model policy
+
+Writing and illustration review use `openai/gpt-6-astra`; image generation
+remains pinned to `openai/gpt-image-2`. Update the Worker publication validator
+and the runner together: new active manifests must declare Astra provenance.
+Do not enable the updated runner against a Worker still enforcing the older
+text-model pin. Historical stored editions are not rewritten by this change.
+
+GPT-Image-2.5 Sunburst and Flare are listed in the current OpenAI model catalog,
+but availability through this dedicated subscription OAuth transport must be
+proven before changing the image pin. API availability alone is insufficient.

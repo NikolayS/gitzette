@@ -4,7 +4,7 @@ import { AI_ACTIVITY_NOTICE, escapeHtml, renderEdition, validateManifest, type P
 function activeManifest(): PublicationManifest {
   return {
     generatorVersion: "test-1",
-    model: "openai/gpt-5.6-sol",
+    model: "openai/gpt-6-astra",
     promptVersion: "editor-1",
     evidence: {
       state: "active",
@@ -152,7 +152,7 @@ describe("typed publication manifest", () => {
   test("requires truthful model provenance for active and quiet editions", () => {
     const active = activeManifest();
     active.model = "deterministic";
-    expect(() => validateManifest(active, "octocat", "2026-W32")).toThrow("active edition requires gpt-5.6-sol");
+    expect(() => validateManifest(active, "octocat", "2026-W32")).toThrow("active edition requires gpt-6-astra");
 
     const quiet = activeManifest();
     quiet.evidence.state = "quiet";

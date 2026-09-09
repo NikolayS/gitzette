@@ -34,7 +34,7 @@ export type Edition = {
 
 export type PublicationManifest = {
   generatorVersion: string;
-  model: "openai/gpt-5.6-sol" | "deterministic";
+  model: "openai/gpt-6-astra" | "deterministic";
   promptVersion: string;
   evidence: EvidenceBundle;
   edition: Edition;
@@ -82,7 +82,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   assertExactKeys(input, "manifest", ["generatorVersion", "model", "promptVersion", "evidence", "edition", "images"]);
   const manifest = input as PublicationManifest;
   assertString(manifest.generatorVersion, "generatorVersion", 100);
-  if (manifest.model !== "openai/gpt-5.6-sol" && manifest.model !== "deterministic") throw new Error("forbidden model");
+  if (manifest.model !== "openai/gpt-6-astra" && manifest.model !== "deterministic") throw new Error("forbidden model");
   assertString(manifest.promptVersion, "promptVersion", 100);
 
   const evidence = manifest.evidence;
@@ -155,7 +155,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   for (const key of usedIllustrations) if (!imageKeys.has(key)) throw new Error("missing illustration artifact");
 
   if (evidence.state === "active") {
-    if (manifest.model !== "openai/gpt-5.6-sol") throw new Error("active edition requires gpt-5.6-sol");
+    if (manifest.model !== "openai/gpt-6-astra") throw new Error("active edition requires gpt-6-astra");
     if (edition.stories.length === 0) throw new Error("active edition has no stories");
     if (manifest.images.length < ACTIVE_MIN_IMAGES || usedIllustrations.size < ACTIVE_MIN_IMAGES) {
       throw new Error(`active edition requires at least ${ACTIVE_MIN_IMAGES} illustrations`);

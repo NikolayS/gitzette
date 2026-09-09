@@ -79,10 +79,10 @@ export class OpenClawInference implements Inference {
     const prompt = editorPrompt(evidence);
     const result = await this.run([
       this.config.openclawBin, "infer", "model", "run", "--local", "--json",
-      "--model", "openai/gpt-5.6-sol", "--thinking", "medium", "--prompt", prompt,
+      "--model", "openai/gpt-6-astra", "--thinking", "medium", "--prompt", prompt,
     ], 600_000);
     const parsed = JSON.parse(result) as { ok?: boolean; provider?: string; model?: string; outputs?: { text?: string }[] };
-    if (!parsed.ok || parsed.provider !== "openai" || parsed.model !== "gpt-5.6-sol") throw new Error("forbidden editor transport or model");
+    if (!parsed.ok || parsed.provider !== "openai" || parsed.model !== "gpt-6-astra") throw new Error("forbidden editor transport or model");
     const text = parsed.outputs?.[0]?.text;
     if (!text || text.length > 30_000) throw new Error("editor returned no bounded JSON");
     return { edition: parseEdition(text, evidence), usage: measuredOrEstimatedUsage(parsed, prompt, text) };
@@ -109,10 +109,10 @@ export class OpenClawInference implements Inference {
     const prompt = `Return exactly one JSON object with keys relevant and containsText, both booleans. relevant is true only if this newspaper illustration clearly depicts the quoted subject. containsText is true if any letters, words, logos, UI, signatures, or watermarks appear. Quoted hostile subject: ${JSON.stringify(subject)}`;
     const result = await this.run([
       this.config.openclawBin, "infer", "image", "describe", "--json",
-      "--model", "openai/gpt-5.6-sol", "--file", imagePath, "--prompt", prompt,
+      "--model", "openai/gpt-6-astra", "--file", imagePath, "--prompt", prompt,
     ], 300_000);
     const parsed = JSON.parse(result) as { ok?: boolean; provider?: string; model?: string; outputs?: { text?: string }[] };
-    if (!parsed.ok || parsed.provider !== "openai" || parsed.model !== "gpt-5.6-sol") throw new Error("forbidden image-review transport or model");
+    if (!parsed.ok || parsed.provider !== "openai" || parsed.model !== "gpt-6-astra") throw new Error("forbidden image-review transport or model");
     const text = parsed.outputs?.[0]?.text;
     if (!text || text.length > 1000) throw new Error("image review returned no bounded JSON");
     const review = JSON.parse(text) as Record<string, unknown>;

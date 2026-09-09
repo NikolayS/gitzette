@@ -32,7 +32,7 @@ Community-supported. [Sponsor the project](https://github.com/sponsors/NikolayS)
 - Hono (routing)
 - GitHub OAuth (`read:user`)
 - Private OpenClaw pull runner (no inbound port)
-- ChatGPT/Codex OAuth subscription (`gpt-5.6-sol`, `gpt-image-2`)
+- ChatGPT/Codex OAuth subscription (`gpt-6-astra`, `gpt-image-2`)
 
 ## Deploy
 

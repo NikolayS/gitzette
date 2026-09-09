@@ -31,7 +31,7 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 function manifest(weekKey: string, imageHashes: Record<string, string>) {
   return {
     generatorVersion: "e2e-1",
-    model: "openai/gpt-5.6-sol",
+    model: "openai/gpt-6-astra",
     promptVersion: "e2e-editor-1",
     evidence: {
       state: "active",

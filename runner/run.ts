@@ -123,7 +123,7 @@ export class RunnerEngine {
     await this.publisher.stage(job, "validating");
     const manifest: PublicationManifest = {
       generatorVersion: this.config.generatorVersion,
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6-astra",
       promptVersion: EDITOR_PROMPT_VERSION,
       evidence,
       edition,
