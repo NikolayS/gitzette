@@ -55,6 +55,17 @@ describe("OpenClaw CLI boundary", () => {
     expect(usage.inputTokens).toBeGreaterThan(0);
   });
 
+  test("editorial metaphor review still rejects irrelevant or text-bearing images", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-review-test-"));
+    for (const review of [{ relevant: false, containsText: false }, { relevant: true, containsText: true }]) {
+      const spawn = (() => Bun.spawn(["/usr/bin/printf", "%s", JSON.stringify({
+        ok: true, provider: "openai", model: "gpt-6-astra", outputs: [{ text: JSON.stringify(review) }],
+      })], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })) as typeof Bun.spawn;
+      await expect(new OpenClawInference(config(directory), spawn).reviewIllustration("database simulation", "image.webp"))
+        .rejects.toThrow(`relevant=${review.relevant}, containsText=${review.containsText}`);
+    }
+  });
+
   test("rejects image output from an older or substituted model", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-cli-test-"));
     const spawn = (() => Bun.spawn([
