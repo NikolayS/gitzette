@@ -33,20 +33,7 @@ ledger_table_count="$(jq -r '.[0].results[0].total' "$cutover_json")"
 "$wrangler_bin" d1 execute gitzette-db --remote --command \
   "SELECT lower(username) AS username,COUNT(*) AS total FROM users GROUP BY lower(username) HAVING COUNT(*)>1" \
   --json >"$collision_json"
-bun -e '
-  const document = JSON.parse(await Bun.file(process.argv[1]).text());
-  if (!Array.isArray(document) || document.length !== 1) {
-    throw new Error("invalid production username-collision preflight response");
-  }
-  const envelope = document[0];
-  if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)
-    || Object.hasOwn(envelope, "error") || !Array.isArray(envelope.results)) {
-    throw new Error("invalid production username-collision preflight response");
-  }
-  if (envelope.results.length !== 0) {
-    throw new Error("production contains case-folding GitHub username collisions; aborting migration");
-  }
-' "$collision_json"
+bun "$(dirname -- "${BASH_SOURCE[0]}")/check-production-collisions.cjs" "$collision_json"
 echo "Production username collision preflight OK: zero case-fold collisions"
 
 if [[ "$ledger_table_count" -gt 0 ]]; then
@@ -68,19 +55,6 @@ local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --co
 
 # The Bun program intentionally receives shell values through argv.
 # shellcheck disable=SC2016
-bun -e '
-  const fs = require("fs");
-  const canonical = sql => String(sql)
-    .replace(/^CREATE TABLE "([A-Za-z0-9_]+)"/i, "CREATE TABLE $1")
-    .replace(/\s+/g, " ").replace(/\s*([(),])\s*/g, "$1").trim();
-  const read = path => JSON.parse(fs.readFileSync(path, "utf8"))[0].results
-    .map(row => ({ type: row.type, name: row.name, sql: canonical(row.sql) }));
-  const fixture = read(process.argv[2]);
-  const production = read(process.argv[3]);
-  if (JSON.stringify(fixture) !== JSON.stringify(production)) {
-    console.error("production schema drifted from the reviewed baseline; aborting migration", { fixture, production });
-    process.exit(1);
-  }
-' "$fixture_state/schema.json" "$remote_json"
+bun "$(dirname -- "${BASH_SOURCE[0]}")/compare-production-drift.cjs" "$fixture_state/schema.json" "$remote_json"
 
 echo "Production cutover gate OK: unmigrated live D1 matches the reviewed baseline"
