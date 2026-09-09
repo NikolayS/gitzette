@@ -53,8 +53,6 @@ query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','t
 local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
 "$wrangler_bin" d1 execute gitzette-db --remote --command "$query" --json >"$remote_json"
 
-# The Bun program intentionally receives shell values through argv.
-# shellcheck disable=SC2016
 bun "$(dirname -- "${BASH_SOURCE[0]}")/compare-production-drift.cjs" "$fixture_state/schema.json" "$remote_json"
 
 echo "Production cutover gate OK: unmigrated live D1 matches the reviewed baseline"

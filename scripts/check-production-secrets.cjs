@@ -10,4 +10,4 @@
     throw new Error(`production Worker secret mismatch; missing=[${missing.join(", ")}], retired-or-unknown=[${retired.join(", ")}]`);
   }
 
-})().catch(() => { console.error("invalid input document"); process.exit(1); });
+})().catch(error => { console.error(error instanceof SyntaxError ? "invalid input document" : error.message); process.exit(1); });

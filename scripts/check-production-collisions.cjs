@@ -13,4 +13,4 @@
     throw new Error("production contains case-folding GitHub username collisions; aborting migration");
   }
 
-})().catch(() => { console.error("invalid input document"); process.exit(1); });
+})().catch(error => { console.error(error instanceof SyntaxError ? "invalid input document" : error.message); process.exit(1); });

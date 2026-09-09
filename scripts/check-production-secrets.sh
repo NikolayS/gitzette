@@ -11,8 +11,6 @@ fi
 secret_json="$(mktemp)"
 trap 'rm -f "$secret_json"' EXIT
 "$wrangler_bin" secret list --format json >"$secret_json"
-# The Bun program intentionally receives shell values through argv.
-# shellcheck disable=SC2016
 bun "$(dirname -- "${BASH_SOURCE[0]}")/check-production-secrets.cjs" "$secret_json"
 
 echo "Production secrets OK: required bindings exist and retired provider credentials are absent"

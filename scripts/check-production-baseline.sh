@@ -19,8 +19,6 @@ query="SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index','t
 local_wrangler d1 execute gitzette-db --local --persist-to "$baseline_state" --command "$query" --json >"$baseline_state/schema.json"
 local_wrangler d1 execute gitzette-db --local --persist-to "$fixture_state" --command "$query" --json >"$fixture_state/schema.json"
 
-# The Bun program intentionally receives shell values through argv.
-# shellcheck disable=SC2016
 bun "$(dirname -- "${BASH_SOURCE[0]}")/compare-production-baseline.cjs" "$baseline_state/schema.json" "$fixture_state/schema.json"
 
 echo "Production baseline OK: 0000_base.sql matches the committed read-only D1 snapshot"
