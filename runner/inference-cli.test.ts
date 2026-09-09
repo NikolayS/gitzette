@@ -39,7 +39,7 @@ describe("OpenClaw CLI boundary", () => {
       return Bun.spawn([
         "/usr/bin/printf",
         "%s",
-        JSON.stringify({ ok: true, provider: "openai", model: "gpt-image-2" }),
+        JSON.stringify({ ok: true, provider: "openai", model: "gpt-image-2.5-sunburst" }),
       ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     }) as typeof Bun.spawn;
 
@@ -47,11 +47,22 @@ describe("OpenClaw CLI boundary", () => {
     expect(originalArgv[0]).toBe("/sealed/openclaw");
     expect(originalArgv.slice(1, 5)).toEqual(["infer", "image", "generate", "--json"]);
     expect(originalArgv).not.toContain("sh");
+    expect(originalArgv[originalArgv.indexOf("--model") + 1]).toBe("openai/gpt-image-2.5-sunburst");
     expect(originalEnv.GITZETTE_RUNNER_SECRET).toBeUndefined();
     expect(originalEnv.GITZETTE_GITHUB_TOKEN).toBeUndefined();
     expect(originalEnv.OPENAI_API_KEY).toBeUndefined();
     expect(usage.tokenSource).toBe("estimated");
     expect(usage.inputTokens).toBeGreaterThan(0);
+  });
+
+  test("rejects image output from an older or substituted model", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-cli-test-"));
+    const spawn = (() => Bun.spawn([
+      "/usr/bin/printf", "%s",
+      JSON.stringify({ ok: true, provider: "openai", model: "gpt-image-2" }),
+    ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })) as typeof Bun.spawn;
+    await expect(new OpenClawInference(config(directory), spawn).illustrate("subject", join(directory, "image.png")))
+      .rejects.toThrow("forbidden image transport or model");
   });
 
   test("fails closed when the image CLI omits its provenance envelope", async () => {

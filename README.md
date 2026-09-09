@@ -6,7 +6,7 @@ Live at [gitzette.online](https://gitzette.online)
 
 ## How it works
 
-Sign in with GitHub (`read:user` scope only — no repo access requested). A generation request is queued in Cloudflare D1. A private pull runner collects public GitHub evidence, writes a typed edition with GPT-5.6 Sol through ChatGPT OAuth, creates illustrations with GPT Image 2 through the same subscription environment, and atomically publishes the validated result to R2.
+Sign in with GitHub (`read:user` scope only — no repo access requested). A generation request is queued in Cloudflare D1. A private pull runner collects public GitHub evidence, writes a typed edition with GPT-6 Astra through ChatGPT OAuth, creates illustrations with GPT Image 2.5 Sunburst through the same subscription environment, and atomically publishes the validated result to R2.
 
 Your dispatch lives at `gitzette.online/@yourusername`.
 
@@ -32,7 +32,7 @@ Community-supported. [Sponsor the project](https://github.com/sponsors/NikolayS)
 - Hono (routing)
 - GitHub OAuth (`read:user`)
 - Private OpenClaw pull runner (no inbound port)
-- ChatGPT/Codex OAuth subscription (`gpt-6-astra`, `gpt-image-2`)
+- ChatGPT/Codex OAuth subscription (`gpt-6-astra`, `gpt-image-2.5-sunburst`)
 
 ## Deploy
 

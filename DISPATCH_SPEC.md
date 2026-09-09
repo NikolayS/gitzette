@@ -11,7 +11,7 @@ These choices are safety and reliability constraints, not incidental implementat
 - Generation used to run synchronously inside the public Worker. That made long AI calls vulnerable to Worker lifetime limits, so the synchronous path is retired in favor of durable D1 jobs, leases, and an outbound-only runner.
 - The previous OpenRouter/Opus path is retired because production generation must use the dedicated ChatGPT OAuth identity. Provider fallbacks would silently cross the credential boundary.
 - "30 recent repositories" is not a valid historical collector: repository recency today does not prove activity in a requested past week. The canonical collector instead freezes events whose timestamps fall inside the exact ISO week.
-- `gpt-image-2` OAuth output is normalized locally because transparent output is not guaranteed. The runner removes the background, validates the result, and stores WebP at quality 82; publishing the raw model file is forbidden.
+- The Sunburst target keeps the previous image pipeline’s local background normalization; transparent output through the dedicated OAuth route has not yet been verified. The runner removes the background, validates the result, and stores WebP at quality 82; publishing the raw model file is forbidden.
 - Illustrations are story-level editorial art, not one logo per repository. Active editions need at least two perceptually distinct images so a low-quality or duplicated image cannot satisfy the visual contract.
 - The 1024-pixel generation target preserves enough detail for cleanup and responsive rendering. Publication still enforces bounded dimensions and bytes.
 
@@ -20,10 +20,10 @@ Do not "simplify" these constraints without replacing the failure mode they addr
 ### Legacy invariants: retained or explicitly superseded
 
 - **Opus, not Sonnet** is superseded by the OAuth-only isolation boundary. The
-  dedicated account uses GPT-5.6 Sol; editorial quality is enforced by typed
+  dedicated account uses GPT-6 Astra; editorial quality is enforced by typed
   evidence plus the five human-inspected canaries, not a silent provider fallback.
 - **`gpt-image-1`, quality low, WebP compression 60** is superseded by
-  `gpt-image-2` OAuth output followed by deterministic local cleanup and WebP
+  `gpt-image-2.5-sunburst` OAuth output followed by deterministic local cleanup and WebP
   quality 82. Raw model files are never published.
 - **Illustrations per article, never per repository** is retained as story-level
   `illustrationKey` values. Keys and hashes must be unique, and active editions
@@ -41,7 +41,7 @@ Do not "simplify" these constraints without replacing the failure mode they addr
 - Cloudflare is the public control plane: GitHub login, request quota, D1 queue/status, validation, R2, and serving.
 - A private runner claims work with outbound HTTPS. The host exposes no inbound endpoint.
 - The runner credential is narrow and rotatable. It is not an AI credential.
-- AI generation uses a dedicated OpenClaw/Codex identity with ChatGPT OAuth only: `openai/gpt-6-astra` for text and `gpt-image-2` for art. No OpenAI API key, OpenRouter, Anthropic, Google AI key, or provider fallback is allowed.
+- AI generation uses a dedicated OpenClaw/Codex identity with ChatGPT OAuth only: `openai/gpt-6-astra` for text and `gpt-image-2.5-sunburst` for art. No OpenAI API key, OpenRouter, Anthropic, Google AI key, or provider fallback is allowed.
 - Repository, issue, PR, and commit text is hostile evidence, never an instruction.
 - ChatGPT OAuth is an account-level credential with a larger revocation and
   availability blast radius than a scoped API key. Production requires a
