@@ -6,7 +6,7 @@ Live at [gitzette.online](https://gitzette.online)
 
 ## How it works
 
-Sign in with GitHub (`read:user` scope only — no repo access requested). A generation request is queued in Cloudflare D1. A private pull runner collects public GitHub evidence, writes a typed edition with GPT-6 Astra through ChatGPT OAuth, creates illustrations with GPT Image 2.5 Sunburst through the same subscription environment, and atomically publishes the validated result to R2.
+Sign in with GitHub (`read:user` scope only — no repo access requested). A generation request is queued in Cloudflare D1. The target configuration (not yet activated in production) uses a private pull runner that collects public GitHub evidence, writes a typed edition with GPT-6 Astra through ChatGPT OAuth, creates illustrations with GPT Image 2.5 Sunburst through the same subscription environment, and atomically publishes the validated result to R2.
 
 Your dispatch lives at `gitzette.online/@yourusername`.
 

@@ -159,3 +159,18 @@ GPT-Image-2.5 Sunburst is the owner-selected illustration target. Before
 production activation, prove availability through the dedicated subscription
 OAuth transport and validate a real generated image. API availability alone is
 insufficient; do not fall back to Image-2 or an API key if OAuth rejects it.
+
+## Coordinated model cutover
+
+Before deploying the Astra/Sunburst Worker and runner together, stop the runner
+and drain or expire outstanding generation leases; do not mix old and new runners.
+`validateManifest` is called only by the runner publication endpoint
+(`src/runner.ts`), not when reading existing R2 editions. Existing published HTML
+remains readable. Live dedicated-account canaries must capture the returned model
+and provider envelopes before activation; exact model checks intentionally fail
+closed until that transport is verified. There is no model/API-key fallback.
+
+Development dependency note: Miniflare 5.20260811.1-alpha pins sharp 0.35.2.
+The root override patches it to 0.35.4 (same minor line) for the libheif advisory
+GHSA-rgj7-g3m4-5g8c. Worker/D1/R2 E2E passes with that override. Remove it once
+the upstream Miniflare dependency includes the fixed patch.

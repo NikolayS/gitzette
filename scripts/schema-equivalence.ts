@@ -23,7 +23,7 @@ function collapseSqlWhitespace(sql: string, stripComments: boolean): string {
       while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") index += 1;
       if (!stripComments) {
         if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
-        result += `${sql.slice(commentStart, index)}\n`;
+        result += `${sql.slice(commentStart, index).trimEnd()}\n`;
       }
       afterLineComment = !stripComments;
       pendingSpace = stripComments;
@@ -65,7 +65,7 @@ function collapseSqlWhitespace(sql: string, stripComments: boolean): string {
 function canonicalSql(sql: string | null): string | null {
   if (sql === null) return null;
   return collapseSqlWhitespace(sql, true)
-    .replace(/CREATE (TABLE|INDEX|TRIGGER|VIEW) IF NOT EXISTS/gi, "CREATE $1")
+    .replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) IF NOT EXISTS/i, "CREATE $1")
     .replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) "([A-Za-z0-9_]+)"/i, "CREATE $1 $2")
     .trim();
 }

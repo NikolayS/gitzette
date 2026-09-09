@@ -10,6 +10,10 @@ const cliPath = fileURLToPath(new URL("./schema-equivalence.ts", import.meta.url
 describe("schema equivalence", () => {
   const schema = (sql: string) => [{ results: [{ type: "table", name: "jobs", sql }] }];
 
+  test("strict line comments tolerate trailing formatting whitespace", () => {
+    expect(schemasMatch(schema("CREATE TABLE jobs(id TEXT -- note  \n)"), schema("CREATE TABLE jobs(id TEXT -- note\n)"), true)).toBe(true);
+  });
+
   test("normalizes reviewed DDL differences but rejects column drift", () => {
     expect(schemasMatch(
       schema("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, state TEXT)"),

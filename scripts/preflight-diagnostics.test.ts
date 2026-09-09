@@ -36,9 +36,29 @@ test("schema preflights compare two independent paths and reject malformed input
         const child = Bun.spawn([process.execPath, fileURLToPath(new URL(script, import.meta.url)), left, right], { stdout: "pipe", stderr: "pipe" });
         const stderr = await new Response(child.stderr).text();
         expect(await child.exited).toBe(exit);
-        if (content === "not-json" || content === "[]") expect(stderr).toContain("invalid input document");
+        if (content === "not-json" || content === "[]") expect(stderr).toMatch(/invalid input document|invalid Wrangler schema result/);
         else if (exit === 1) expect(stderr).toMatch(/differs|drifted/);
       }
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+
+test("production comparers preserve quoted SQL values and report file errors", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "gitzette-quoted-schema-"));
+  try {
+    const left = join(dir, "left.json"), right = join(dir, "right.json");
+    const schema = (value: string) => JSON.stringify([{ results: [{ type: "table", name: "t", sql: `CREATE TABLE t (v TEXT DEFAULT '${value}')` }] }]);
+    for (const script of ["compare-production-baseline.cjs", "compare-production-drift.cjs"]) {
+      for (const [a, b] of [["a, b", "a,b"], ["a  b", "a b"], ["CREATE TABLE IF NOT EXISTS", "CREATE TABLE"]]) {
+        await writeFile(left, schema(a)); await writeFile(right, schema(b));
+        const child = Bun.spawn([process.execPath, fileURLToPath(new URL(script, import.meta.url)), left, right], { stdout: "pipe", stderr: "pipe" });
+        expect(await child.exited).toBe(1);
+        expect(await new Response(child.stderr).text()).toMatch(/differs|drifted/);
+      }
+      const child = Bun.spawn([process.execPath, fileURLToPath(new URL(script, import.meta.url)), join(dir, "missing.json"), right], { stdout: "pipe", stderr: "pipe" });
+      expect(await child.exited).toBe(1);
+      expect(await new Response(child.stderr).text()).toContain("ENOENT");
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
