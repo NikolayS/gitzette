@@ -197,6 +197,14 @@ Before production activation:
 Nik explicitly authorized his existing OAuth subscription for both GitZette
 canaries and production. A separate subscription is no longer a prerequisite.
 The Linux runner and its auth store remain isolated. Sharing the subscription
-means revocation and account limits affect both TARS and GitZette; no API-key
+means revocation, refresh-token rotation, throttling, and provider account actions
+can affect both TARS and GitZette. GitZette serves multiple GitHub users, so its
+load shares the owner account limits. No API-key
 fallback is permitted. Only the authorized OAuth profile is copied, not another
 agent's complete configuration or tool access.
+
+The current copied profile shares a login session; filesystem isolation does not
+isolate refresh/revocation effects. Recovery must coordinate both clients, or
+establish a fresh runner login under the same authorized subscription. The
+release record documents the owner request, not an invented legal determination
+or an unrecorded acceptance of additional risks.

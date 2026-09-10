@@ -16,6 +16,7 @@ describe("schema equivalence", () => {
       expect(productionSchema(schema(`${prefix} IF NOT EXISTS jobs(id)`), true))
         .toEqual(productionSchema(schema(`${prefix} jobs(id)`), true));
     }
+    expect(canonicalSchema(schema("CREATE UNIQUE INDEX IF NOT EXISTS jobs(id)"))).toEqual(canonicalSchema(schema("CREATE UNIQUE INDEX jobs(id)")));
     const plain = schema("CREATE TABLE jobs(id TEXT)");
     const guarded = schema("CREATE TABLE IF NOT EXISTS jobs(id TEXT)");
     expect(productionSchema(plain)).not.toEqual(productionSchema(guarded));

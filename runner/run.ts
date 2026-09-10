@@ -1,3 +1,4 @@
+import { TEXT_MODEL } from "../src/models";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { quietEdition, validateManifest, type PublicationManifest } from "../src/edition";
@@ -123,7 +124,7 @@ export class RunnerEngine {
     await this.publisher.stage(job, "validating");
     const manifest: PublicationManifest = {
       generatorVersion: this.config.generatorVersion,
-      model: "openai/gpt-6-astra",
+      model: TEXT_MODEL,
       promptVersion: EDITOR_PROMPT_VERSION,
       evidence,
       edition,

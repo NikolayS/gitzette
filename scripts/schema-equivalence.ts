@@ -1,3 +1,4 @@
+const OPTIONAL_CREATE_GUARD = /^(CREATE (?:TABLE|(?:UNIQUE )?INDEX|TRIGGER|VIEW)) IF NOT EXISTS/i;
 type SchemaRow = { type: string; name: string; sql: string | null };
 
 function collapseSqlWhitespace(sql: string, stripComments: boolean): string {
@@ -65,7 +66,7 @@ function collapseSqlWhitespace(sql: string, stripComments: boolean): string {
 function canonicalSql(sql: string | null): string | null {
   if (sql === null) return null;
   return collapseSqlWhitespace(sql, true)
-    .replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) IF NOT EXISTS/i, "CREATE $1")
+    .replace(OPTIONAL_CREATE_GUARD, "$1")
     .replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) "([A-Za-z0-9_]+)"/i, "CREATE $1 $2")
     .trim();
 }
@@ -76,7 +77,7 @@ export function productionSchema(document: unknown, baseline = false): SchemaRow
   return mapSchema(document, (sql) => {
     if (sql === null) return null;
     let normalized = strictSql(sql);
-    if (baseline) normalized = normalized!.replace(/^(CREATE (?:TABLE|(?:UNIQUE )?INDEX|TRIGGER|VIEW)) IF NOT EXISTS/i, "$1");
+    if (baseline) normalized = normalized!.replace(OPTIONAL_CREATE_GUARD, "$1");
     return normalized!.replace(/^CREATE TABLE "([A-Za-z0-9_]+)"/i, "CREATE TABLE $1");
   });
 }

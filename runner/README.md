@@ -52,32 +52,12 @@ narrow `RUNNER_SECRET` is configured on both sides. Never put an AI API key in
 the environment file; startup rejects broad credential patterns and known AI
 provider variables. `bun.lock` is the sole dependency lockfile used by CI.
 
-OpenClaw 2026.7 does not import OAuth material from a legacy `~/.codex`
-directory. Do not copy another user's Codex files into this account or treat
-their presence as proof of usable runner auth. After the owner-authorized GitZette
-account and revocation policy are approved, authenticate directly into the
-isolated OpenClaw store as the service user:
-
-```bash
-sudo -u gitzette-runner env -i \
-  HOME=/var/lib/gitzette-runner \
-  PATH=/var/lib/gitzette-runner/.bun/bin:/usr/local/bin:/usr/bin:/bin \
-  OPENCLAW_STATE_DIR=/var/lib/gitzette-runner/.openclaw \
-  OPENCLAW_CONFIG_PATH=/var/lib/gitzette-runner/.openclaw/openclaw.json \
-  /var/lib/gitzette-runner/.bun/bin/openclaw models auth login \
-    --provider openai --device-code
-```
-
-Run the same sealed environment with `openclaw infer model auth status --json`
-and require an available OpenAI OAuth route with no fallback before running the
-text and image canaries. Missing, expired, or rate-limited auth keeps the
-service disabled. Never add an API key to make a canary pass.
-
-Owner authorization is recorded in docs/live-canary-2026-09-09.md: Nik expressly
-approved the shared subscription for GitZette. Per his instruction, GitZette does
-not require an additional repository-specific formal/SOC2 approval. This records
-owner authorization, not a legal terms-of-service determination. Valid OAuth,
-passing generation tests, and the release checks remain required.
+Provisioning follows the [authorized subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update).
+The current activation copied only Nik's explicitly authorized OAuth profile into
+the isolated runner store; it did not mint an independent login session or copy
+TARS's configuration, tools, or other profiles. Legacy Codex files are not proof
+of usable OpenClaw authentication. Verify auth status and both live model
+canaries before enabling the service. No API-key fallback is permitted.
 
 The runner classifies OpenClaw auth failures primarily from structured JSON
 `status`, `statusCode`, and `code` fields; a bounded message matcher is only a
@@ -89,9 +69,12 @@ emitted after five consecutive failures of any class, so unknown provider
 wording cannot suppress the operator signal.
 
 Treat either alert as a total generation outage: disable the runner, inspect
-the authorized identity with the sealed `auth status` command, revoke the broken
-session if it still appears active, and repeat device-code login as
-`gitzette-runner`. Then rerun auth status plus the text and image canaries before
+the authorized identity with the sealed `auth status` command. Do not revoke
+the shared session casually: revocation or refresh-token rotation can disrupt
+TARS too. Coordinate recovery of both clients. A fresh device-code login under
+the same authorized account can establish an independent runner session; keep
+all authentication codes in the trusted terminal, never chat or logs.
+Then rerun auth status plus the text and image canaries before
 re-enabling the service. Never copy another account's state or install an
 API-key fallback. The restore target is four hours from the first alert; an
 outage may exceed that target when the provider or account owner is unavailable.
@@ -136,7 +119,7 @@ not hard-refuse or leave a first-time user blocked for days.
 Every successful job records input tokens, output tokens, token measurement
 source, generated image count, and runner wall time on `generation_jobs` in the
 same lease-guarded batch that publishes it. `/status` shows rolling-seven-day
-aggregates. OpenClaw 2026.7.1-beta.5 does not expose token usage in its local
+aggregates. The installed OpenClaw does not expose token usage in its local
 capability JSON, so the runner currently stores a deterministic UTF-8-byte/4
 estimate and labels it `estimated`; if a future envelope supplies bounded
 provider counts, it records them as `provider`. Image count and wall time are
@@ -177,11 +160,4 @@ The root override patches it to 0.35.4 (same minor line) for the libheif advisor
 GHSA-rgj7-g3m4-5g8c. Worker/D1/R2 E2E passes with that override. Remove it once
 the upstream Miniflare dependency includes the fixed patch.
 
-### Authorized subscription policy (September 9 update)
-
-Nik explicitly authorized his existing OAuth subscription for both GitZette
-canaries and production. A separate subscription is no longer a prerequisite.
-The Linux runner and its auth store remain isolated. Sharing the subscription
-means revocation and account limits affect both TARS and GitZette; no API-key
-fallback is permitted. Only the authorized OAuth profile is copied, not another
-agent's complete configuration or tool access.
+See the canonical [subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update) for authorization, shared-session effects, and recovery constraints.

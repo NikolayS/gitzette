@@ -1,3 +1,4 @@
+import { TEXT_MODEL } from "../src/models";
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,10 +13,12 @@ describe("OpenClaw CLI boundary", () => {
       tools: { deny: string[]; elevated: { enabled: boolean } };
       channels: Record<string, unknown>;
       agents: {
-        defaults: { sandbox: { mode: string; scope: string; workspaceAccess: string } };
-        entries: Record<string, { tools: { deny: string[] } }>;
+        defaults: { model: { primary: string; fallbacks: string[] }; sandbox: { mode: string; scope: string; workspaceAccess: string } };
+        entries: Record<string, { models: Record<string, unknown>; tools: { deny: string[] } }>;
       };
     };
+    expect(document.agents.defaults.model).toEqual({ primary: TEXT_MODEL, fallbacks: [] });
+    expect(Object.keys(document.agents.entries.main.models)).toEqual([TEXT_MODEL]);
     expect(document.tools).toEqual({ deny: ["*"], elevated: { enabled: false } });
     expect(document.channels).toEqual({});
     expect(document.agents.defaults.sandbox).toEqual({

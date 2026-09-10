@@ -32,3 +32,17 @@ returned `processed` at 00:10:54 UTC. Manifest promptVersion is gitzette-editor-
 This remains a local-file publication, not a production canary.
 
 The September 10 fresh prompt-v3 run supersedes the earlier reused-output validation.
+
+## Subscription activation record
+
+Owner instruction, September 9: “can you just bring somehow the same oauth
+subscription as you have?” The existing OAuth profile was copied into the
+isolated store; no independent session was minted. Shared refresh, throttling,
+revocation, or provider account action can affect both clients. This records
+the instruction actually received, not an assertion of separately recorded
+legal/risk acceptance. Recovery follows the canonical subscription policy.
+
+Historical local canaries on September 10 also passed for NikolayS W32 and
+PhysShell W30 (fresh active editions), and Karpathy W20 (genuine quiet week).
+The steipete and torvalds collectors failed closed on incomplete GitHub search
+results; retries paused after the provider secondary rate limit.
