@@ -67,7 +67,7 @@ export class GitHubCollector implements Collector {
     return [...repos].filter(validRepo).sort();
   }
 
-  private async search(kind: "commits" | "issues", query: string): Promise<SearchItem[]> {
+  private async search(kind: "commits" | "issues", query: string, splitIncomplete = true): Promise<SearchItem[]> {
     const items: SearchItem[] = [];
     for (let page = 1; page <= 5; page++) {
       const url = new URL(`https://api.github.com/search/${kind}`);
@@ -77,7 +77,23 @@ export class GitHubCollector implements Collector {
       url.searchParams.set("per_page", "100");
       url.searchParams.set("page", String(page));
       const body = await this.github(url.toString()) as { incomplete_results?: boolean; total_count?: number; items?: SearchItem[] };
-      if (body.incomplete_results || !Array.isArray(body.items)) throw new Error(`GitHub ${kind} search incomplete`);
+      if (!Array.isArray(body.items)) throw new Error(`GitHub ${kind} search incomplete`);
+      if (body.incomplete_results) {
+        // A global historical search can time out even below the result cap.
+        // Retry once as sequential daily windows; never accept partial data.
+        const range = query.match(/(?:committer-date|merged|created):(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})/);
+        if (!splitIncomplete || !range) throw new Error(`GitHub ${kind} search incomplete`);
+        const start = Date.parse(range[1] + "T00:00:00Z");
+        const end = Date.parse(range[2] + "T00:00:00Z");
+        const days = (end - start) / 86400000 + 1;
+        if (!Number.isInteger(days) || days < 1 || days > 7) throw new Error("invalid bounded search window");
+        const complete: SearchItem[] = [];
+        for (let day = 0; day < days; day++) {
+          const date = new Date(start + day * 86400000).toISOString().slice(0, 10);
+          complete.push(...await this.search(kind, query.replace(range[0], range[0].split(":")[0] + ":" + date + ".." + date), false));
+        }
+        return complete.slice(0, 500);
+      }
       items.push(...body.items);
       if (body.items.length < 100 || items.length >= Math.min(body.total_count ?? items.length, 500)) break;
     }

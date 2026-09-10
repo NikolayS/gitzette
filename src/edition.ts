@@ -1,4 +1,4 @@
-import { TEXT_MODEL } from "./models";
+import { TEXT_MODEL, TEXT_MODEL_ID } from "./models";
 export const ACTIVE_MIN_IMAGES = 2;
 export const ACTIVE_MAX_IMAGES = 3;
 
@@ -156,7 +156,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   for (const key of usedIllustrations) if (!imageKeys.has(key)) throw new Error("missing illustration artifact");
 
   if (evidence.state === "active") {
-    if (manifest.model !== TEXT_MODEL) throw new Error("active edition requires gpt-6-astra");
+    if (manifest.model !== TEXT_MODEL) throw new Error(`active edition requires ${TEXT_MODEL_ID}`);
     if (edition.stories.length === 0) throw new Error("active edition has no stories");
     if (manifest.images.length < ACTIVE_MIN_IMAGES || usedIllustrations.size < ACTIVE_MIN_IMAGES) {
       throw new Error(`active edition requires at least ${ACTIVE_MIN_IMAGES} illustrations`);

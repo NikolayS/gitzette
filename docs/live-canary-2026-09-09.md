@@ -46,3 +46,15 @@ Historical local canaries on September 10 also passed for NikolayS W32 and
 PhysShell W30 (fresh active editions), and Karpathy W20 (genuine quiet week).
 The steipete and torvalds collectors failed closed on incomplete GitHub search
 results; retries paused after the provider secondary rate limit.
+
+## Remaining activation failures — September 10
+
+The broader steipete W14 case failed illustration relevance with prompt v3 on
+both attempts. Prompt v4 adds visible computing context and a release-only
+metaphor, but its live attempt also failed the unchanged relevance check.
+No rejected edition was published. This remains an unresolved quality failure,
+not a passing canary. The Torvalds W16 global search remained incomplete even
+with the new bounded sequential daily-window fallback; it fails closed.
+Production activation also awaits an independent login session under the same
+subscription, as required by the independent review of 3e84f23. No review retry
+can substitute for that login or the missing passing generation evidence.

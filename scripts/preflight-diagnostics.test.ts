@@ -66,3 +66,24 @@ test("production comparers preserve quoted SQL values and report file errors", a
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+
+test("valid production preflights pass and retired secrets are identified", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "gitzette-valid-preflight-"));
+  const expected = ["ADMIN_USER_ID", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "RUNNER_SECRET", "SESSION_SECRET", "STATUS_TOKEN"].map(name => ({ name }));
+  try {
+    for (const [script, input, exit] of [
+      ["check-production-collisions.cjs", [{ results: [] }], 0],
+      ["check-production-secrets.cjs", expected, 0],
+      ["check-production-secrets.cjs", [...expected, { name: "OPENAI_API_KEY" }], 1],
+    ] as const) {
+      const file = join(dir, "input.json");
+      await writeFile(file, JSON.stringify(input));
+      const child = Bun.spawn([process.execPath, fileURLToPath(new URL(script, import.meta.url)), file], { stdout: "pipe", stderr: "pipe" });
+      const stderr = await new Response(child.stderr).text();
+      expect(await child.exited).toBe(exit);
+      if (exit) expect(stderr).toContain("retired-or-unknown=[OPENAI_API_KEY]");
+      else expect(stderr).toBe("");
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

@@ -75,8 +75,7 @@ TARS too. Coordinate recovery of both clients. A fresh device-code login under
 the same authorized account can establish an independent runner session; keep
 all authentication codes in the trusted terminal, never chat or logs.
 Then rerun auth status plus the text and image canaries before
-re-enabling the service. Never copy another account's state or install an
-API-key fallback. The restore target is four hours from the first alert; an
+re-enabling the service. Never import an unauthorized account or install an API-key fallback. The restore target is four hours from the first alert; an
 outage may exceed that target when the provider or account owner is unavailable.
 Existing editions remain served, and queued work fails closed or ages out
 during the accepted generation outage.
@@ -161,3 +160,19 @@ GHSA-rgj7-g3m4-5g8c. Worker/D1/R2 E2E passes with that override. Remove it once
 the upstream Miniflare dependency includes the fixed patch.
 
 See the canonical [subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update) for authorization, shared-session effects, and recovery constraints.
+
+
+### Independent session before production activation
+
+The copied profile is temporary canary authentication, not the final service
+login. The release review requires an independent login session under Nik's
+same authorized subscription before enabling the service. It does not require
+a separate subscription or API billing account. In a trusted host terminal:
+
+```bash
+sudo -H -u gitzette-runner node /opt/openclaw-global/node_modules/openclaw/dist/index.js models auth login --provider openai --device-code
+```
+
+Complete the provider sign-in there, never in chat. Verify the selected identity
+and OAuth status, then rerun text/image canaries before service activation.
+Do not revoke the copied session during replacement: TARS still uses it.

@@ -189,7 +189,7 @@ Before production activation:
    the dashboard accepts it only as `Authorization: Bearer ...`, never in URLs.
 3. Run the five canonical canaries: NikolayS W32, steipete W14, torvalds W16, one genuine Karpathy quiet week, and PhysShell W30.
 4. Inspect active output on mobile and desktop and verify at least two meaningful illustrations.
-5. Verify the dedicated runner has only OAuth auth and no AI API-key profile/fallback.
+5. Verify the isolated runner store has only OAuth auth and no AI API-key profile/fallback.
 6. Deploy, then immediately run `bash /tmp/gl-dispatch/dispatch/smoke-test.sh` as required by the workspace rule.
 
 ### Authorized subscription policy (September 9 update)
@@ -208,3 +208,7 @@ isolate refresh/revocation effects. Recovery must coordinate both clients, or
 establish a fresh runner login under the same authorized subscription. The
 release record documents the owner request, not an invented legal determination
 or an unrecorded acceptance of additional risks.
+
+Production activation requires an independent runner login session under the
+same authorized subscription; see runner/README.md. The copied session is
+temporary canary setup only, following the independent release review.
