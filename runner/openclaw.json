@@ -3,11 +3,7 @@
     "defaults": {
       "workspace": "/var/lib/gitzette-runner/workspace",
       "model": {
-        "primary": "openai/gpt-5.6-sol",
-        "fallbacks": []
-      },
-      "imageGenerationModel": {
-        "primary": "openai/gpt-image-2",
+        "primary": "openai/gpt-6-astra",
         "fallbacks": []
       },
       "sandbox": {
@@ -16,28 +12,30 @@
         "workspaceAccess": "none"
       }
     },
-    "list": [
-      {
-        "id": "main",
-        "default": true,
+    "entries": {
+      "main": {
         "name": "GitZette sealed inference",
         "workspace": "/var/lib/gitzette-runner/workspace",
         "agentDir": "/var/lib/gitzette-runner/.openclaw/agents/main/agent",
         "models": {
-          "openai/gpt-5.6-sol": {
+          "openai/gpt-6-astra": {
             "agentRuntime": {
               "id": "codex"
             }
           }
         },
         "tools": {
-          "deny": ["*"]
+          "deny": [
+            "*"
+          ]
         }
       }
-    ]
+    }
   },
   "tools": {
-    "deny": ["*"],
+    "deny": [
+      "*"
+    ],
     "elevated": {
       "enabled": false
     }

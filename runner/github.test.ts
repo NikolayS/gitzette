@@ -104,3 +104,36 @@ describe("canonical GitHub collector", () => {
     expect(evidence.items).toHaveLength(101);
   });
 });
+
+
+test("incomplete weekly searches use bounded daily windows and still fail closed", async () => {
+  for (const failDaily of [false, true]) {
+    const commitQueries: string[] = [];
+    const request = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/graphql") {
+        const body = JSON.parse(String(init?.body));
+        if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
+        return Response.json({ data: { user: { contributionsCollection: {} } } });
+      }
+      if (url.pathname !== "/search/commits") return Response.json({ items: [], incomplete_results: false });
+      const q = url.searchParams.get("q")!;
+      commitQueries.push(q);
+      const weekly = q.includes("2026-08-03..2026-08-09");
+      return Response.json({ incomplete_results: weekly || failDaily, items: weekly ? [] : [{
+        sha: q, html_url: "https://github.com/octocat/widget/commit/abc",
+        commit: { message: "Daily change" }, repository: { full_name: "octocat/widget" },
+      }] });
+    };
+    const collected = new GitHubCollector("test-token", request as typeof fetch).collect("octocat", "2026-W32");
+    if (failDaily) {
+      await expect(collected).rejects.toThrow("GitHub commits search incomplete");
+      expect(commitQueries).toHaveLength(2);
+    } else {
+      expect((await collected).items).toHaveLength(7);
+      expect(commitQueries).toHaveLength(8);
+      expect(commitQueries[1]).toContain("2026-08-03..2026-08-03");
+      expect(commitQueries[7]).toContain("2026-08-09..2026-08-09");
+    }
+  }
+});

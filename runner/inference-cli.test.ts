@@ -1,3 +1,4 @@
+import { TEXT_MODEL } from "../src/models";
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,10 +13,12 @@ describe("OpenClaw CLI boundary", () => {
       tools: { deny: string[]; elevated: { enabled: boolean } };
       channels: Record<string, unknown>;
       agents: {
-        defaults: { sandbox: { mode: string; scope: string; workspaceAccess: string } };
-        list: { tools: { deny: string[] } }[];
+        defaults: { model: { primary: string; fallbacks: string[] }; sandbox: { mode: string; scope: string; workspaceAccess: string } };
+        entries: Record<string, { models: Record<string, unknown>; tools: { deny: string[] } }>;
       };
     };
+    expect(document.agents.defaults.model).toEqual({ primary: TEXT_MODEL, fallbacks: [] });
+    expect(Object.keys(document.agents.entries.main.models)).toEqual([TEXT_MODEL]);
     expect(document.tools).toEqual({ deny: ["*"], elevated: { enabled: false } });
     expect(document.channels).toEqual({});
     expect(document.agents.defaults.sandbox).toEqual({
@@ -23,8 +26,8 @@ describe("OpenClaw CLI boundary", () => {
       scope: "agent",
       workspaceAccess: "none",
     });
-    expect(document.agents.list).toHaveLength(1);
-    expect(document.agents.list[0].tools).toEqual({ deny: ["*"] });
+    expect(Object.keys(document.agents.entries)).toEqual(["main"]);
+    expect(document.agents.entries.main.tools).toEqual({ deny: ["*"] });
   });
 
   test("uses an argv array, verifies the image envelope, and strips secrets", async () => {
@@ -39,7 +42,7 @@ describe("OpenClaw CLI boundary", () => {
       return Bun.spawn([
         "/usr/bin/printf",
         "%s",
-        JSON.stringify({ ok: true, provider: "openai", model: "gpt-image-2" }),
+        JSON.stringify({ ok: true, provider: "openai", model: "gpt-image-2.5-sunburst" }),
       ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     }) as typeof Bun.spawn;
 
@@ -47,11 +50,42 @@ describe("OpenClaw CLI boundary", () => {
     expect(originalArgv[0]).toBe("/sealed/openclaw");
     expect(originalArgv.slice(1, 5)).toEqual(["infer", "image", "generate", "--json"]);
     expect(originalArgv).not.toContain("sh");
+    expect(originalArgv[originalArgv.indexOf("--model") + 1]).toBe("openai/gpt-image-2.5-sunburst");
     expect(originalEnv.GITZETTE_RUNNER_SECRET).toBeUndefined();
     expect(originalEnv.GITZETTE_GITHUB_TOKEN).toBeUndefined();
     expect(originalEnv.OPENAI_API_KEY).toBeUndefined();
     expect(usage.tokenSource).toBe("estimated");
     expect(usage.inputTokens).toBeGreaterThan(0);
+  });
+
+  test("editorial metaphor review still rejects irrelevant or text-bearing images", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-review-test-"));
+    for (const review of [{ relevant: false, containsText: false }, { relevant: true, containsText: true }]) {
+      const spawn = (() => Bun.spawn(["/usr/bin/printf", "%s", JSON.stringify({
+        ok: true, provider: "openai", model: "gpt-6-astra", outputs: [{ text: JSON.stringify(review) }],
+      })], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })) as typeof Bun.spawn;
+      await expect(new OpenClawInference(config(directory), spawn).reviewIllustration("database simulation", "image.webp"))
+        .rejects.toThrow(`relevant=${review.relevant}, containsText=${review.containsText}`);
+    }
+  });
+
+  test("rejects nonboolean image review fields without logging model content", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-review-types-"));
+    const spawn = (() => Bun.spawn(["/usr/bin/printf", "%s", JSON.stringify({
+      ok: true, provider: "openai", model: "gpt-6-astra", outputs: [{ text: JSON.stringify({ relevant: "untrusted-model-text", containsText: false }) }],
+    })], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })) as typeof Bun.spawn;
+    await expect(new OpenClawInference(config(directory), spawn).reviewIllustration("subject", "image.webp"))
+      .rejects.toThrow("image review requires boolean fields");
+  });
+
+  test("rejects image output from an older or substituted model", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-cli-test-"));
+    const spawn = (() => Bun.spawn([
+      "/usr/bin/printf", "%s",
+      JSON.stringify({ ok: true, provider: "openai", model: "gpt-image-2" }),
+    ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })) as typeof Bun.spawn;
+    await expect(new OpenClawInference(config(directory), spawn).illustrate("subject", join(directory, "image.png")))
+      .rejects.toThrow("forbidden image transport or model");
   });
 
   test("fails closed when the image CLI omits its provenance envelope", async () => {
@@ -83,7 +117,7 @@ describe("OpenClaw CLI boundary", () => {
       return Bun.spawn([
         "/usr/bin/printf",
         "%s",
-        JSON.stringify({ ok: true, provider: "openai", model: "gpt-5.6-sol", outputs: [{ text: JSON.stringify(output) }] }),
+        JSON.stringify({ ok: true, provider: "openai", model: "gpt-6-astra", outputs: [{ text: JSON.stringify(output) }] }),
       ], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     }) as typeof Bun.spawn;
     const evidence: EvidenceBundle = {

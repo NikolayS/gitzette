@@ -14,6 +14,11 @@ secret, AI API keys, TARS state, messaging configuration, or a tool-capable
 agent session. The OpenClaw config denies every agent tool; text and images use
 the direct `openclaw infer` capability surface. It intentionally contains no
 Gateway block, and the systemd service never starts a Gateway process.
+
+The shipped configuration uses keyed `agents.entries` for OpenClaw 2026.9.2.
+Image selection is explicit on each `infer image generate --model` call; do not
+restore the retired `agents.defaults.imageGenerationModel` setting. Validate the
+configuration with the installed OpenClaw before attempting OAuth activation.
 Public commit messages and PR/issue titles are untrusted third-party input. They
 are serialized inside the hostile-evidence delimiter, never interpolated into a
 shell, and reach an agent with `tools.deny=["*"]`, no channels, elevation off,
@@ -47,31 +52,12 @@ narrow `RUNNER_SECRET` is configured on both sides. Never put an AI API key in
 the environment file; startup rejects broad credential patterns and known AI
 provider variables. `bun.lock` is the sole dependency lockfile used by CI.
 
-OpenClaw 2026.7 does not import OAuth material from a legacy `~/.codex`
-directory. Do not copy another user's Codex files into this account or treat
-their presence as proof of usable runner auth. After the dedicated GitZette
-account and revocation policy are approved, authenticate directly into the
-isolated OpenClaw store as the service user:
-
-```bash
-sudo -u gitzette-runner env -i \
-  HOME=/var/lib/gitzette-runner \
-  PATH=/var/lib/gitzette-runner/.bun/bin:/usr/local/bin:/usr/bin:/bin \
-  OPENCLAW_STATE_DIR=/var/lib/gitzette-runner/.openclaw \
-  OPENCLAW_CONFIG_PATH=/var/lib/gitzette-runner/.openclaw/openclaw.json \
-  /var/lib/gitzette-runner/.bun/bin/openclaw models auth login \
-    --provider openai --device-code
-```
-
-Run the same sealed environment with `openclaw infer model auth status --json`
-and require an available OpenAI OAuth route with no fallback before running the
-text and image canaries. Missing, expired, or rate-limited auth keeps the
-service disabled. Never add an API key to make a canary pass.
-
-Before activation, the operator must attach a written authorization/terms-of-use
-determination for automated use of the dedicated account to the release record.
-This repository does not assert that approval exists. Without that record the
-runner and weekly scheduler remain disabled, even if device-code login works.
+Provisioning follows the [authorized subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update).
+The current activation copied only Nik's explicitly authorized OAuth profile into
+the isolated runner store; it did not mint an independent login session or copy
+TARS's configuration, tools, or other profiles. Legacy Codex files are not proof
+of usable OpenClaw authentication. Verify auth status and both live model
+canaries before enabling the service. No API-key fallback is permitted.
 
 The runner classifies OpenClaw auth failures primarily from structured JSON
 `status`, `statusCode`, and `code` fields; a bounded message matcher is only a
@@ -83,11 +69,13 @@ emitted after five consecutive failures of any class, so unknown provider
 wording cannot suppress the operator signal.
 
 Treat either alert as a total generation outage: disable the runner, inspect
-the dedicated identity with the sealed `auth status` command, revoke the broken
-session if it still appears active, and repeat device-code login as
-`gitzette-runner`. Then rerun auth status plus the text and image canaries before
-re-enabling the service. Never copy another account's state or install an
-API-key fallback. The restore target is four hours from the first alert; an
+the authorized identity with the sealed `auth status` command. Do not revoke
+the shared session casually: revocation or refresh-token rotation can disrupt
+TARS too. Coordinate recovery of both clients. A fresh device-code login under
+the same authorized account can establish an independent runner session; keep
+all authentication codes in the trusted terminal, never chat or logs.
+Then rerun auth status plus the text and image canaries before
+re-enabling the service. Never import an unauthorized account or install an API-key fallback. The restore target is four hours from the first alert; an
 outage may exceed that target when the provider or account owner is unavailable.
 Existing editions remain served, and queued work fails closed or ages out
 during the accepted generation outage.
@@ -102,9 +90,10 @@ stat -c '%U:%G %a %n' /var/lib/gitzette-runner /etc/gitzette-runner/environment
 ```
 
 Expected ownership/modes are `gitzette-runner:gitzette-runner 700` and
-`root:root 600`. The OAuth identity must be a dedicated GitZette account, never
-a person's primary ChatGPT identity. Account-policy approval and a tested
-revocation response are production activation gates; if OAuth is revoked or
+`root:root 600`. The runner store must contain only the owner-authorized OAuth profile.
+Nik's existing personal subscription is allowed under the recorded authorization;
+isolation is at the Linux user/store boundary. A tested revocation response remains
+required; if OAuth is revoked or
 limited, generation intentionally fails closed and operators disable the runner
 while existing editions remain available.
 
@@ -129,7 +118,7 @@ not hard-refuse or leave a first-time user blocked for days.
 Every successful job records input tokens, output tokens, token measurement
 source, generated image count, and runner wall time on `generation_jobs` in the
 same lease-guarded batch that publishes it. `/status` shows rolling-seven-day
-aggregates. OpenClaw 2026.7.1-beta.5 does not expose token usage in its local
+aggregates. The installed OpenClaw does not expose token usage in its local
 capability JSON, so the runner currently stores a deterministic UTF-8-byte/4
 estimate and labels it `estimated`; if a future envelope supplies bounded
 provider counts, it records them as `provider`. Image count and wall time are
@@ -137,7 +126,53 @@ measured directly. The initial 100-start setting, its worst-case call shape,
 and the production calibration procedure are documented in
 [`docs/usage-calibration.md`](../docs/usage-calibration.md).
 
-The dedicated ChatGPT OAuth subscription is not an API-key billing account, so
+The authorized ChatGPT OAuth subscription is not an API-key billing account, so
 the old API-dollar ledger does not represent its cost model. If the account
 moves to metered billing, disable the runner until a reviewed monetary budget
 gate is added.
+
+## Model policy
+
+Writing and illustration review use `openai/gpt-6-astra`; image generation
+is pinned to `openai/gpt-image-2.5-sunburst`. Update the Worker publication validator
+and the runner together: new active manifests must declare Astra provenance.
+Do not enable the updated runner against a Worker still enforcing the older
+text-model pin. Historical stored editions are not rewritten by this change.
+
+GPT-Image-2.5 Sunburst is the owner-selected illustration target. Before
+production activation, prove availability through the owner-authorized subscription
+OAuth transport and validate a real generated image. API availability alone is
+insufficient; do not fall back to Image-2 or an API key if OAuth rejects it.
+
+## Coordinated model cutover
+
+Before deploying the Astra/Sunburst Worker and runner together, stop the runner
+and drain or expire outstanding generation leases; do not mix old and new runners.
+`validateManifest` is called only by the runner publication endpoint
+(`src/runner.ts`), not when reading existing R2 editions. Existing published HTML
+remains readable. Live authorized-account canaries must capture the returned model
+and provider envelopes before activation; exact model checks intentionally fail
+closed until that transport is verified. There is no model/API-key fallback.
+
+Development dependency note: Miniflare 5.20260811.1-alpha pins sharp 0.35.2.
+The root override patches it to 0.35.4 (same minor line) for the libheif advisory
+GHSA-rgj7-g3m4-5g8c. Worker/D1/R2 E2E passes with that override. Remove it once
+the upstream Miniflare dependency includes the fixed patch.
+
+See the canonical [subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update) for authorization, shared-session effects, and recovery constraints.
+
+
+### Independent session before production activation
+
+The copied profile is temporary canary authentication, not the final service
+login. The release review requires an independent login session under Nik's
+same authorized subscription before enabling the service. It does not require
+a separate subscription or API billing account. In a trusted host terminal:
+
+```bash
+sudo -H -u gitzette-runner node /opt/openclaw-global/node_modules/openclaw/dist/index.js models auth login --provider openai --device-code
+```
+
+Complete the provider sign-in there, never in chat. Verify the selected identity
+and OAuth status, then rerun text/image canaries before service activation.
+Do not revoke the copied session during replacement: TARS still uses it.
