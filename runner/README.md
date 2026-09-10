@@ -54,7 +54,7 @@ provider variables. `bun.lock` is the sole dependency lockfile used by CI.
 
 OpenClaw 2026.7 does not import OAuth material from a legacy `~/.codex`
 directory. Do not copy another user's Codex files into this account or treat
-their presence as proof of usable runner auth. After the dedicated GitZette
+their presence as proof of usable runner auth. After the owner-authorized GitZette
 account and revocation policy are approved, authenticate directly into the
 isolated OpenClaw store as the service user:
 
@@ -74,7 +74,7 @@ text and image canaries. Missing, expired, or rate-limited auth keeps the
 service disabled. Never add an API key to make a canary pass.
 
 Before activation, the operator must attach a written authorization/terms-of-use
-determination for automated use of the dedicated account to the release record.
+determination for automated use of the authorized account to the release record.
 This repository does not assert that approval exists. Without that record the
 runner and weekly scheduler remain disabled, even if device-code login works.
 
@@ -88,7 +88,7 @@ emitted after five consecutive failures of any class, so unknown provider
 wording cannot suppress the operator signal.
 
 Treat either alert as a total generation outage: disable the runner, inspect
-the dedicated identity with the sealed `auth status` command, revoke the broken
+the authorized identity with the sealed `auth status` command, revoke the broken
 session if it still appears active, and repeat device-code login as
 `gitzette-runner`. Then rerun auth status plus the text and image canaries before
 re-enabling the service. Never copy another account's state or install an
@@ -107,7 +107,7 @@ stat -c '%U:%G %a %n' /var/lib/gitzette-runner /etc/gitzette-runner/environment
 ```
 
 Expected ownership/modes are `gitzette-runner:gitzette-runner 700` and
-`root:root 600`. The OAuth identity must be a dedicated GitZette account, never
+`root:root 600`. The OAuth identity must be a owner-authorized GitZette account, never
 a person's primary ChatGPT identity. Account-policy approval and a tested
 revocation response are production activation gates; if OAuth is revoked or
 limited, generation intentionally fails closed and operators disable the runner
@@ -142,7 +142,7 @@ measured directly. The initial 100-start setting, its worst-case call shape,
 and the production calibration procedure are documented in
 [`docs/usage-calibration.md`](../docs/usage-calibration.md).
 
-The dedicated ChatGPT OAuth subscription is not an API-key billing account, so
+The authorized ChatGPT OAuth subscription is not an API-key billing account, so
 the old API-dollar ledger does not represent its cost model. If the account
 moves to metered billing, disable the runner until a reviewed monetary budget
 gate is added.
@@ -156,7 +156,7 @@ Do not enable the updated runner against a Worker still enforcing the older
 text-model pin. Historical stored editions are not rewritten by this change.
 
 GPT-Image-2.5 Sunburst is the owner-selected illustration target. Before
-production activation, prove availability through the dedicated subscription
+production activation, prove availability through the owner-authorized subscription
 OAuth transport and validate a real generated image. API availability alone is
 insufficient; do not fall back to Image-2 or an API key if OAuth rejects it.
 
@@ -166,7 +166,7 @@ Before deploying the Astra/Sunburst Worker and runner together, stop the runner
 and drain or expire outstanding generation leases; do not mix old and new runners.
 `validateManifest` is called only by the runner publication endpoint
 (`src/runner.ts`), not when reading existing R2 editions. Existing published HTML
-remains readable. Live dedicated-account canaries must capture the returned model
+remains readable. Live authorized-account canaries must capture the returned model
 and provider envelopes before activation; exact model checks intentionally fail
 closed until that transport is verified. There is no model/API-key fallback.
 
@@ -174,3 +174,12 @@ Development dependency note: Miniflare 5.20260811.1-alpha pins sharp 0.35.2.
 The root override patches it to 0.35.4 (same minor line) for the libheif advisory
 GHSA-rgj7-g3m4-5g8c. Worker/D1/R2 E2E passes with that override. Remove it once
 the upstream Miniflare dependency includes the fixed patch.
+
+### Authorized subscription policy (September9 update)
+
+Nik explicitly authorized his existing OAuth subscription for both GitZette
+canaries and production. A separate subscription is no longer a prerequisite.
+The Linux runner and its auth store remain isolated. Sharing the subscription
+means revocation and account limits affect both TARS and GitZette; no API-key
+fallback is permitted. Only the authorized OAuth profile is copied, not another
+agent's complete configuration or tool access.

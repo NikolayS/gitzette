@@ -69,7 +69,7 @@ describe("runner engine", () => {
     expect(result, publisher.failure).toBe("processed");
     expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp"]);
     expect(publisher.published?.images).toHaveLength(2);
-    expect(publisher.published?.promptVersion).toBe("gitzette-editor-v2");
+    expect(publisher.published?.promptVersion).toBe("gitzette-editor-v3");
     expect(publisher.publishedUsage).toMatchObject({
       inputTokens: 130,
       outputTokens: 22,

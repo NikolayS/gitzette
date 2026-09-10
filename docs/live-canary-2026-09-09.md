@@ -21,3 +21,12 @@ ImageMagick, and mixed-case job username versus normalized collector username.
 Nik explicitly authorized using his existing OAuth subscription in the isolated
 runner, superseding the dedicated-account restriction. Both real response
 model IDs matched the strict pins: gpt-6-astra and gpt-image-2.5-sunburst.
+
+## Fresh prompt-v3 run — September10
+
+A new run generated fresh Astra articles and both Sunburst images, with no
+cached model outputs. The general-purpose illustration prompt contains no
+story-specific city example. Both image reviews, visual/alpha checks,
+perceptual distinction and the final manifest validation passed; RunnerEngine
+returned `processed` at00:10:54 UTC. Manifest promptVersion is gitzette-editor-v3.
+This remains a local-file publication, not a production canary.

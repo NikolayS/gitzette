@@ -22,7 +22,7 @@ function collapseSqlWhitespace(sql: string, stripComments: boolean): string {
       index += 2;
       while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") index += 1;
       if (!stripComments) {
-        if (pendingSpace && result && !/[,(]$/.test(result)) result += " ";
+        if (result && !/[,(\n ]$/.test(result)) result += " ";
         result += `${sql.slice(commentStart, index).trimEnd()}\n`;
       }
       afterLineComment = !stripComments;
@@ -68,6 +68,17 @@ function canonicalSql(sql: string | null): string | null {
     .replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) IF NOT EXISTS/i, "CREATE $1")
     .replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) "([A-Za-z0-9_]+)"/i, "CREATE $1 $2")
     .trim();
+}
+
+// Match the historical production gates: preserve comments and quoted values.
+// Only the baseline replay tolerates IF NOT EXISTS; live drift does not.
+export function productionSchema(document: unknown, baseline = false): SchemaRow[] {
+  return mapSchema(document, (sql) => {
+    if (sql === null) return null;
+    let normalized = strictSql(sql);
+    if (baseline) normalized = normalized!.replace(/^CREATE (TABLE|INDEX|TRIGGER|VIEW) IF NOT EXISTS/i, "CREATE $1");
+    return normalized!.replace(/^CREATE TABLE "([A-Za-z0-9_]+)"/i, "CREATE TABLE $1");
+  });
 }
 
 export function canonicalSchema(document: unknown): SchemaRow[] {

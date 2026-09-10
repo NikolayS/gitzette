@@ -3,12 +3,21 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalSchema, schemasMatch } from "./schema-equivalence";
+import { canonicalSchema, schemasMatch, productionSchema } from "./schema-equivalence";
 
 const cliPath = fileURLToPath(new URL("./schema-equivalence.ts", import.meta.url));
 
 describe("schema equivalence", () => {
   const schema = (sql: string) => [{ results: [{ type: "table", name: "jobs", sql }] }];
+
+  test("production gates preserve comment and drift IF NOT EXISTS differences", () => {
+    const plain = schema("CREATE TABLE jobs(id TEXT)");
+    const guarded = schema("CREATE TABLE IF NOT EXISTS jobs(id TEXT)");
+    expect(productionSchema(plain)).not.toEqual(productionSchema(guarded));
+    expect(productionSchema(plain, true)).toEqual(productionSchema(guarded, true));
+    expect(productionSchema(plain)).not.toEqual(productionSchema(schema("CREATE TABLE jobs(id TEXT /* review */)")));
+    expect(schemasMatch(schema("CREATE TABLE jobs(id TEXT-- note\n)"), schema("CREATE TABLE jobs(id TEXT -- note\n)"), true)).toBe(true);
+  });
 
   test("strict comment boundaries preserve comments and punctuation", () => {
     expect(schemasMatch(schema("CREATE TABLE jobs(id TEXT -- note\n, name TEXT)"), schema("CREATE TABLE jobs(id TEXT\n-- note\n , name TEXT)"), true)).toBe(true);
