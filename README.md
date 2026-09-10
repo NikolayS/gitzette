@@ -2,7 +2,7 @@
 
 Weekly open-source digest — auto-generated from GitHub activity, rendered as a newspaper.
 
-Live at [gitzette.online](https://gitzette.online)
+Existing site: [gitzette.online](https://gitzette.online). The revival described here is not yet deployed.
 
 ## How it works
 

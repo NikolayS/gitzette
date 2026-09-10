@@ -31,12 +31,12 @@ test("schema preflights compare two independent paths and reject malformed input
     const schema = (column: string) => JSON.stringify([{ results: [{ type: "table", name: "example", sql: `CREATE TABLE example (${column} TEXT)` }] }]);
     await writeFile(left, schema("original"));
     for (const script of ["compare-production-baseline.cjs", "compare-production-drift.cjs"]) {
-      for (const [content, exit] of [[schema("original"), 0], [schema("different"), 1], ["not-json", 1], ["[]", 1]] as const) {
+      for (const [content, exit] of [[schema("original"), 0], [schema("different"), 1], ["not-json", 1], ["[]", 1], ['[{"error":"unauthorized"}]', 1], ['[{"success":false,"results":[]}]', 1]] as const) {
         await writeFile(right, content);
         const child = Bun.spawn([process.execPath, fileURLToPath(new URL(script, import.meta.url)), left, right], { stdout: "pipe", stderr: "pipe" });
         const stderr = await new Response(child.stderr).text();
         expect(await child.exited).toBe(exit);
-        if (content === "not-json" || content === "[]") expect(stderr).toMatch(/invalid input document|invalid Wrangler schema result/);
+        if (content === "not-json" || content === "[]" || content.includes("unauthorized") || content.includes('"success":false')) expect(stderr).toMatch(/invalid input document|invalid Wrangler schema result/);
         else if (exit === 1) expect(stderr).toMatch(/differs|drifted/);
       }
     }

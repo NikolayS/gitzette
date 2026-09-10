@@ -10,6 +10,12 @@ const cliPath = fileURLToPath(new URL("./schema-equivalence.ts", import.meta.url
 describe("schema equivalence", () => {
   const schema = (sql: string) => [{ results: [{ type: "table", name: "jobs", sql }] }];
 
+  test("strict comment boundaries preserve comments and punctuation", () => {
+    expect(schemasMatch(schema("CREATE TABLE jobs(id TEXT -- note\n, name TEXT)"), schema("CREATE TABLE jobs(id TEXT\n-- note\n , name TEXT)"), true)).toBe(true);
+    expect(schemasMatch(schema("CREATE TABLE jobs(id /* keep */ TEXT)"), schema("CREATE TABLE jobs( id /* keep */  TEXT )"), true)).toBe(true);
+    expect(schemasMatch(schema("CREATE TABLE jobs(id /* keep */ TEXT)"), schema("CREATE TABLE jobs(id /* changed */ TEXT)"), true)).toBe(false);
+  });
+
   test("strict line comments tolerate trailing formatting whitespace", () => {
     expect(schemasMatch(schema("CREATE TABLE jobs(id TEXT -- note  \n)"), schema("CREATE TABLE jobs(id TEXT -- note\n)"), true)).toBe(true);
   });
