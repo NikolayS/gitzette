@@ -73,10 +73,11 @@ and require an available OpenAI OAuth route with no fallback before running the
 text and image canaries. Missing, expired, or rate-limited auth keeps the
 service disabled. Never add an API key to make a canary pass.
 
-Before activation, the operator must attach a written authorization/terms-of-use
-determination for automated use of the authorized account to the release record.
-This repository does not assert that approval exists. Without that record the
-runner and weekly scheduler remain disabled, even if device-code login works.
+Owner authorization is recorded in docs/live-canary-2026-09-09.md: Nik expressly
+approved the shared subscription for GitZette. Per his instruction, GitZette does
+not require an additional repository-specific formal/SOC2 approval. This records
+owner authorization, not a legal terms-of-service determination. Valid OAuth,
+passing generation tests, and the release checks remain required.
 
 The runner classifies OpenClaw auth failures primarily from structured JSON
 `status`, `statusCode`, and `code` fields; a bounded message matcher is only a
@@ -107,9 +108,10 @@ stat -c '%U:%G %a %n' /var/lib/gitzette-runner /etc/gitzette-runner/environment
 ```
 
 Expected ownership/modes are `gitzette-runner:gitzette-runner 700` and
-`root:root 600`. The OAuth identity must be a owner-authorized GitZette account, never
-a person's primary ChatGPT identity. Account-policy approval and a tested
-revocation response are production activation gates; if OAuth is revoked or
+`root:root 600`. The runner store must contain only the owner-authorized OAuth profile.
+Nik's existing personal subscription is allowed under the recorded authorization;
+isolation is at the Linux user/store boundary. A tested revocation response remains
+required; if OAuth is revoked or
 limited, generation intentionally fails closed and operators disable the runner
 while existing editions remain available.
 
@@ -175,7 +177,7 @@ The root override patches it to 0.35.4 (same minor line) for the libheif advisor
 GHSA-rgj7-g3m4-5g8c. Worker/D1/R2 E2E passes with that override. Remove it once
 the upstream Miniflare dependency includes the fixed patch.
 
-### Authorized subscription policy (September9 update)
+### Authorized subscription policy (September 9 update)
 
 Nik explicitly authorized his existing OAuth subscription for both GitZette
 canaries and production. A separate subscription is no longer a prerequisite.

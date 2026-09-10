@@ -11,6 +11,11 @@ describe("schema equivalence", () => {
   const schema = (sql: string) => [{ results: [{ type: "table", name: "jobs", sql }] }];
 
   test("production gates preserve comment and drift IF NOT EXISTS differences", () => {
+    expect(schemasMatch(schema("CREATE TABLE jobs(id/* keep */TEXT)"), schema("CREATE TABLE jobs(id /* keep */ TEXT)"), true)).toBe(true);
+    for (const prefix of ["CREATE UNIQUE INDEX", "create table", "create unique index"]) {
+      expect(productionSchema(schema(`${prefix} IF NOT EXISTS jobs(id)`), true))
+        .toEqual(productionSchema(schema(`${prefix} jobs(id)`), true));
+    }
     const plain = schema("CREATE TABLE jobs(id TEXT)");
     const guarded = schema("CREATE TABLE IF NOT EXISTS jobs(id TEXT)");
     expect(productionSchema(plain)).not.toEqual(productionSchema(guarded));

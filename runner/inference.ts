@@ -117,6 +117,7 @@ export class OpenClawInference implements Inference {
     if (!text || text.length > 1000) throw new Error("image review returned no bounded JSON");
     const review = JSON.parse(text) as Record<string, unknown>;
     exact(review, "image review", ["relevant", "containsText"]);
+    if (typeof review.relevant !== "boolean" || typeof review.containsText !== "boolean") throw new Error("image review requires boolean fields");
     if (review.relevant !== true || review.containsText !== false) throw new Error(`illustration failed relevance/text review: relevant=${JSON.stringify(review.relevant)}, containsText=${JSON.stringify(review.containsText)}`);
     return measuredOrEstimatedUsage(parsed, prompt, text);
   }

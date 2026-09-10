@@ -66,6 +66,15 @@ describe("OpenClaw CLI boundary", () => {
     }
   });
 
+  test("rejects nonboolean image review fields without logging model content", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-review-types-"));
+    const spawn = (() => Bun.spawn(["/usr/bin/printf", "%s", JSON.stringify({
+      ok: true, provider: "openai", model: "gpt-6-astra", outputs: [{ text: JSON.stringify({ relevant: "untrusted-model-text", containsText: false }) }],
+    })], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })) as typeof Bun.spawn;
+    await expect(new OpenClawInference(config(directory), spawn).reviewIllustration("subject", "image.webp"))
+      .rejects.toThrow("image review requires boolean fields");
+  });
+
   test("rejects image output from an older or substituted model", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-cli-test-"));
     const spawn = (() => Bun.spawn([
