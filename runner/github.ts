@@ -102,16 +102,21 @@ export class GitHubCollector implements Collector {
     }) as any;
     if (body.errors || !body.data?.user) throw new Error("GitHub contribution collection failed");
     const collection = body.data.user.contributionsCollection;
+    if (!collection || !Array.isArray(collection.commitContributionsByRepository)) throw new Error("GitHub contribution repositories invalid");
+    const issueContributions = contributionConnection(collection.issueContributions, "issue");
+    const pullRequestContributions = contributionConnection(collection.pullRequestContributions, "pull request");
+    const repositoryContributions = contributionConnection(collection.repositoryContributions, "repository");
     const repos = new Map<string, ContributionRepository>();
-    const commitRows = collection.commitContributionsByRepository ?? [];
+    const commitRows = collection.commitContributionsByRepository;
+    if (commitRows.length > 100) throw new Error("GitHub commit contribution repositories too large");
     for (const row of commitRows) addPublicRepo(repos, row.repository);
-    for (const node of collection.issueContributions?.nodes ?? []) addPublicRepo(repos,node.issue.repository);
-    for (const node of collection.pullRequestContributions?.nodes ?? []) addPublicRepo(repos,node.pullRequest.repository);
-    for (const node of collection.repositoryContributions?.nodes ?? []) addPublicRepo(repos,node.repository);
+    for (const node of issueContributions.nodes) addPublicRepo(repos,node?.issue?.repository);
+    for (const node of pullRequestContributions.nodes) addPublicRepo(repos,node?.pullRequest?.repository);
+    for (const node of repositoryContributions.nodes) addPublicRepo(repos,node?.repository);
     const hitLimit = commitRows.length >= 100
-      || collection.issueContributions?.pageInfo?.hasNextPage === true
-      || collection.pullRequestContributions?.pageInfo?.hasNextPage === true
-      || collection.repositoryContributions?.pageInfo?.hasNextPage === true;
+      || issueContributions.pageInfo.hasNextPage
+      || pullRequestContributions.pageInfo.hasNextPage
+      || repositoryContributions.pageInfo.hasNextPage;
     const repositories = [...repos.values()].filter((row) => validRepo(row.repo)).sort((a,b) => a.repo.localeCompare(b.repo));
     return { repositories, coverage: hitLimit ? { status: "truncated", observed: repositories.length, limit: 400 } : { status: "complete" } };
   }
@@ -129,6 +134,7 @@ export class GitHubCollector implements Collector {
       const body = await this.github(url.toString()) as { incomplete_results?: boolean; total_count?: number; items?: SearchItem[] };
       if (!Array.isArray(body.items)) throw new Error(`GitHub ${kind} search incomplete`);
       if (!Number.isSafeInteger(body.total_count) || body.total_count! < 0) throw new Error(`GitHub ${kind} search total missing`);
+      if (typeof body.incomplete_results !== "boolean") throw new Error(`GitHub ${kind} search incomplete_results invalid`);
       if (page === 1) total = body.total_count!;
       else if (body.total_count !== total) throw new Error(`GitHub ${kind} search total changed during pagination`);
       if (body.items.length > 100) throw new Error(`GitHub ${kind} search page too large`);
@@ -163,12 +169,15 @@ export class GitHubCollector implements Collector {
     // retained item when attributing commits to repositories or citing it.
     const selected = mergeSearchResults(kind, items);
     if (selected.length > total) throw new Error(`GitHub ${kind} search items exceed total`);
+    if (total > 0 && selected.length === 0) throw new Error(`GitHub ${kind} search total has no items`);
     return { items: selected, total, itemCoverage: total > selected.length ? { status: "truncated", observed: selected.length, limit: 500 } : { status: "complete" } };
   }
 
   private async discussions(username: string, from: string, to: string): Promise<EvidenceItem[]> {
     const query = `query($q:String!,$cursor:String){search(query:$q,type:DISCUSSION,first:100,after:$cursor){discussionCount pageInfo{hasNextPage endCursor} nodes{... on Discussion{id title url repository{nameWithOwner visibility}}}}}`;
-    const nodes: any[] = [];
+    const nodes = new Map<string, any>();
+    let expectedCount: number | null = null;
+    let exhausted = false;
     let cursor: string | null = null;
     for (let page = 0; page < 5; page++) {
       const body = await this.github("https://api.github.com/graphql", {
@@ -176,12 +185,27 @@ export class GitHubCollector implements Collector {
       }) as any;
       const search = body.data?.search;
       if (body.errors || !search || !Array.isArray(search.nodes)) throw new Error("GitHub discussion search incomplete");
-      nodes.push(...search.nodes);
-      if (!search.pageInfo?.hasNextPage || nodes.length >= 500) break;
-      if (typeof search.pageInfo.endCursor !== "string") throw new Error("GitHub discussion cursor missing");
+      if (!Number.isSafeInteger(search.discussionCount) || search.discussionCount < 0
+        || !search.pageInfo || typeof search.pageInfo.hasNextPage !== "boolean"
+        || !(search.pageInfo.endCursor === null || typeof search.pageInfo.endCursor === "string")) {
+        throw new Error("GitHub discussion search pagination invalid");
+      }
+      if (expectedCount === null) expectedCount = search.discussionCount;
+      else if (search.discussionCount !== expectedCount) throw new Error("GitHub discussion search count changed during pagination");
+      if (search.nodes.length > 100) throw new Error("GitHub discussion search page too large");
+      for (const node of search.nodes) {
+        assertDiscussionNode(node);
+        nodes.set(node.id, node);
+      }
+      if (nodes.size > search.discussionCount) throw new Error("GitHub discussion search items exceed count");
+      if (!search.pageInfo.hasNextPage) { exhausted = true; break; }
+      if (nodes.size >= 500) break;
+      if (typeof search.pageInfo.endCursor !== "string" || !search.pageInfo.endCursor) throw new Error("GitHub discussion cursor missing");
       cursor = search.pageInfo.endCursor;
     }
-    return nodes.filter((node:any) => isPublicRepository(node.repository)).slice(0, 500).map((node: any) => ({
+    if (!exhausted) throw new Error("GitHub discussion search exceeded collection cap");
+    if (exhausted && nodes.size !== expectedCount) throw new Error("GitHub discussion search count does not match items");
+    return [...nodes.values()].filter((node:any) => isPublicRepository(node.repository)).slice(0, 500).map((node: any) => ({
       id: `discussion:${node.id}`,
       type: "discussion" as const,
       title: String(node.title).slice(0, 500),
@@ -197,6 +221,8 @@ export class GitHubCollector implements Collector {
     for (let page = 1; page <= 5; page++) {
       const batch = await this.github(`https://api.github.com/repos/${encodedRepo}/releases?per_page=100&page=${page}`) as any[];
       if (!Array.isArray(batch)) throw new Error("GitHub releases response invalid");
+      if (batch.length > 100) throw new Error("GitHub releases page too large");
+      for (const release of batch) assertRelease(repo, release);
       response.push(...batch);
       // GitHub orders this endpoint by creation, while a draft created long ago
       // may first be published inside this week. Only endpoint exhaustion proves
@@ -286,6 +312,43 @@ function assertSearchItem(kind: "commits" | "issues", query: string, item: Searc
   }
 }
 
+function assertRelease(repo: string, release: any): void {
+  if (!release || !Number.isSafeInteger(release.id) || release.id <= 0 || typeof release.draft !== "boolean") {
+    throw new Error("GitHub release item invalid");
+  }
+  if (release.draft) return;
+  if (typeof release.published_at !== "string" || !isIsoInstant(release.published_at) || !isGitHubUrl(release.html_url)) {
+    throw new Error("GitHub release item invalid");
+  }
+  const parts = new URL(release.html_url).pathname.split("/").filter(Boolean);
+  if (parts.length < 5 || `${parts[0]}/${parts[1]}`.toLowerCase() !== repo.toLowerCase()
+    || parts[2] !== "releases" || parts[3] !== "tag" || !parts[4]) throw new Error("GitHub release item invalid");
+}
+
+function assertDiscussionNode(node: any): void {
+  if (!node || typeof node.id !== "string" || !node.id || node.id.length > 120
+    || typeof node.title !== "string" || !node.title.trim() || node.title.length > 500
+    || !isGitHubUrl(node.url) || !node.repository || !validRepo(node.repository.nameWithOwner)) {
+    throw new Error("GitHub discussion search item invalid");
+  }
+  isPublicRepository(node.repository);
+  const parts = new URL(node.url).pathname.split("/").filter(Boolean);
+  const [owner] = String(node.repository.nameWithOwner).split("/");
+  const repositoryDiscussion = parts.length === 4
+    && `${parts[0]}/${parts[1]}`.toLowerCase() === String(node.repository.nameWithOwner).toLowerCase()
+    && parts[2] === "discussions" && /^\d+$/.test(parts[3]);
+  const organizationDiscussion = parts.length === 4 && parts[0] === "orgs"
+    && parts[1].toLowerCase() === owner.toLowerCase()
+    && parts[2] === "discussions" && /^\d+$/.test(parts[3]);
+  if (!repositoryDiscussion && !organizationDiscussion) throw new Error("GitHub discussion search item invalid");
+}
+
+function isIsoInstant(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) || !Number.isFinite(Date.parse(value))) return false;
+  const expected = value.includes(".") ? value : value.replace("Z", ".000Z");
+  return new Date(value).toISOString() === expected;
+}
+
 function firstLine(value: string): string {
   return value.split(/\r?\n/, 1)[0].trim() || "Commit";
 }
@@ -335,9 +398,16 @@ function isPublicRepository(repo: any): boolean {
   if (!repo || !["PUBLIC","PRIVATE","INTERNAL"].includes(repo.visibility)) throw new Error("GitHub repository visibility missing");
   return repo.visibility === "PUBLIC";
 }
+function contributionConnection(value: any, label: string): { nodes: any[]; pageInfo: { hasNextPage: boolean } } {
+  if (!value || !Array.isArray(value.nodes) || !value.pageInfo || typeof value.pageInfo.hasNextPage !== "boolean") {
+    throw new Error(`GitHub ${label} contribution connection invalid`);
+  }
+  if (value.nodes.length > 100) throw new Error(`GitHub ${label} contribution connection too large`);
+  return value;
+}
 function addPublicRepo(repos: Map<string, ContributionRepository>, repo: any): void {
   if (!isPublicRepository(repo)) return;
-  if (!validRepo(repo.nameWithOwner)) return;
+  if (!validRepo(repo.nameWithOwner)) throw new Error("GitHub public repository name invalid");
   const hasStars = Number.isSafeInteger(repo.stargazerCount) && repo.stargazerCount >= 0;
   const key = String(repo.nameWithOwner).toLowerCase();
   repos.set(key, {

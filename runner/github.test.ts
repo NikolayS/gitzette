@@ -2,6 +2,20 @@ import { describe, expect, test } from "bun:test";
 import { GitHubCollector, isoWeek } from "./github";
 import { MAX_STATISTICS_REPOSITORIES, validateActivityStatistics } from "../src/statistics";
 
+function emptyContributions(overrides: Record<string, unknown> = {}) {
+  return {
+    commitContributionsByRepository: [],
+    issueContributions: { nodes: [], pageInfo: { hasNextPage: false } },
+    pullRequestContributions: { nodes: [], pageInfo: { hasNextPage: false } },
+    repositoryContributions: { nodes: [], pageInfo: { hasNextPage: false } },
+    ...overrides,
+  };
+}
+
+function emptyDiscussionSearch() {
+  return { discussionCount: 0, nodes: [], pageInfo: { hasNextPage: false, endCursor: null } };
+}
+
 describe("canonical GitHub collector", () => {
   test("computes exact ISO-week boundaries", () => {
     expect(isoWeek("2026-W01")).toEqual({ from: "2025-12-29", toExclusive: "2026-01-05", toInclusive: "2026-01-04" });
@@ -16,14 +30,12 @@ describe("canonical GitHub collector", () => {
       urls.push(url);
       if (url === "https://api.github.com/graphql") {
         const requestBody = JSON.parse(String(init?.body ?? "{}"));
-        if (requestBody.query?.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
-        return Response.json({ data: { user: { contributionsCollection: {
+        if (requestBody.query?.includes("type:DISCUSSION")) return Response.json({ data: { search: emptyDiscussionSearch() } });
+        return Response.json({ data: { user: { contributionsCollection: emptyContributions({
           commitContributionsByRepository: [
             { repository: { visibility: "PUBLIC", nameWithOwner: "octocat/widget", stargazerCount: 17 } },
-            { repository: { visibility: "PUBLIC", nameWithOwner: "../evil" } },
           ],
-          issueContributions: { nodes: [] }, pullRequestContributions: { nodes: [] }, repositoryContributions: { nodes: [] },
-        } } } });
+        }) } } });
       }
       if (url.includes("/releases?")) return Response.json([]);
       if (url.includes("/search/commits")) return Response.json({ incomplete_results: false, total_count: 1, items: [{ sha: "abc", html_url: "https://github.com/octocat/widget/commit/abc", commit: { message: "Fix parser\nbody" }, repository: { full_name: "octocat/widget" } }] });
@@ -50,10 +62,7 @@ describe("canonical GitHub collector", () => {
         if (requestBody.query?.includes("type:DISCUSSION")) {
           return Response.json({ data: { search: { discussionCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } });
         }
-        return Response.json({ data: { user: { contributionsCollection: {
-          commitContributionsByRepository: [], issueContributions: { nodes: [] },
-          pullRequestContributions: { nodes: [] }, repositoryContributions: { nodes: [] },
-        } } } });
+        return Response.json({ data: { user: { contributionsCollection: emptyContributions() } } });
       }
       const parsed = new URL(url);
       if (parsed.pathname === "/search/commits") {
@@ -82,8 +91,8 @@ describe("canonical GitHub collector", () => {
       if (url.pathname === "/graphql") {
         const body = JSON.parse(String(init?.body));
         return Response.json(body.query.includes("type:DISCUSSION")
-          ? { data: { search: { discussionCount: 0, nodes: [] } } }
-          : { data: { user: { contributionsCollection: {} } } });
+          ? { data: { search: emptyDiscussionSearch() } }
+          : { data: { user: { contributionsCollection: emptyContributions() } } });
       }
       if (url.pathname !== "/search/commits") return Response.json({ incomplete_results: false, total_count: 0, items: [] });
       const page = Number(url.searchParams.get("page"));
@@ -116,8 +125,8 @@ describe("canonical GitHub collector", () => {
         if (url.pathname === "/graphql") {
           const body = JSON.parse(String(init?.body));
           return Response.json(body.query.includes("type:DISCUSSION")
-            ? { data: { search: { discussionCount: 0, nodes: [] } } }
-            : { data: { user: { contributionsCollection: {} } } });
+            ? { data: { search: emptyDiscussionSearch() } }
+            : { data: { user: { contributionsCollection: emptyContributions() } } });
         }
         if (url.pathname !== "/search/commits") return Response.json({ incomplete_results: false, total_count: 0, items: [] });
         const page = Number(url.searchParams.get("page"));
@@ -134,7 +143,7 @@ describe("canonical GitHub collector", () => {
           })),
         });
       };
-      await expect(new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32"))
+      await expect(new GitHubCollector("token", request as unknown as typeof fetch).collect("octocat", "2026-W32"))
         .rejects.toThrow(error);
     }
   });
@@ -147,6 +156,10 @@ describe("canonical GitHub collector", () => {
     const validPr = { id: 1, number: 1, title: "PR", html_url: "https://github.com/octocat/widget/pull/1" };
     const cases = [
       { path: "/search/commits", response: { incomplete_results: false, items: [] }, error: "GitHub commits search total missing" },
+      { path: "/search/commits", response: { total_count: 0, items: [] }, error: "GitHub commits search incomplete_results invalid" },
+      { path: "/search/commits", response: { incomplete_results: null, total_count: 0, items: [] }, error: "GitHub commits search incomplete_results invalid" },
+      { path: "/search/commits", response: { incomplete_results: "false", total_count: 0, items: [] }, error: "GitHub commits search incomplete_results invalid" },
+      { path: "/search/commits", response: { incomplete_results: false, total_count: 1, items: [] }, error: "GitHub commits search total has no items" },
       { path: "/search/commits", response: { incomplete_results: false, total_count: 1, items: [{ ...validCommit, sha: undefined }] }, error: "GitHub commits search item invalid" },
       { path: "/search/commits", response: { incomplete_results: false, total_count: 1, items: [{ ...validCommit, repository: { full_name: "octocat/widget", private: true } }] }, error: "GitHub commits search item invalid" },
       { path: "/search/commits", response: { incomplete_results: false, total_count: 1, items: [{ ...validCommit, repository: {} }] }, error: "GitHub commits search item invalid" },
@@ -159,13 +172,13 @@ describe("canonical GitHub collector", () => {
         if (url.pathname === "/graphql") {
           const body = JSON.parse(String(init?.body));
           return Response.json(body.query.includes("type:DISCUSSION")
-            ? { data: { search: { discussionCount: 0, nodes: [] } } }
-            : { data: { user: { contributionsCollection: {} } } });
+            ? { data: { search: emptyDiscussionSearch() } }
+            : { data: { user: { contributionsCollection: emptyContributions() } } });
         }
         if (url.pathname === testCase.path) return Response.json(testCase.response);
         return Response.json({ incomplete_results: false, total_count: 0, items: [] });
       };
-      await expect(new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32"))
+      await expect(new GitHubCollector("token", request as unknown as typeof fetch).collect("octocat", "2026-W32"))
         .rejects.toThrow(testCase.error);
     }
   });
@@ -192,16 +205,109 @@ describe("canonical GitHub collector", () => {
             })),
           } } });
         }
-        return Response.json({ data: { user: { contributionsCollection: {
-          commitContributionsByRepository: [], issueContributions: { nodes: [] },
-          pullRequestContributions: { nodes: [] }, repositoryContributions: { nodes: [] },
-        } } } });
+        return Response.json({ data: { user: { contributionsCollection: emptyContributions() } } });
       }
       return Response.json({ incomplete_results: false, total_count: 0, items: [] });
     };
     const evidence = await new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32");
     expect(cursors).toEqual([null, "page-2"]);
     expect(evidence.items).toHaveLength(101);
+  });
+
+  test("rejects malformed contribution and discussion completeness envelopes", async () => {
+    const malformedCollections = [
+      { ...emptyContributions(), commitContributionsByRepository: undefined },
+      { ...emptyContributions(), issueContributions: { nodes: [] } },
+      { ...emptyContributions(), pullRequestContributions: { nodes: null, pageInfo: { hasNextPage: false } } },
+      { ...emptyContributions(), repositoryContributions: { nodes: [], pageInfo: { hasNextPage: "false" } } },
+    ];
+    for (const collection of malformedCollections) {
+      const request = async () => Response.json({ data: { user: { contributionsCollection: collection } } });
+      await expect(new GitHubCollector("token", request as unknown as typeof fetch).collect("octocat", "2026-W32"))
+        .rejects.toThrow(/contribution (repositories|connection) invalid/);
+    }
+
+    const discussionCases = [
+      { discussionCount: 0, nodes: [], pageInfo: { endCursor: null } },
+      { discussionCount: 1, nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+    ];
+    for (const search of discussionCases) {
+      const request = async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/graphql") {
+          const body = JSON.parse(String(init?.body));
+          return Response.json(body.query.includes("type:DISCUSSION")
+            ? { data: { search } }
+            : { data: { user: { contributionsCollection: emptyContributions() } } });
+        }
+        return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+      };
+      await expect(new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32"))
+        .rejects.toThrow(/discussion search (pagination invalid|count does not match items)/);
+    }
+  });
+
+  test("deduplicates discussion IDs and rejects an exhausted count they cannot satisfy", async () => {
+    const node = {
+      id: "D1", title: "Repeated", url: "https://github.com/octocat/widget/discussions/1",
+      repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC" },
+    };
+    const request = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/graphql") {
+        const body = JSON.parse(String(init?.body));
+        if (!body.query.includes("type:DISCUSSION")) return Response.json({ data: { user: { contributionsCollection: emptyContributions() } } });
+        const second = body.variables.cursor === "next";
+        return Response.json({ data: { search: {
+          discussionCount: 2, nodes: [node],
+          pageInfo: { hasNextPage: !second, endCursor: second ? null : "next" },
+        } } });
+      }
+      return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+    };
+    await expect(new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32"))
+      .rejects.toThrow("GitHub discussion search count does not match items");
+  });
+
+  test("accepts matching organization discussions, rejects mismatched organizations, and fails at an unexhausted cap", async () => {
+    const collectDiscussion = (searchForPage: (cursor: string | null) => unknown) => {
+      const request = async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/graphql") {
+          const body = JSON.parse(String(init?.body));
+          return Response.json(body.query.includes("type:DISCUSSION")
+            ? { data: { search: searchForPage(body.variables.cursor) } }
+            : { data: { user: { contributionsCollection: emptyContributions() } } });
+        }
+        return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+      };
+      return new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32");
+    };
+    const orgNode = {
+      id: "D-org", title: "Organization topic", url: "https://github.com/orgs/octocat/discussions/7",
+      repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC" },
+    };
+    const accepted = await collectDiscussion(() => ({
+      discussionCount: 1, nodes: [orgNode], pageInfo: { hasNextPage: false, endCursor: null },
+    }));
+    expect(accepted.items.some((item) => item.id === "discussion:D-org")).toBe(true);
+    await expect(collectDiscussion(() => ({
+      discussionCount: 1, nodes: [{ ...orgNode, url: "https://github.com/orgs/other/discussions/7" }],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    }))).rejects.toThrow("GitHub discussion search item invalid");
+
+    await expect(collectDiscussion((cursor) => {
+      const page = cursor ? Number(cursor.slice(1)) : 0;
+      return {
+        discussionCount: 501,
+        nodes: Array.from({ length: 100 }, (_, index) => ({
+          id: `D-${page}-${index}`, title: `Discussion ${page}-${index}`,
+          url: `https://github.com/octocat/widget/discussions/${page * 100 + index + 1}`,
+          repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC" },
+        })),
+        pageInfo: { hasNextPage: true, endCursor: `p${page + 1}` },
+      };
+    })).rejects.toThrow("GitHub discussion search exceeded collection cap");
   });
 });
 
@@ -213,8 +319,8 @@ test("incomplete weekly searches use bounded daily windows and still fail closed
       const url = new URL(String(input));
       if (url.pathname === "/graphql") {
         const body = JSON.parse(String(init?.body));
-        if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
-        return Response.json({ data: { user: { contributionsCollection: {} } } });
+        if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: emptyDiscussionSearch() } });
+        return Response.json({ data: { user: { contributionsCollection: emptyContributions() } } });
       }
       if (url.pathname !== "/search/commits") return Response.json({ items: [], incomplete_results: false, total_count: 0 });
       const q = url.searchParams.get("q")!;
@@ -243,7 +349,7 @@ test('daily fallback deduplicates and selects newest weekly commits after mergin
   const url=new URL(String(input));
   if(url.pathname==='/graphql') {
    const body=JSON.parse(String(init?.body));
-   return Response.json(body.query.includes('type:DISCUSSION')?{data:{search:{discussionCount:0,nodes:[]}}}:{data:{user:{contributionsCollection:{}}}});
+   return Response.json(body.query.includes('type:DISCUSSION')?{data:{search:emptyDiscussionSearch()}}:{data:{user:{contributionsCollection:emptyContributions()}}});
   }
   if(url.pathname!=='/search/commits')return Response.json({items:[],incomplete_results:false,total_count:0});
   const q=url.searchParams.get('q')!;
@@ -267,8 +373,8 @@ test("keeps opened and merged PR event totals distinct, including the same PR", 
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
       return Response.json(body.query.includes("type:DISCUSSION")
-        ? { data: { search: { discussionCount: 0, nodes: [] } } }
-        : { data: { user: { contributionsCollection: {} } } });
+        ? { data: { search: emptyDiscussionSearch() } }
+        : { data: { user: { contributionsCollection: emptyContributions() } } });
     }
     if (url.pathname !== "/search/issues") return Response.json({ incomplete_results: false, total_count: 0, items: [] });
     const query = url.searchParams.get("q")!;
@@ -341,17 +447,17 @@ test("release collection does not stop on old dates because old drafts can be ne
     const url = new URL(String(input));
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
-      if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
-      return Response.json({ data: { user: { contributionsCollection: {
+      if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: emptyDiscussionSearch() } });
+      return Response.json({ data: { user: { contributionsCollection: emptyContributions({
         commitContributionsByRepository: [{ repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC", stargazerCount: 1 } }],
-      } } } });
+      }) } } });
     }
     if (url.pathname.startsWith("/search/")) return Response.json({ incomplete_results: false, total_count: 0, items: [] });
     if (url.pathname === "/repos/octocat/widget/releases") {
       const page = Number(url.searchParams.get("page"));
       releasePages.push(page);
       if (page === 1) return Response.json(Array.from({ length: 100 }, (_, id) => ({
-        id, draft: false, name: `Old ${id}`, created_at: "2020-01-01T00:00:00Z", published_at: "2020-01-02T00:00:00Z",
+        id: id + 1, draft: false, name: `Old ${id}`, created_at: "2020-01-01T00:00:00Z", published_at: "2020-01-02T00:00:00Z",
         html_url: `https://github.com/octocat/widget/releases/tag/old-${id}`,
       })));
       return Response.json(page === 2 ? [{
@@ -376,10 +482,10 @@ test("deduplicates a release repeated across shifting pages before evidence and 
     const url = new URL(String(input));
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
-      if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
-      return Response.json({ data: { user: { contributionsCollection: {
+      if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: emptyDiscussionSearch() } });
+      return Response.json({ data: { user: { contributionsCollection: emptyContributions({
         commitContributionsByRepository: [{ repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC", stargazerCount: 1 } }],
-      } } } });
+      }) } } });
     }
     if (url.pathname.startsWith("/search/")) return Response.json({ incomplete_results: false, total_count: 0, items: [] });
     if (url.pathname === "/repos/octocat/widget/releases") {
@@ -400,6 +506,38 @@ test("deduplicates a release repeated across shifting pages before evidence and 
   expect(result.items.filter((item: any) => item.id === "release:octocat/widget:42")).toHaveLength(1);
 });
 
+test("rejects malformed release pages instead of certifying an empty total", async () => {
+  const valid = {
+    id: 1, draft: false, published_at: "2026-08-05T00:00:00Z",
+    html_url: "https://github.com/octocat/widget/releases/tag/v1",
+  };
+  const batches = [
+    [{ ...valid, id: undefined }],
+    [{ ...valid, draft: undefined }],
+    [{ ...valid, published_at: "2026-02-30T00:00:00Z" }],
+    [{ ...valid, html_url: undefined }],
+    [{ ...valid, html_url: "https://github.com/other/widget/releases/tag/v1" }],
+    Array.from({ length: 101 }, (_, index) => ({ ...valid, id: index + 1 })),
+  ];
+  for (const batch of batches) {
+    const request = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/graphql") {
+        const body = JSON.parse(String(init?.body));
+        return Response.json(body.query.includes("type:DISCUSSION")
+          ? { data: { search: emptyDiscussionSearch() } }
+          : { data: { user: { contributionsCollection: emptyContributions({
+            commitContributionsByRepository: [{ repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC", stargazerCount: 1 } }],
+          }) } } });
+      }
+      if (url.pathname.startsWith("/search/")) return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+      return Response.json(batch);
+    };
+    await expect(new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32"))
+      .rejects.toThrow(/GitHub releases? (page too large|item invalid)/);
+  }
+});
+
 import {mergeSearchResults} from './github';
 test('daily issue selection follows updated time rather than the created/merged query day',()=>{
  const result=mergeSearchResults('issues',[{id:1,updated_at:'2026-08-09T01:00:00Z'},{id:2,updated_at:'2026-08-08T01:00:00Z'},{id:1,updated_at:'2026-08-09T01:00:00Z'}]);
@@ -415,16 +553,16 @@ test('public collection excludes private/internal repositories and draft release
    expect(body.query).toContain('visibility');
    if(body.query.includes('type:DISCUSSION')){
     expect(body.variables.q).toContain('is:public');
-    return Response.json({data:{search:{discussionCount:2,nodes:[
+    return Response.json({data:{search:{discussionCount:2,pageInfo:{hasNextPage:false,endCursor:null},nodes:[
      {id:'private-discussion',title:'Private discussion',url:'https://github.com/example/private/discussions/1',repository:{nameWithOwner:'example/private',visibility:'PRIVATE'}},
      {id:'public-discussion',title:'Public discussion',url:'https://github.com/example/public/discussions/2',repository:{nameWithOwner:'example/public',visibility:'PUBLIC'}},
     ]}}});
    }
-   return Response.json({data:{user:{contributionsCollection:{commitContributionsByRepository:[
+   return Response.json({data:{user:{contributionsCollection:emptyContributions({commitContributionsByRepository:[
     {repository:{nameWithOwner:'example/private',visibility:'PRIVATE'}},
     {repository:{nameWithOwner:'example/internal',visibility:'INTERNAL'}},
     {repository:{nameWithOwner:'example/public',visibility:'PUBLIC'}},
-   ]}}}});
+   ]})}}});
   }
   if(url.pathname.startsWith('/search/')){
    expect(url.searchParams.get('q')).toContain('is:public');
@@ -442,6 +580,6 @@ test('public collection excludes private/internal repositories and draft release
 });
 
 test('unknown repository visibility fails instead of declaring a quiet public week',async()=>{
- const request=async(_input:string|URL|Request)=>Response.json({data:{user:{contributionsCollection:{commitContributionsByRepository:[{repository:{nameWithOwner:'example/repo'}}]}}}});
+ const request=async(_input:string|URL|Request)=>Response.json({data:{user:{contributionsCollection:emptyContributions({commitContributionsByRepository:[{repository:{nameWithOwner:'example/repo'}}]})}}});
  await expect(new GitHubCollector('test-token',request as typeof fetch).collect('octocat','2026-W32')).rejects.toThrow('visibility missing');
 });
