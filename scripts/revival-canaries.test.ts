@@ -11,7 +11,19 @@ async function fixture(seed=true) {
 }
 test('recovery is bounded, idempotent, and uses the real queue without publishing artifacts',async()=>{
  const db=await fixture();try {
- db.exec(recovery);db.exec(recovery);
+ db.exec(recovery);
+ const rows = () => db.query('SELECT j.id,u.username,j.week_key,j.requested_by,j.status FROM generation_jobs j JOIN users u ON u.id=j.user_id ORDER BY u.username,j.week_key').all();
+ const expected = [
+  ['818ca963-0666-465d-ae1e-d930a813c5bf','karpathy','2026-W20'],
+  ['b52c7c0d-1e40-438e-902d-a91d91384e63','nikolays','2026-W32'],
+  ['6bfa9658-5c82-430c-90ad-2688335d2b63','nikolays','2026-W36'],
+  ['5ece0481-557e-45dd-9c12-a9b12d3190a5','physshell','2026-W30'],
+  ['2877a4f5-c2d7-4688-8fdc-ab5d61d6606f','steipete','2026-W14'],
+  ['85a7fe4e-4e3b-4dcc-9ba4-a50e6f9ed4f2','torvalds','2026-W16'],
+ ].map(([id,username,week_key])=>({id,username,week_key,requested_by:'1345402',status:'queued'}));
+ expect(rows()).toEqual(expected);
+ db.exec(recovery);
+ expect(rows()).toEqual(expected);
  expect(db.query('SELECT COUNT(*) n FROM generation_jobs').get()).toEqual({n:6});
  expect(db.query("SELECT COUNT(*) n FROM generation_jobs WHERE status='queued' AND requested_by='1345402'").get()).toEqual({n:6});
  expect(db.query('SELECT COUNT(*) n FROM edition_versions').get()).toEqual({n:0});
@@ -29,4 +41,14 @@ test('recovery preserves live work and suppression and does not create missing i
 });
 test('fresh database without the existing owner identity queues nothing',async()=>{
  const db=await fixture(false);try{db.exec(recovery);expect(db.query('SELECT COUNT(*) n FROM generation_jobs').get()).toEqual({n:0});}finally{db.close();}
+});
+test('eligible target users cannot queue without the fixed authorized owner identity',async()=>{
+ const db=await fixture();try {
+ db.exec("DELETE FROM users WHERE id='1345402'");
+ db.exec(recovery);
+ expect(db.query('SELECT COUNT(*) n FROM generation_jobs').get()).toEqual({n:0});
+ db.exec("INSERT INTO users(id,username) VALUES('wrong-owner','nikolays')");
+ db.exec(recovery);
+ expect(db.query('SELECT COUNT(*) n FROM generation_jobs').get()).toEqual({n:0});
+ }finally{db.close();}
 });
