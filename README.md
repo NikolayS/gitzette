@@ -201,3 +201,12 @@ edition route, and every recorded `/img/*` URL return 404 before closing the
 request. The suppression row and managed registry entry prevent historical D1/R2
 records from becoming public again. A later opt-in requires a reviewed decision
 and explicit deletion of the suppression row.
+
+Credential cutover is phased: `provision-runner-credentials.ts check` is read-only;
+all production schema/profile preflights complete before `sync` changes runner
+bindings. Keep the pull runner stopped during this cutover. Existing application
+and legacy generation bindings remain intact if preflight or Worker deploy fails.
+Only a successful Worker deploy permits `retire` to remove the explicitly named
+unused legacy bindings. If retirement partially fails, leave the new Worker in
+place, keep generation stopped, and rerun retirement plus the final binding
+check; do not restore legacy generation or enable the runner before verification.

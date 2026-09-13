@@ -15,6 +15,8 @@ export function credentialPlan(names: string[]) {
 }
 
 async function execute() {
+  const phase = process.argv[2];
+  if (!["check", "sync", "retire"].includes(phase)) throw new Error("explicit check/sync/retire phase required");
   const wrangler = new URL('../node_modules/.bin/wrangler', import.meta.url).pathname;
   const env: Record<string, string | undefined> = { ...process.env, CI: 'true' };
   delete env.GITZETTE_RUNNER_SECRET;
@@ -33,15 +35,16 @@ async function execute() {
   for (const name of plan.put) {
     if (!values[name] || (name !== 'ADMIN_USER_ID' && values[name]!.length < 32)) throw new Error(`missing deployment input for ${name}`);
   }
+  if (phase === "check") { console.log("Worker credential inputs and binding names verified (read-only)"); return; }
   // Validate every input before mutation. The child receives only Cloudflare auth,
   // not runner/status secrets in its environment; values go to stdin directly.
-  for (const name of plan.put) {
+  for (const name of phase === "sync" ? plan.put : []) {
     const child = Bun.spawn([wrangler, 'secret', 'put', name], { env, stdin: 'pipe', stdout: 'ignore', stderr: 'ignore' });
     child.stdin.write(values[name]!);
     await child.stdin.end();
     if (await child.exited !== 0) throw new Error(`unable to set Worker binding ${name}`);
   }
-  for (const name of plan.remove) {
+  for (const name of phase === "retire" ? plan.remove : []) {
     const child = Bun.spawn([wrangler, 'secret', 'delete', name], { env, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
     if (await child.exited !== 0) throw new Error(`unable to retire Worker binding ${name}`);
   }

@@ -9,3 +9,17 @@ test('missing application credentials and unknown bindings stop provisioning bef
   expect(() => credentialPlan(['RUNNER_SECRET'])).toThrow('application bindings missing');
   expect(() => credentialPlan([...app,'OTHER_SECRET'])).toThrow('unreviewed');
 });
+test('deployment validates schema before credential mutation and retires only after deploy', async () => {
+  const workflow=await Bun.file(new URL('../.github/workflows/deploy.yml',import.meta.url)).text();
+  const check=workflow.indexOf('provision-runner-credentials.ts check');
+  const schema=workflow.indexOf('bash scripts/check-production-schema.sh');
+  const sync=workflow.indexOf('provision-runner-credentials.ts sync');
+  const deploy=workflow.indexOf('run: ./node_modules/.bin/wrangler deploy');
+  const retire=workflow.indexOf('provision-runner-credentials.ts retire');
+  expect(check).toBeGreaterThan(0);
+  expect(schema).toBeGreaterThan(check);
+  expect(sync).toBeGreaterThan(schema);
+  expect(deploy).toBeGreaterThan(sync);
+  expect(retire).toBeGreaterThan(deploy);
+  expect(workflow.indexOf('bash scripts/check-production-secrets.sh')).toBeGreaterThan(retire);
+});

@@ -57,7 +57,8 @@ export async function startBroker(options: { socket: string; state: string; conf
   validateBrokerConfig(await Bun.file(options.config).json());
   let busy = false;
   const server = Bun.serve({ unix: options.socket, maxRequestBodySize: 12 * 1024 * 1024,
-    async fetch(req) {
+    async fetch(req, server) {
+      server.timeout(req, 0); // Inference has its own bounded child deadline.
       if (req.method !== "POST" || new URL(req.url).pathname !== "/infer") return new Response(null, { status: 404 });
       if (busy) return new Response(null, { status: 503 });
       busy = true;
@@ -73,13 +74,16 @@ export async function startBroker(options: { socket: string; state: string; conf
           env: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: options.work, TMPDIR: directory,
             OPENCLAW_STATE_DIR: options.state, OPENCLAW_CONFIG_PATH: options.config },
         });
+        const abort = () => child.kill();
+        req.signal.addEventListener("abort", abort, { once: true });
+        if (req.signal.aborted) child.kill();
         const timer = setTimeout(() => child.kill(), 600_000);
         let output: string, stderr: string, code: number;
         try { [output, stderr, code] = await Promise.all([boundedText(child.stdout, 2_000_000), boundedText(child.stderr, 100_000), child.exited]); }
         catch { child.kill(); await child.exited; throw new Error("inference output exceeded limit"); }
-        finally { clearTimeout(timer); }
+        finally { clearTimeout(timer); req.signal.removeEventListener("abort", abort); }
         // Raw provider diagnostics never cross the socket or enter logs.
-        if (code !== 0) return new Response(null, { status: classifyOpenClawFailure(stderr) === "auth" ? 401 : 502 });
+        if (code !== 0) return new Response(null, { status: (classifyOpenClawFailure(stderr) === "auth" || classifyOpenClawFailure(output) === "auth") ? 401 : 502 });
         let image: string | undefined;
         if (request.operation === "generate") {
           const file = Bun.file(join(directory, "output.png"));
