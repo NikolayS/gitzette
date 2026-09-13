@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { enqueueIdleArchiveJob } from "./archive-backfill";
 import { renderEdition, validateManifest, type PublicationManifest } from "./edition";
 import { hasPublicationDimensions, webpDimensions } from "./image";
 import { bearerToken, secretMatches } from "./credentials";
@@ -36,7 +37,7 @@ WHERE id=(
       WHERE capacity_started_at>=?
     ) < ?
   )
-  ORDER BY created_at, rowid LIMIT 1
+  ORDER BY CASE WHEN id LIKE 'b4cf1100-2026-4000-8000-%' THEN 1 ELSE 0 END, created_at, rowid LIMIT 1
 )
 RETURNING id,user_id,week_key,status,attempt,lease_token,lease_expires_at`;
 
@@ -90,7 +91,10 @@ runnerRoutes.post("/jobs/claim", async (c) => {
       globalLimit,
     )
     .first<Omit<ClaimedJob, "username">>();
-  if (!row) return c.body(null, 204);
+  if (!row) {
+    await enqueueIdleArchiveJob(c.env, now, globalLimit);
+    return c.body(null, 204);
+  }
   const user = await c.env.DB.prepare(
     `SELECT username,
        EXISTS(SELECT 1 FROM profile_suppressions ps WHERE ps.username=users.username COLLATE NOCASE) AS suppressed
