@@ -1,3 +1,4 @@
+import { validateActivityStatistics, type ActivityStatistics } from "./statistics";
 import { upgradeStructuredEdition } from "./edition-style";
 import { TEXT_MODEL, TEXT_MODEL_ID } from "./models";
 export const ACTIVE_MIN_IMAGES = 2;
@@ -16,6 +17,7 @@ export type EvidenceBundle = {
   username: string;
   weekKey: string;
   items: EvidenceItem[];
+  stats?: ActivityStatistics;
 };
 
 export type EditionStory = {
@@ -88,7 +90,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
   assertString(manifest.promptVersion, "promptVersion", 100);
 
   const evidence = manifest.evidence;
-  assertExactKeys(evidence, "evidence", ["state", "username", "weekKey", "items"]);
+  assertExactKeys(evidence, "evidence", ["state", "username", "weekKey", "items", "stats"]);
   if (!evidence || evidence.username !== username || evidence.weekKey !== weekKey) {
     throw new Error("evidence target mismatch");
   }
@@ -96,6 +98,7 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
     throw new Error("invalid evidence state");
   }
   if (!Array.isArray(evidence.items) || evidence.items.length > 500) throw new Error("invalid evidence items");
+  if (evidence.stats !== undefined) validateActivityStatistics(evidence.stats, weekKey);
   const evidenceIds = new Set<string>();
   for (const item of evidence.items) {
     assertExactKeys(item, "evidence item", ["id", "type", "title", "url", "repo"]);
@@ -196,5 +199,5 @@ export function renderEdition(manifest: PublicationManifest, imageUrl: (key: str
       : "";
     return `<article>${image}<div class="tag">${escapeHtml(story.tag)}</div><h2>${escapeHtml(story.headline)}</h2><p><em>${escapeHtml(story.deck)}</em></p>${story.paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join("")}<details class="sources"><summary>Sources (${story.evidenceIds.length})</summary><ol>${citations}</ol></details></article>`;
   }).join("");
-  return upgradeStructuredEdition(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(edition.headline)}</title><style>body{margin:0;background:#e8e4dc;color:#111;font:16px/1.6 Georgia,serif}main{max-width:960px;margin:24px auto;padding:32px;background:#f7f4ee;border:1px solid #c8c2b4}header{border-bottom:3px solid #111}article{display:flow-root;padding:28px 0;border-bottom:1px solid #c8c2b4}article img{float:left;width:180px;height:180px;object-fit:contain;margin:0 20px 12px 0}.tag,.sources,.notice,footer{font:12px/1.4 monospace}.sources,.notice{color:#555}@media(max-width:600px){main{margin:0;padding:20px}article img{width:130px;height:130px}}</style></head><body><main class="gitzette-edition"><header><h1>${escapeHtml(edition.headline)}</h1><p class="deck"><em>${escapeHtml(edition.tagline)}</em></p><p>@${escapeHtml(evidence.username)} · ${escapeHtml(evidence.weekKey)}</p><p class="notice">${AI_ACTIVITY_NOTICE}</p></header>${stories}<footer>${escapeHtml(edition.closingNote)}</footer></main></body></html>`);
+  return upgradeStructuredEdition(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(edition.headline)}</title><style>body{margin:0;background:#e8e4dc;color:#111;font:16px/1.6 Georgia,serif}main{max-width:960px;margin:24px auto;padding:32px;background:#f7f4ee;border:1px solid #c8c2b4}header{border-bottom:3px solid #111}article{display:flow-root;padding:28px 0;border-bottom:1px solid #c8c2b4}article img{float:left;width:180px;height:180px;object-fit:contain;margin:0 20px 12px 0}.tag,.sources,.notice,footer{font:12px/1.4 monospace}.sources,.notice{color:#555}@media(max-width:600px){main{margin:0;padding:20px}article img{width:130px;height:130px}}</style></head><body><main class="gitzette-edition"><header><h1>${escapeHtml(edition.headline)}</h1><p class="deck"><em>${escapeHtml(edition.tagline)}</em></p><p>@${escapeHtml(evidence.username)} · ${escapeHtml(evidence.weekKey)}</p><p class="notice">${AI_ACTIVITY_NOTICE}</p></header>${stories}<footer>${escapeHtml(edition.closingNote)}</footer></main></body></html>`, evidence.stats);
 }

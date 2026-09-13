@@ -39,6 +39,14 @@ const edition: Edition = {
   ],
 };
 
+const threeImageEdition: Edition = {
+  ...edition,
+  stories: [
+    ...edition.stories,
+    { headline: "Cache divided", deck: "A third boundary becomes visible.", paragraphs: ["A third bounded claim."], evidenceIds: ["commit:abc"], tag: "FEATURE", illustrationKey: "image-3.webp" },
+  ],
+};
+
 describe("runner engine", () => {
   test("publishes a quiet week without invoking AI", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
@@ -69,7 +77,7 @@ describe("runner engine", () => {
     expect(result, publisher.failure).toBe("processed");
     expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp"]);
     expect(publisher.published?.images).toHaveLength(2);
-    expect(publisher.published?.promptVersion).toBe("gitzette-editor-v5");
+    expect(publisher.published?.promptVersion).toBe("gitzette-editor-v6-coverage-art-direction");
     expect(publisher.publishedUsage).toMatchObject({
       inputTokens: 130,
       outputTokens: 22,
@@ -78,6 +86,52 @@ describe("runner engine", () => {
     });
     expect(publisher.publishedUsage?.wallTimeMs).toBeGreaterThanOrEqual(0);
     expect(publisher.failure).toBeUndefined();
+  });
+
+  test("uploads and publishes all three illustrations from a broader edition", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const evidence: EvidenceBundle = { state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "Parser fix", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] };
+    const colors = ["red", "blue", "green"];
+    let image = 0;
+    const inference: Inference = {
+      write: async () => ({ edition: threeImageEdition, usage: tokenUsage(100, 20) }),
+      illustrate: async (_subject, output) => {
+        const child = Bun.spawn(["/usr/bin/convert", "-size", "1024x1024", "xc:#f7f4ee", "-fill", colors[image++]!, "-draw", "circle 512,512 760,512", output]);
+        expect(await child.exited).toBe(0);
+        return tokenUsage(10, 0);
+      },
+      reviewIllustration: async () => tokenUsage(5, 1),
+    };
+
+    const result = await new RunnerEngine(config(directory), publisher, { collect: async () => evidence }, inference).runOnce();
+    expect(result, publisher.failure).toBe("processed");
+    expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp", "image-3.webp"]);
+    expect(publisher.published?.images.map(({ key }) => key)).toEqual(["image-1.webp", "image-2.webp", "image-3.webp"]);
+    expect(publisher.publishedUsage).toMatchObject({ inputTokens: 145, outputTokens: 23, imageCount: 3 });
+    expect(publisher.failure).toBeUndefined();
+  });
+
+  test("rejects a third illustration that matches the second before publication", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const evidence: EvidenceBundle = { state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "Parser fix", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] };
+    const colors = ["red", "blue", "blue"];
+    let image = 0;
+    const inference: Inference = {
+      write: async () => ({ edition: threeImageEdition, usage: tokenUsage(0, 0) }),
+      illustrate: async (_subject, output) => {
+        const child = Bun.spawn(["/usr/bin/convert", "-size", "1024x1024", "xc:#f7f4ee", "-fill", colors[image++]!, "-draw", "circle 512,512 760,512", output]);
+        expect(await child.exited).toBe(0);
+        return tokenUsage(0, 0);
+      },
+      reviewIllustration: async () => tokenUsage(0, 0),
+    };
+
+    expect(await new RunnerEngine(config(directory), publisher, { collect: async () => evidence }, inference).runOnce()).toBe("failed");
+    expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp"]);
+    expect(publisher.published).toBeUndefined();
+    expect(publisher.failure).toContain("illustrations are too visually similar");
   });
 
   test("fails closed when model output cannot be validated", async () => {

@@ -221,3 +221,26 @@ describe("April broadsheet restoration", () => {
     expect(upgradeStructuredEdition(raw("2026-W01"))).toContain("Dec 29, 2025 – Jan 4, 2026");
   });
 });
+
+
+describe("weekly activity integration", () => {
+  test("renders persisted activity rather than citation-derived substitutes", () => {
+    const m = activeManifest();
+    const complete = (value: number) => ({value, coverage:{status:"complete" as const}});
+    m.evidence.stats = {
+      period:{from:"2026-08-03",toInclusive:"2026-08-09"},observedAt:"2026-09-13T18:00:00Z",
+      scopes:{releases:"discovered_public_contribution_repositories",repositories:"public_repositories_discovered_from_contributions_and_commit_search"},
+      contributionRepositories:{status:"complete"},
+      totals:{publicCommits:complete(42),openedPullRequests:complete(7),mergedPullRequests:complete(5),releases:complete(2)},
+      repositories:[{repo:"octocat/widget",url:"https://github.com/octocat/widget",publicCommits:complete(42),stars:{...complete(1234),observedAt:"2026-09-13T18:00:00Z"}}]
+    };
+    const html=renderEdition(validateManifest(m,"octocat","2026-W32"), k=>`/img/${k}`);
+    expect(html).toContain('<div class="dispatch-bar"><span><strong>42</strong> public commits');
+    expect(html).toContain('1,234');
+    expect(html).toContain('PRs merged');
+    expect(html).not.toContain('Cited sources by repository');
+    expect(upgradeStructuredEdition(html)).toBe(html);
+    m.evidence.stats.period.from="2026-08-04";
+    expect(()=>validateManifest(m,"octocat","2026-W32")).toThrow('statistics period target mismatch');
+  });
+});

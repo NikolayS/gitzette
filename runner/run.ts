@@ -99,7 +99,8 @@ export class RunnerEngine {
       convertBin: this.config.imageMagickBin,
       compareBin: this.config.imageMagickCompareBin,
     };
-    for (const key of ["image-1.webp", "image-2.webp"] as const) {
+    const illustrationKeys = edition.stories.flatMap(story => story.illustrationKey ? [story.illustrationKey] : []);
+    for (const key of illustrationKeys) {
       const story = edition.stories.find((candidate) => candidate.illustrationKey === key);
       if (!story) throw new Error(`edition omitted ${key}`);
       const input = join(directory, `${key}.png`);
@@ -110,8 +111,8 @@ export class RunnerEngine {
       await validateVisual(output, imageRuntime);
       addUsage(await this.inference.reviewIllustration(`${story.headline}. ${story.deck}`, output));
       assertLease();
-      if (images.length > 0) {
-        const distance = await perceptualDistance(join(directory, images[0].key), output, imageRuntime);
+      for (const prior of images) {
+        const distance = await perceptualDistance(join(directory, prior.key), output, imageRuntime);
         if (distance < 0.08) throw new Error(`illustrations are too visually similar: ${distance}`);
       }
       const digest = await sha256(bytes);

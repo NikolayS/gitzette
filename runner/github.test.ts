@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { GitHubCollector, isoWeek } from "./github";
+import { MAX_STATISTICS_REPOSITORIES, validateActivityStatistics } from "../src/statistics";
 
 describe("canonical GitHub collector", () => {
   test("computes exact ISO-week boundaries", () => {
@@ -18,7 +19,7 @@ describe("canonical GitHub collector", () => {
         if (requestBody.query?.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
         return Response.json({ data: { user: { contributionsCollection: {
           commitContributionsByRepository: [
-            { repository: { visibility: "PUBLIC", nameWithOwner: "octocat/widget" } },
+            { repository: { visibility: "PUBLIC", nameWithOwner: "octocat/widget", stargazerCount: 17 } },
             { repository: { visibility: "PUBLIC", nameWithOwner: "../evil" } },
           ],
           issueContributions: { nodes: [] }, pullRequestContributions: { nodes: [] }, repositoryContributions: { nodes: [] },
@@ -33,6 +34,11 @@ describe("canonical GitHub collector", () => {
     expect(evidence.state).toBe("active");
     expect(evidence.username).toBe("octocat");
     expect(evidence.items.map((item) => item.id)).toEqual(["commit:abc", "repository:octocat/widget"]);
+    expect((evidence as any).stats.repositories).toEqual([{
+      repo: "octocat/widget", url: "https://github.com/octocat/widget",
+      publicCommits: { value: 1, coverage: { status: "complete" } },
+      stars: { value: 17, observedAt: (evidence as any).stats.observedAt, coverage: { status: "complete" } },
+    }]);
   });
 
   test("paginates search results instead of failing above one page", async () => {
@@ -153,9 +159,107 @@ test('daily fallback deduplicates and selects newest weekly commits after mergin
  };
  const result=await new GitHubCollector('test-token',request as typeof fetch).collect('octocat','2026-W32');
  expect(result.items).toHaveLength(500);
+ expect((result as any).stats.totals.publicCommits).toEqual({value:700,coverage:{status:'complete'}});
+ expect((result as any).stats.repositories[0].publicCommits.coverage.status).toBe('truncated');
  expect(result.items[0].id).toBe('commit:2026-08-09-99');
  expect(result.items.filter(x=>x.id==='commit:common')).toHaveLength(1);
  expect(result.items.some(x=>x.id.startsWith('commit:2026-08-03-'))).toBe(false);
+});
+
+test("keeps opened and merged PR event totals distinct, including the same PR", async () => {
+  const queries: string[] = [];
+  const request = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/graphql") {
+      const body = JSON.parse(String(init?.body));
+      return Response.json(body.query.includes("type:DISCUSSION")
+        ? { data: { search: { discussionCount: 0, nodes: [] } } }
+        : { data: { user: { contributionsCollection: {} } } });
+    }
+    if (url.pathname !== "/search/issues") return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+    const query = url.searchParams.get("q")!;
+    queries.push(query);
+    if (!query.includes("is:pr")) return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+    return Response.json({ incomplete_results: false, total_count: 1, items: [{
+      id: 42, number: 7, title: "Opened and merged", updated_at: "2026-08-05T00:00:00Z",
+      html_url: "https://github.com/OctoCat/Widget/pull/7",
+    }] });
+  };
+  const result = await new GitHubCollector("token", request as typeof fetch).collect("OCTOCAT", "2026-W32") as any;
+  expect(queries.some((query) => query.includes("created:2026-08-03..2026-08-09"))).toBe(true);
+  expect(queries.some((query) => query.includes("merged:2026-08-03..2026-08-09"))).toBe(true);
+  expect(result.stats.totals.openedPullRequests.value).toBe(1);
+  expect(result.stats.totals.mergedPullRequests.value).toBe(1);
+  expect(result.items.filter((item: any) => item.type === "pull_request")).toHaveLength(1);
+});
+
+test("statistics validation is exact, nullable when unavailable, and tied to the ISO week", () => {
+  const stats = {
+    period: { from: "2025-12-29", toInclusive: "2026-01-04" },
+    observedAt: "2026-01-05T00:00:00.000Z",
+    scopes: {
+      releases: "discovered_public_contribution_repositories",
+      repositories: "public_repositories_discovered_from_contributions_and_commit_search",
+    },
+    contributionRepositories: { status: "complete" },
+    totals: {
+      publicCommits: { value: 2, coverage: { status: "complete" } },
+      openedPullRequests: { value: 1, coverage: { status: "complete" } },
+      mergedPullRequests: { value: null, coverage: { status: "unavailable", reason: "search unavailable" } },
+      releases: { value: 0, coverage: { status: "complete" } },
+    },
+    repositories: [{
+      repo: "OctoCat/Widget", url: "https://github.com/OctoCat/Widget",
+      publicCommits: { value: 2, coverage: { status: "complete" } },
+      stars: { value: null, observedAt: "2026-01-05T00:00:00.000Z", coverage: { status: "unavailable", reason: "snapshot missing" } },
+    }],
+  };
+  expect(validateActivityStatistics(stats, "2026-W01")).toBe(stats as any);
+  expect(() => validateActivityStatistics({ ...stats, unexpected: true }, "2026-W01")).toThrow("unknown statistics field");
+  expect(() => validateActivityStatistics(stats, "2026-W02")).toThrow("period target mismatch");
+  expect(() => validateActivityStatistics({ ...stats, totals: { ...stats.totals, mergedPullRequests: { value: 0, coverage: { status: "unavailable", reason: "missing" } } } }, "2026-W01")).toThrow("invalid statistics totals.mergedPullRequests.value");
+  expect(() => validateActivityStatistics({ ...stats, observedAt: "2026-02-30T00:00:00.000Z" }, "2026-W01")).toThrow("invalid statistics observedAt");
+  expect(() => validateActivityStatistics({ ...stats, repositories: [{ ...stats.repositories[0], stars: { ...stats.repositories[0].stars, observedAt: "2026-04-31T00:00:00Z" } }] }, "2026-W01")).toThrow("invalid statistics repository.stars.observedAt");
+  const repository = stats.repositories[0];
+  const maximumRows = Array.from({ length: MAX_STATISTICS_REPOSITORIES }, (_, index) => ({
+    ...repository, repo: `owner/repo-${index}`, url: `https://github.com/owner/repo-${index}`,
+  }));
+  expect(validateActivityStatistics({ ...stats, repositories: maximumRows }, "2026-W01").repositories).toHaveLength(MAX_STATISTICS_REPOSITORIES);
+  expect(() => validateActivityStatistics({ ...stats, repositories: [...maximumRows, {
+    ...repository, repo: "owner/overflow", url: "https://github.com/owner/overflow",
+  }] }, "2026-W01")).toThrow("invalid statistics repositories");
+});
+
+test("release collection does not stop on old dates because old drafts can be newly published", async () => {
+  const releasePages: number[] = [];
+  const request = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/graphql") {
+      const body = JSON.parse(String(init?.body));
+      if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
+      return Response.json({ data: { user: { contributionsCollection: {
+        commitContributionsByRepository: [{ repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC", stargazerCount: 1 } }],
+      } } } });
+    }
+    if (url.pathname.startsWith("/search/")) return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+    if (url.pathname === "/repos/octocat/widget/releases") {
+      const page = Number(url.searchParams.get("page"));
+      releasePages.push(page);
+      if (page === 1) return Response.json(Array.from({ length: 100 }, (_, id) => ({
+        id, draft: false, name: `Old ${id}`, created_at: "2020-01-01T00:00:00Z", published_at: "2020-01-02T00:00:00Z",
+        html_url: `https://github.com/octocat/widget/releases/tag/old-${id}`,
+      })));
+      return Response.json(page === 2 ? [{
+        id: 101, draft: false, name: "Former draft", created_at: "2019-01-01T00:00:00Z", published_at: "2026-08-05T00:00:00Z",
+        html_url: "https://github.com/octocat/widget/releases/tag/newly-published",
+      }] : []);
+    }
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const result = await new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32") as any;
+  expect(releasePages).toEqual([1, 2]);
+  expect(result.stats.totals.releases).toEqual({ value: 1, coverage: { status: "complete" } });
+  expect(result.items.some((item: any) => item.id === "release:octocat/widget:101")).toBe(true);
 });
 
 import {mergeSearchResults} from './github';
