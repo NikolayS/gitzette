@@ -4,7 +4,7 @@ import { ControlPlaneClient } from "../runner/control-plane";
 import { RunnerEngine } from "../runner/run";
 import type { Edition } from "../src/edition";
 import type { JobUsage, TokenUsage } from "../src/usage";
-import { previousCompletedIsoWeekKey } from "../src/week";
+import { parseIsoWeekKey, previousCompletedIsoWeekKey } from "../src/week";
 
 const base = process.env.E2E_BASE_URL;
 if (!base) throw new Error("E2E_BASE_URL is required; run via scripts/e2e.sh");
@@ -29,6 +29,20 @@ async function sha256(bytes: Uint8Array): Promise<string> {
     .map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function statistics(weekKey: string) {
+  const { monday, sunday, nextMonday } = parseIsoWeekKey(weekKey);
+  const date = (value: Date) => value.toISOString().slice(0, 10);
+  const complete = (value: number) => ({ value, coverage: { status: "complete" as const } });
+  const observedAt = nextMonday.toISOString();
+  return {
+    period: { from: date(monday), toInclusive: date(sunday) }, observedAt,
+    scopes: { releases: "discovered_public_contribution_repositories" as const, repositories: "public_repositories_discovered_from_contributions_and_commit_search" as const },
+    contributionRepositories: { status: "complete" as const },
+    totals: { publicCommits: complete(1), openedPullRequests: complete(1), mergedPullRequests: complete(0), releases: complete(0) },
+    repositories: [{ repo: "octocat/widget", url: "https://github.com/octocat/widget", publicCommits: complete(1), stars: { ...complete(17), observedAt } }],
+  };
+}
+
 function manifest(weekKey: string, imageHashes: Record<string, string>) {
   return {
     generatorVersion: "e2e-1",
@@ -39,6 +53,7 @@ function manifest(weekKey: string, imageHashes: Record<string, string>) {
       username: "octocat",
       weekKey,
       items: [{ id: "pr:1", type: "pull_request", title: "Parser fix", url: "https://github.com/octocat/widget/pull/1", repo: "octocat/widget" }],
+      stats: statistics(weekKey),
     },
     edition: {
       headline: "A parser reaches the end",
@@ -238,7 +253,7 @@ const activeEngine = new RunnerEngine(
     imageMagickBin: "/usr/bin/convert", imageMagickCompareBin: "/usr/bin/compare",
   },
   new ControlPlaneClient(base, "e2e-runner-secret"),
-  { collect: async (username, weekKey) => ({ state: "active", username, weekKey, items: [{ id: "pr:1", type: "pull_request", title: "Parser fix", url: "https://github.com/octocat/widget/pull/1", repo: "octocat/widget" }] }) },
+  { collect: async (username, weekKey) => ({ state: "active", username, weekKey, items: [{ id: "pr:1", type: "pull_request", title: "Parser fix", url: "https://github.com/octocat/widget/pull/1", repo: "octocat/widget" }], stats: statistics(weekKey) }) },
   {
     write: async () => ({ edition: activeEdition, usage: tokenUsage(100, 20) }),
     illustrate: async (_subject, output) => {

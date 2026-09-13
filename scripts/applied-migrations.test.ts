@@ -49,6 +49,7 @@ describe("applied migration replay boundary", () => {
       "0005_profile_suppressions.sql",
       "0006_artifact_cleanup_queue.sql",
       "0007_revival_canaries.sql",
+      "0008_restore_owner_dispatch.sql",
     ]);
   });
 });

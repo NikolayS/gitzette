@@ -2,6 +2,7 @@ import type { EvidenceBundle, EvidenceItem } from "../src/edition";
 import { normalizeGitHubUsername } from "../src/identifiers";
 import type { Collector } from "./types";
 import { parseIsoWeekKey } from "../src/week";
+import type { CountMetric, Coverage, WeeklyStatistics } from "../src/statistics";
 
 type RequestFn = typeof fetch;
 type SearchItem = {
@@ -14,6 +15,10 @@ type SearchItem = {
   updated_at?: string;
   repository?: { full_name?: string; private?: boolean };
 };
+type SearchResult = { items: SearchItem[]; total: number; itemCoverage: Coverage };
+type ContributionRepository = { repo: string; stars: number | null; starsCoverage: Coverage };
+type ContributionRepositories = { repositories: ContributionRepository[]; coverage: Coverage };
+type ReleaseResult = { items: EvidenceItem[]; coverage: Coverage };
 
 export class GitHubCollector implements Collector {
   constructor(private readonly token: string, private readonly request: RequestFn = fetch) {}
@@ -22,7 +27,9 @@ export class GitHubCollector implements Collector {
     const canonicalUsername = normalizeGitHubUsername(username);
     if (!canonicalUsername) throw new Error("invalid GitHub username");
     const { from, toInclusive } = isoWeek(weekKey);
-    const repositories = await this.contributionRepositories(canonicalUsername, from, toInclusive);
+    const observedAt = new Date().toISOString();
+    const discovered = await this.contributionRepositories(canonicalUsername, from, toInclusive);
+    const repositories = discovered.repositories.map((row) => row.repo);
     const [commits, mergedPrs, createdPrs, issues, discussions, releases] = await Promise.all([
       this.search("commits", `author:${canonicalUsername} committer-date:${from}..${toInclusive}`),
       this.search("issues", `author:${canonicalUsername} is:pr is:merged merged:${from}..${toInclusive}`),
@@ -33,11 +40,11 @@ export class GitHubCollector implements Collector {
     ]);
 
     const items = new Map<string, EvidenceItem>();
-    for (const item of commits) add(items, commitEvidence(item));
-    for (const item of [...mergedPrs, ...createdPrs]) add(items, issueEvidence(item, "pull_request"));
-    for (const item of issues) add(items, issueEvidence(item, "issue"));
+    for (const item of commits.items) add(items, commitEvidence(item));
+    for (const item of [...mergedPrs.items, ...createdPrs.items]) add(items, issueEvidence(item, "pull_request"));
+    for (const item of issues.items) add(items, issueEvidence(item, "issue"));
     for (const item of discussions) add(items, item);
-    for (const item of releases.flat()) add(items, item);
+    for (const item of releases.flatMap((result) => result.items)) add(items, item);
     for (const repo of repositories) {
       add(items, {
         id: `repository:${repo}`,
@@ -48,28 +55,75 @@ export class GitHubCollector implements Collector {
       });
     }
 
-    const evidence = [...items.values()].slice(0, 500);
-    return { state: evidence.length > 0 ? "active" : "quiet", username: canonicalUsername, weekKey, items: evidence };
+    const evidence = selectEvidence([...items.values()], 500);
+    const releaseItems = releases.flatMap((result) => result.items);
+    const releaseCoverage = combineCoverage([discovered.coverage, ...releases.map((result) => result.coverage)], releaseItems.length);
+    const repositoryRows = new Map(discovered.repositories.map((row) => [row.repo.toLowerCase(), row]));
+    const commitsByRepository = new Map<string, { repo: string; count: number }>();
+    for (const item of commits.items) {
+      const repo = item.repository?.full_name;
+      if (!repo || item.repository?.private === true || !validRepo(repo)) continue;
+      const key = repo.toLowerCase();
+      const current = commitsByRepository.get(key);
+      commitsByRepository.set(key, { repo: current?.repo ?? repo, count: (current?.count ?? 0) + 1 });
+      if (!repositoryRows.has(key)) repositoryRows.set(key, {
+        repo, stars: null, starsCoverage: { status: "unavailable", reason: "repository was found by commit search outside the bounded contribution repository list" },
+      });
+    }
+    const statistics: WeeklyStatistics = {
+      period: { from, toInclusive }, observedAt,
+      scopes: {
+        releases: "discovered_public_contribution_repositories",
+        repositories: "public_repositories_discovered_from_contributions_and_commit_search",
+      },
+      contributionRepositories: discovered.coverage,
+      totals: {
+        publicCommits: completeCount(commits.total),
+        openedPullRequests: completeCount(createdPrs.total),
+        mergedPullRequests: completeCount(mergedPrs.total),
+        releases: { value: releaseCoverage.status === "unavailable" ? null : releaseItems.length, coverage: releaseCoverage },
+      },
+      repositories: [...repositoryRows.values()].sort((a,b) => a.repo.localeCompare(b.repo)).map((row) => ({
+        repo: row.repo,
+        url: `https://github.com/${row.repo}`,
+        publicCommits: repositoryCommitMetric(commitsByRepository.get(row.repo.toLowerCase())?.count, commits.itemCoverage),
+        stars: { value: row.stars, observedAt, coverage: row.starsCoverage },
+      })),
+    };
+    const bundle = { state: evidence.length > 0 ? "active" as const : "quiet" as const, username: canonicalUsername, weekKey, items: evidence, stats: statistics };
+    return bundle;
   }
 
-  private async contributionRepositories(username: string, from: string, to: string): Promise<string[]> {
-    const query = `query($login:String!,$from:DateTime!,$to:DateTime!){user(login:$login){contributionsCollection(from:$from,to:$to){commitContributionsByRepository(maxRepositories:100){repository{nameWithOwner visibility}}issueContributions(first:100){nodes{issue{repository{nameWithOwner visibility}}}}pullRequestContributions(first:100){nodes{pullRequest{repository{nameWithOwner visibility}}}}repositoryContributions(first:100){nodes{repository{nameWithOwner visibility}}}}}}`;
+  private async contributionRepositories(username: string, from: string, to: string): Promise<ContributionRepositories> {
+    const query = `query($login:String!,$from:DateTime!,$to:DateTime!){user(login:$login){contributionsCollection(from:$from,to:$to){commitContributionsByRepository(maxRepositories:100){repository{nameWithOwner visibility stargazerCount}}issueContributions(first:100){pageInfo{hasNextPage} nodes{issue{repository{nameWithOwner visibility stargazerCount}}}}pullRequestContributions(first:100){pageInfo{hasNextPage} nodes{pullRequest{repository{nameWithOwner visibility stargazerCount}}}}repositoryContributions(first:100){pageInfo{hasNextPage} nodes{repository{nameWithOwner visibility stargazerCount}}}}}}`;
     const body = await this.github("https://api.github.com/graphql", {
       method: "POST",
       body: JSON.stringify({ query, variables: { login: username, from: `${from}T00:00:00Z`, to: `${to}T23:59:59Z` } }),
     }) as any;
     if (body.errors || !body.data?.user) throw new Error("GitHub contribution collection failed");
     const collection = body.data.user.contributionsCollection;
-    const repos = new Set<string>();
-    for (const row of collection.commitContributionsByRepository ?? []) addPublicRepo(repos,row.repository);
-    for (const node of collection.issueContributions?.nodes ?? []) addPublicRepo(repos,node.issue.repository);
-    for (const node of collection.pullRequestContributions?.nodes ?? []) addPublicRepo(repos,node.pullRequest.repository);
-    for (const node of collection.repositoryContributions?.nodes ?? []) addPublicRepo(repos,node.repository);
-    return [...repos].filter(validRepo).sort();
+    if (!collection || !Array.isArray(collection.commitContributionsByRepository)) throw new Error("GitHub contribution repositories invalid");
+    const issueContributions = contributionConnection(collection.issueContributions, "issue");
+    const pullRequestContributions = contributionConnection(collection.pullRequestContributions, "pull request");
+    const repositoryContributions = contributionConnection(collection.repositoryContributions, "repository");
+    const repos = new Map<string, ContributionRepository>();
+    const commitRows = collection.commitContributionsByRepository;
+    if (commitRows.length > 100) throw new Error("GitHub commit contribution repositories too large");
+    for (const row of commitRows) addPublicRepo(repos, row.repository);
+    for (const node of issueContributions.nodes) addPublicRepo(repos,node?.issue?.repository);
+    for (const node of pullRequestContributions.nodes) addPublicRepo(repos,node?.pullRequest?.repository);
+    for (const node of repositoryContributions.nodes) addPublicRepo(repos,node?.repository);
+    const hitLimit = commitRows.length >= 100
+      || issueContributions.pageInfo.hasNextPage
+      || pullRequestContributions.pageInfo.hasNextPage
+      || repositoryContributions.pageInfo.hasNextPage;
+    const repositories = [...repos.values()].filter((row) => validRepo(row.repo)).sort((a,b) => a.repo.localeCompare(b.repo));
+    return { repositories, coverage: hitLimit ? { status: "truncated", observed: repositories.length, limit: 400 } : { status: "complete" } };
   }
 
-  private async search(kind: "commits" | "issues", query: string, splitIncomplete = true): Promise<SearchItem[]> {
+  private async search(kind: "commits" | "issues", query: string, splitIncomplete = true): Promise<SearchResult> {
     const items: SearchItem[] = [];
+    let total = 0;
     for (let page = 1; page <= 5; page++) {
       const url = new URL(`https://api.github.com/search/${kind}`);
       url.searchParams.set("q", `is:public ${query}`);
@@ -79,6 +133,12 @@ export class GitHubCollector implements Collector {
       url.searchParams.set("page", String(page));
       const body = await this.github(url.toString()) as { incomplete_results?: boolean; total_count?: number; items?: SearchItem[] };
       if (!Array.isArray(body.items)) throw new Error(`GitHub ${kind} search incomplete`);
+      if (!Number.isSafeInteger(body.total_count) || body.total_count! < 0) throw new Error(`GitHub ${kind} search total missing`);
+      if (typeof body.incomplete_results !== "boolean") throw new Error(`GitHub ${kind} search incomplete_results invalid`);
+      if (page === 1) total = body.total_count!;
+      else if (body.total_count !== total) throw new Error(`GitHub ${kind} search total changed during pagination`);
+      if (body.items.length > 100) throw new Error(`GitHub ${kind} search page too large`);
+      for (const item of body.items) assertSearchItem(kind, query, item);
       if (body.incomplete_results) {
         // A global historical search can time out even below the result cap.
         // Retry once as sequential daily windows; never accept partial data.
@@ -89,21 +149,35 @@ export class GitHubCollector implements Collector {
         const days = (end - start) / 86400000 + 1;
         if (!Number.isInteger(days) || days < 1 || days > 7) throw new Error("invalid bounded search window");
         const complete: SearchItem[] = [];
+        let completeTotal = 0;
+        let truncated = false;
         for (let day = 0; day < days; day++) {
           const date = new Date(start + day * 86400000).toISOString().slice(0, 10);
-          complete.push(...await this.search(kind, query.replace(range[0], range[0].split(":")[0] + ":" + date + ".." + date), false));
+          const result = await this.search(kind, query.replace(range[0], range[0].split(":")[0] + ":" + date + ".." + date), false);
+          complete.push(...result.items);
+          completeTotal += result.total;
+          truncated ||= result.itemCoverage.status === "truncated";
         }
-        return mergeSearchResults(kind, complete);
+        const merged = mergeSearchResults(kind, complete);
+        return { items: merged, total: completeTotal, itemCoverage: truncated || completeTotal > merged.length ? { status: "truncated", observed: merged.length, limit: 500 } : { status: "complete" } };
       }
       items.push(...body.items);
-      if (body.items.length < 100 || items.length >= Math.min(body.total_count ?? items.length, 500)) break;
+      if (body.items.length < 100 || items.length >= Math.min(total, 500)) break;
     }
-    return items.slice(0, 500);
+    // Search pages can shift while they are being read and repeat an item.
+    // Keep GitHub's total_count as the aggregate, but never double-count a
+    // retained item when attributing commits to repositories or citing it.
+    const selected = mergeSearchResults(kind, items);
+    if (selected.length > total) throw new Error(`GitHub ${kind} search items exceed total`);
+    if (total > 0 && selected.length === 0) throw new Error(`GitHub ${kind} search total has no items`);
+    return { items: selected, total, itemCoverage: total > selected.length ? { status: "truncated", observed: selected.length, limit: 500 } : { status: "complete" } };
   }
 
   private async discussions(username: string, from: string, to: string): Promise<EvidenceItem[]> {
     const query = `query($q:String!,$cursor:String){search(query:$q,type:DISCUSSION,first:100,after:$cursor){discussionCount pageInfo{hasNextPage endCursor} nodes{... on Discussion{id title url repository{nameWithOwner visibility}}}}}`;
-    const nodes: any[] = [];
+    const nodes = new Map<string, any>();
+    let expectedCount: number | null = null;
+    let exhausted = false;
     let cursor: string | null = null;
     for (let page = 0; page < 5; page++) {
       const body = await this.github("https://api.github.com/graphql", {
@@ -111,12 +185,27 @@ export class GitHubCollector implements Collector {
       }) as any;
       const search = body.data?.search;
       if (body.errors || !search || !Array.isArray(search.nodes)) throw new Error("GitHub discussion search incomplete");
-      nodes.push(...search.nodes);
-      if (!search.pageInfo?.hasNextPage || nodes.length >= 500) break;
-      if (typeof search.pageInfo.endCursor !== "string") throw new Error("GitHub discussion cursor missing");
+      if (!Number.isSafeInteger(search.discussionCount) || search.discussionCount < 0
+        || !search.pageInfo || typeof search.pageInfo.hasNextPage !== "boolean"
+        || !(search.pageInfo.endCursor === null || typeof search.pageInfo.endCursor === "string")) {
+        throw new Error("GitHub discussion search pagination invalid");
+      }
+      if (expectedCount === null) expectedCount = search.discussionCount;
+      else if (search.discussionCount !== expectedCount) throw new Error("GitHub discussion search count changed during pagination");
+      if (search.nodes.length > 100) throw new Error("GitHub discussion search page too large");
+      for (const node of search.nodes) {
+        assertDiscussionNode(node);
+        nodes.set(node.id, node);
+      }
+      if (nodes.size > search.discussionCount) throw new Error("GitHub discussion search items exceed count");
+      if (!search.pageInfo.hasNextPage) { exhausted = true; break; }
+      if (nodes.size >= 500) break;
+      if (typeof search.pageInfo.endCursor !== "string" || !search.pageInfo.endCursor) throw new Error("GitHub discussion cursor missing");
       cursor = search.pageInfo.endCursor;
     }
-    return nodes.filter((node:any) => isPublicRepository(node.repository)).slice(0, 500).map((node: any) => ({
+    if (!exhausted) throw new Error("GitHub discussion search exceeded collection cap");
+    if (exhausted && nodes.size !== expectedCount) throw new Error("GitHub discussion search count does not match items");
+    return [...nodes.values()].filter((node:any) => isPublicRepository(node.repository)).slice(0, 500).map((node: any) => ({
       id: `discussion:${node.id}`,
       type: "discussion" as const,
       title: String(node.title).slice(0, 500),
@@ -125,17 +214,22 @@ export class GitHubCollector implements Collector {
     })).filter((item: EvidenceItem) => isGitHubUrl(item.url) && validRepo(item.repo));
   }
 
-  private async releases(repo: string, from: string, to: string): Promise<EvidenceItem[]> {
+  private async releases(repo: string, from: string, to: string): Promise<ReleaseResult> {
     const response: any[] = [];
+    let complete = false;
     const encodedRepo = repo.split("/").map(encodeURIComponent).join("/");
     for (let page = 1; page <= 5; page++) {
       const batch = await this.github(`https://api.github.com/repos/${encodedRepo}/releases?per_page=100&page=${page}`) as any[];
       if (!Array.isArray(batch)) throw new Error("GitHub releases response invalid");
+      if (batch.length > 100) throw new Error("GitHub releases page too large");
+      for (const release of batch) assertRelease(repo, release);
       response.push(...batch);
-      const oldest = String(batch.at(-1)?.published_at ?? batch.at(-1)?.created_at ?? "").slice(0, 10);
-      if (batch.length < 100 || oldest < from) break;
+      // GitHub orders this endpoint by creation, while a draft created long ago
+      // may first be published inside this week. Only endpoint exhaustion proves
+      // there are no later pages containing an in-window publication.
+      if (batch.length < 100) { complete = true; break; }
     }
-    return response.filter((release) => {
+    const mappedItems = response.filter((release) => {
       const date = String(release.published_at ?? release.created_at ?? "").slice(0, 10);
       return release.draft === false && date >= from && date <= to;
     }).map((release) => ({
@@ -145,6 +239,10 @@ export class GitHubCollector implements Collector {
       url: String(release.html_url),
       repo,
     })).filter((item) => isGitHubUrl(item.url));
+    const uniqueItems = new Map<string, EvidenceItem>();
+    for (const item of mappedItems) uniqueItems.set(item.id, item);
+    const items = [...uniqueItems.values()];
+    return { items, coverage: complete ? { status: "complete" } : { status: "truncated", observed: items.length, limit: 500 } };
   }
 
   private async github(url: string, init: RequestInit = {}): Promise<unknown> {
@@ -188,6 +286,67 @@ function issueEvidence(item: SearchItem, type: "pull_request" | "issue"): Eviden
   const repo = `${parts[0]}/${parts[1]}`;
   if (!validRepo(repo)) return null;
   return { id: `${type}:${repo}#${item.number}`, type, title: item.title.slice(0, 500), url: item.html_url!, repo };
+}
+
+function assertSearchItem(kind: "commits" | "issues", query: string, item: SearchItem): void {
+  if (!item || typeof item !== "object") throw new Error(`GitHub ${kind} search item invalid`);
+  if (kind === "commits") {
+    const repo = item.repository?.full_name;
+    if (typeof item.sha !== "string" || !item.sha || item.sha.length > 100
+      || typeof repo !== "string" || !validRepo(repo) || item.repository?.private === true
+      || !isGitHubUrl(item.html_url)) throw new Error("GitHub commits search item invalid");
+    const parts = new URL(item.html_url!).pathname.split("/").filter(Boolean);
+    if (parts.length < 4 || `${parts[0]}/${parts[1]}`.toLowerCase() !== repo.toLowerCase() || parts[2] !== "commit" || !parts[3]) {
+      throw new Error("GitHub commits search item invalid");
+    }
+    return;
+  }
+  if (!Number.isSafeInteger(item.id) || item.id! <= 0 || !Number.isSafeInteger(item.number) || item.number! <= 0
+    || typeof item.title !== "string" || !item.title.trim() || item.title.length > 500 || !isGitHubUrl(item.html_url)) {
+    throw new Error("GitHub issues search item invalid");
+  }
+  const parts = new URL(item.html_url!).pathname.split("/").filter(Boolean);
+  const expectedPath = query.includes("is:pr") ? "pull" : "issues";
+  if (parts.length < 4 || !validRepo(`${parts[0]}/${parts[1]}`) || parts[2] !== expectedPath || Number(parts[3]) !== item.number) {
+    throw new Error("GitHub issues search item invalid");
+  }
+}
+
+function assertRelease(repo: string, release: any): void {
+  if (!release || !Number.isSafeInteger(release.id) || release.id <= 0 || typeof release.draft !== "boolean") {
+    throw new Error("GitHub release item invalid");
+  }
+  if (release.draft) return;
+  if (typeof release.published_at !== "string" || !isIsoInstant(release.published_at) || !isGitHubUrl(release.html_url)) {
+    throw new Error("GitHub release item invalid");
+  }
+  const parts = new URL(release.html_url).pathname.split("/").filter(Boolean);
+  if (parts.length < 5 || `${parts[0]}/${parts[1]}`.toLowerCase() !== repo.toLowerCase()
+    || parts[2] !== "releases" || parts[3] !== "tag" || !parts[4]) throw new Error("GitHub release item invalid");
+}
+
+function assertDiscussionNode(node: any): void {
+  if (!node || typeof node.id !== "string" || !node.id || node.id.length > 120
+    || typeof node.title !== "string" || !node.title.trim() || node.title.length > 500
+    || !isGitHubUrl(node.url) || !node.repository || !validRepo(node.repository.nameWithOwner)) {
+    throw new Error("GitHub discussion search item invalid");
+  }
+  isPublicRepository(node.repository);
+  const parts = new URL(node.url).pathname.split("/").filter(Boolean);
+  const [owner] = String(node.repository.nameWithOwner).split("/");
+  const repositoryDiscussion = parts.length === 4
+    && `${parts[0]}/${parts[1]}`.toLowerCase() === String(node.repository.nameWithOwner).toLowerCase()
+    && parts[2] === "discussions" && /^\d+$/.test(parts[3]);
+  const organizationDiscussion = parts.length === 4 && parts[0] === "orgs"
+    && parts[1].toLowerCase() === owner.toLowerCase()
+    && parts[2] === "discussions" && /^\d+$/.test(parts[3]);
+  if (!repositoryDiscussion && !organizationDiscussion) throw new Error("GitHub discussion search item invalid");
+}
+
+function isIsoInstant(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) || !Number.isFinite(Date.parse(value))) return false;
+  const expected = value.includes(".") ? value : value.replace("Z", ".000Z");
+  return new Date(value).toISOString() === expected;
 }
 
 function firstLine(value: string): string {
@@ -235,10 +394,97 @@ export function mergeSearchResults(kind: "commits" | "issues", items: SearchItem
   return [...unique.values()].slice(0,500);
 }
 
+const EVIDENCE_TYPE_ORDER: EvidenceItem["type"][] = [
+  "commit", "pull_request", "issue", "discussion", "release", "repository",
+];
+
+/**
+ * Selects bounded editorial evidence without allowing one high-volume event
+ * type or repository to consume the entire budget. Provider ordering remains
+ * intact within each type/repository bucket.
+ */
+export function selectEvidence(items: readonly EvidenceItem[], limit: number): EvidenceItem[] {
+  if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("invalid evidence selection limit");
+  const streams = new Map<EvidenceItem["type"], EvidenceItem[]>();
+  for (const type of EVIDENCE_TYPE_ORDER) {
+    const byRepository = new Map<string, EvidenceItem[]>();
+    for (const item of items) {
+      if (item.type !== type) continue;
+      const key = item.repo.toLowerCase();
+      const bucket = byRepository.get(key) ?? [];
+      bucket.push(item);
+      byRepository.set(key, bucket);
+    }
+    const buckets = [...byRepository.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, bucket]) => bucket);
+    const positions = new Array(buckets.length).fill(0);
+    const stream: EvidenceItem[] = [];
+    let remaining = buckets.reduce((sum, bucket) => sum + bucket.length, 0);
+    while (remaining > 0) {
+      for (let index = 0; index < buckets.length; index++) {
+        const item = buckets[index][positions[index]++];
+        if (item) { stream.push(item); remaining--; }
+      }
+    }
+    streams.set(type, stream);
+  }
+  const positions = new Map(EVIDENCE_TYPE_ORDER.map((type) => [type, 0]));
+  const selected: EvidenceItem[] = [];
+  let progressed = true;
+  while (selected.length < limit && progressed) {
+    progressed = false;
+    for (const type of EVIDENCE_TYPE_ORDER) {
+      if (selected.length >= limit) break;
+      const stream = streams.get(type)!;
+      const position = positions.get(type)!;
+      if (position < stream.length) {
+        selected.push(stream[position]);
+        positions.set(type, position + 1);
+        progressed = true;
+      }
+    }
+  }
+  return selected;
+}
+
 function isPublicRepository(repo: any): boolean {
   if (!repo || !["PUBLIC","PRIVATE","INTERNAL"].includes(repo.visibility)) throw new Error("GitHub repository visibility missing");
   return repo.visibility === "PUBLIC";
 }
-function addPublicRepo(repos: Set<string>, repo: any): void {
-  if (isPublicRepository(repo)) repos.add(repo.nameWithOwner);
+function contributionConnection(value: any, label: string): { nodes: any[]; pageInfo: { hasNextPage: boolean } } {
+  if (!value || !Array.isArray(value.nodes) || !value.pageInfo || typeof value.pageInfo.hasNextPage !== "boolean") {
+    throw new Error(`GitHub ${label} contribution connection invalid`);
+  }
+  if (value.nodes.length > 100) throw new Error(`GitHub ${label} contribution connection too large`);
+  return value;
+}
+function addPublicRepo(repos: Map<string, ContributionRepository>, repo: any): void {
+  if (!isPublicRepository(repo)) return;
+  if (!validRepo(repo.nameWithOwner)) throw new Error("GitHub public repository name invalid");
+  const hasStars = Number.isSafeInteger(repo.stargazerCount) && repo.stargazerCount >= 0;
+  const key = String(repo.nameWithOwner).toLowerCase();
+  repos.set(key, {
+    repo: repo.nameWithOwner,
+    stars: hasStars ? repo.stargazerCount : null,
+    starsCoverage: hasStars ? { status: "complete" } : { status: "unavailable", reason: "GitHub repository star snapshot missing" },
+  });
+}
+
+function completeCount(value: number): CountMetric {
+  return { value, coverage: { status: "complete" } };
+}
+
+function repositoryCommitMetric(observed: number | undefined, itemCoverage: Coverage): CountMetric {
+  if (itemCoverage.status === "complete") return completeCount(observed ?? 0);
+  if (observed === undefined) return { value: null, coverage: { status: "unavailable", reason: "commit item cap prevents per-repository attribution" } };
+  return { value: observed, coverage: { status: "truncated", observed, limit: 500 } };
+}
+
+function combineCoverage(coverages: Coverage[], observed: number): Coverage {
+  if (coverages.some((coverage) => coverage.status === "unavailable")) {
+    return { status: "unavailable", reason: "repository discovery or release collection was unavailable" };
+  }
+  if (coverages.some((coverage) => coverage.status === "truncated")) {
+    return { status: "truncated", observed, limit: coverages.length * 500 };
+  }
+  return { status: "complete" };
 }

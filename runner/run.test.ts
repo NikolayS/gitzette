@@ -11,6 +11,21 @@ import type { JobUsage, TokenUsage } from "../src/usage";
 
 const job: ClaimedJob = { id: "2bb65583-b570-4a55-b4e4-5de336b10664", username: "octocat", weekKey: "2026-W32", leaseToken: "5ba2cbaf-5dc5-4a3a-8be0-d4230dd11e09", leaseExpiresAt: 1_800_000_000, attempt: 1 };
 
+function activeEvidence(title = "Parser fix"): EvidenceBundle {
+  const complete = (value: number) => ({ value, coverage: { status: "complete" as const } });
+  return {
+    state: "active", username: job.username, weekKey: job.weekKey,
+    items: [{ id: "commit:abc", type: "commit", title, url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }],
+    stats: {
+      period: { from: "2026-08-03", toInclusive: "2026-08-09" }, observedAt: "2026-08-10T00:00:00Z",
+      scopes: { releases: "discovered_public_contribution_repositories", repositories: "public_repositories_discovered_from_contributions_and_commit_search" },
+      contributionRepositories: { status: "complete" },
+      totals: { publicCommits: complete(1), openedPullRequests: complete(0), mergedPullRequests: complete(0), releases: complete(0) },
+      repositories: [{ repo: "octocat/widget", url: "https://github.com/octocat/widget", publicCommits: complete(1), stars: { ...complete(17), observedAt: "2026-08-10T00:00:00Z" } }],
+    },
+  };
+}
+
 class FakePublisher implements Publisher {
   stages: RunnerStage[] = [];
   heartbeats = 0;
@@ -39,6 +54,14 @@ const edition: Edition = {
   ],
 };
 
+const threeImageEdition: Edition = {
+  ...edition,
+  stories: [
+    ...edition.stories,
+    { headline: "Cache divided", deck: "A third boundary becomes visible.", paragraphs: ["A third bounded claim."], evidenceIds: ["commit:abc"], tag: "FEATURE", illustrationKey: "image-3.webp" },
+  ],
+};
+
 describe("runner engine", () => {
   test("publishes a quiet week without invoking AI", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
@@ -53,7 +76,7 @@ describe("runner engine", () => {
   test("runs active evidence through two images and atomic publication", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
     const publisher = new FakePublisher();
-    const evidence: EvidenceBundle = { state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "Parser fix", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] };
+    const evidence = activeEvidence();
     let image = 0;
     const inference: Inference = {
       write: async () => ({ edition, usage: tokenUsage(100, 20) }),
@@ -69,7 +92,7 @@ describe("runner engine", () => {
     expect(result, publisher.failure).toBe("processed");
     expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp"]);
     expect(publisher.published?.images).toHaveLength(2);
-    expect(publisher.published?.promptVersion).toBe("gitzette-editor-v5");
+    expect(publisher.published?.promptVersion).toBe("gitzette-editor-v6-coverage-art-direction");
     expect(publisher.publishedUsage).toMatchObject({
       inputTokens: 130,
       outputTokens: 22,
@@ -80,10 +103,56 @@ describe("runner engine", () => {
     expect(publisher.failure).toBeUndefined();
   });
 
+  test("uploads and publishes all three illustrations from a broader edition", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const evidence = activeEvidence();
+    const colors = ["red", "blue", "green"];
+    let image = 0;
+    const inference: Inference = {
+      write: async () => ({ edition: threeImageEdition, usage: tokenUsage(100, 20) }),
+      illustrate: async (_subject, output) => {
+        const child = Bun.spawn(["/usr/bin/convert", "-size", "1024x1024", "xc:#f7f4ee", "-fill", colors[image++]!, "-draw", "circle 512,512 760,512", output]);
+        expect(await child.exited).toBe(0);
+        return tokenUsage(10, 0);
+      },
+      reviewIllustration: async () => tokenUsage(5, 1),
+    };
+
+    const result = await new RunnerEngine(config(directory), publisher, { collect: async () => evidence }, inference).runOnce();
+    expect(result, publisher.failure).toBe("processed");
+    expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp", "image-3.webp"]);
+    expect(publisher.published?.images.map(({ key }) => key)).toEqual(["image-1.webp", "image-2.webp", "image-3.webp"]);
+    expect(publisher.publishedUsage).toMatchObject({ inputTokens: 145, outputTokens: 23, imageCount: 3 });
+    expect(publisher.failure).toBeUndefined();
+  });
+
+  test("rejects a third illustration that matches the second before publication", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
+    const publisher = new FakePublisher();
+    const evidence = activeEvidence();
+    const colors = ["red", "blue", "blue"];
+    let image = 0;
+    const inference: Inference = {
+      write: async () => ({ edition: threeImageEdition, usage: tokenUsage(0, 0) }),
+      illustrate: async (_subject, output) => {
+        const child = Bun.spawn(["/usr/bin/convert", "-size", "1024x1024", "xc:#f7f4ee", "-fill", colors[image++]!, "-draw", "circle 512,512 760,512", output]);
+        expect(await child.exited).toBe(0);
+        return tokenUsage(0, 0);
+      },
+      reviewIllustration: async () => tokenUsage(0, 0),
+    };
+
+    expect(await new RunnerEngine(config(directory), publisher, { collect: async () => evidence }, inference).runOnce()).toBe("failed");
+    expect(publisher.uploads).toEqual(["image-1.webp", "image-2.webp"]);
+    expect(publisher.published).toBeUndefined();
+    expect(publisher.failure).toContain("illustrations are too visually similar");
+  });
+
   test("fails closed when model output cannot be validated", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
     const publisher = new FakePublisher();
-    const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
+    const collector: Collector = { collect: async () => activeEvidence("x") };
     const inference: Inference = {
       write: async () => { throw new Error("unknown edition field: prompt"); },
       illustrate: async () => tokenUsage(0, 0),
@@ -97,7 +166,7 @@ describe("runner engine", () => {
   test("classifies a revoked OpenClaw OAuth session separately", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gitzette-runner-test-"));
     const publisher = new FakePublisher();
-    const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
+    const collector: Collector = { collect: async () => activeEvidence("x") };
     const inference: Inference = {
       write: async () => { throw new OpenClawInferenceError(1, "OAuth session expired"); },
       illustrate: async () => tokenUsage(0, 0),
@@ -113,7 +182,7 @@ describe("runner engine", () => {
     const publisher = new FakePublisher();
     const slowConfig = config(directory);
     slowConfig.heartbeatSeconds = 0.01;
-    const collector: Collector = { collect: async () => ({ state: "active", username: job.username, weekKey: job.weekKey, items: [{ id: "commit:abc", type: "commit", title: "x", url: "https://github.com/octocat/widget/commit/abc", repo: "octocat/widget" }] }) };
+    const collector: Collector = { collect: async () => activeEvidence("x") };
     const inference: Inference = {
       write: async () => { await Bun.sleep(35); throw new Error("stop after heartbeat proof"); },
       illustrate: async () => tokenUsage(0, 0), reviewIllustration: async () => tokenUsage(0, 0),

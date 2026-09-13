@@ -16,6 +16,23 @@ function activeManifest(): PublicationManifest {
       items: [
         { id: "pr:1", type: "pull_request", title: "Fix parser", url: "https://github.com/octocat/widget/pull/1", repo: "octocat/widget" },
       ],
+      stats: {
+        period: { from: "2026-08-03", toInclusive: "2026-08-09" },
+        observedAt: "2026-08-10T00:00:00Z",
+        scopes: { releases: "discovered_public_contribution_repositories", repositories: "public_repositories_discovered_from_contributions_and_commit_search" },
+        contributionRepositories: { status: "complete" },
+        totals: {
+          publicCommits: { value: 1, coverage: { status: "complete" } },
+          openedPullRequests: { value: 1, coverage: { status: "complete" } },
+          mergedPullRequests: { value: 0, coverage: { status: "complete" } },
+          releases: { value: 0, coverage: { status: "complete" } },
+        },
+        repositories: [{
+          repo: "octocat/widget", url: "https://github.com/octocat/widget",
+          publicCommits: { value: 1, coverage: { status: "complete" } },
+          stars: { value: 17, observedAt: "2026-08-10T00:00:00Z", coverage: { status: "complete" } },
+        }],
+      },
     },
     edition: {
       headline: "The parser reaches the end",
@@ -47,6 +64,12 @@ function activeManifest(): PublicationManifest {
 describe("typed publication manifest", () => {
   test("accepts an evidence-backed active edition with two images", () => {
     expect(validateManifest(activeManifest(), "octocat", "2026-W32").edition.stories).toHaveLength(2);
+  });
+
+  test("rejects new active publications without weekly activity statistics", () => {
+    const manifest = activeManifest();
+    delete manifest.evidence.stats;
+    expect(() => validateManifest(manifest, "octocat", "2026-W32")).toThrow("active edition requires activity statistics");
   });
 
   test("retains the legacy nonempty-publication and known-source guards", () => {
@@ -120,7 +143,41 @@ describe("typed publication manifest", () => {
     const manifest = activeManifest();
     manifest.images.pop();
     manifest.edition.stories.pop();
-    expect(() => validateManifest(manifest, "octocat", "2026-W32")).toThrow("requires at least 2 illustrations");
+    expect(() => validateManifest(manifest, "octocat", "2026-W32")).toThrow("requires exact illustration set: image-1.webp, image-2.webp");
+  });
+
+  test("requires the exact two-image key set for a two-story active edition", () => {
+    const extraArtifact = activeManifest();
+    extraArtifact.images.push({ key: "image-3.webp", contentType: "image/webp", sha256: "c".repeat(64) });
+    expect(() => validateManifest(extraArtifact, "octocat", "2026-W32")).toThrow("requires exact illustration set: image-1.webp, image-2.webp");
+
+    const shiftedKeys = activeManifest();
+    shiftedKeys.edition.stories[0].illustrationKey = "image-2.webp";
+    shiftedKeys.edition.stories[1].illustrationKey = "image-3.webp";
+    shiftedKeys.images[0].key = "image-2.webp";
+    shiftedKeys.images[1].key = "image-3.webp";
+    expect(() => validateManifest(shiftedKeys, "octocat", "2026-W32")).toThrow("requires exact illustration set: image-1.webp, image-2.webp");
+  });
+
+  test("requires three used illustrations for active editions with three or more stories", () => {
+    const insufficient = activeManifest();
+    insufficient.edition.stories.push({
+      headline: "The third angle",
+      deck: "Broader coverage needs its full illustration budget.",
+      paragraphs: ["A third meaningful story remains evidence-bound."],
+      evidenceIds: ["pr:1"],
+      tag: "FEATURE",
+    });
+    insufficient.images.push({ key: "image-3.webp", contentType: "image/webp", sha256: "c".repeat(64) });
+    expect(() => validateManifest(insufficient, "octocat", "2026-W32")).toThrow("requires exact illustration set: image-1.webp, image-2.webp, image-3.webp");
+
+    const sufficient = activeManifest();
+    sufficient.edition.stories.push({
+      ...insufficient.edition.stories[2],
+      illustrationKey: "image-3.webp",
+    });
+    sufficient.images.push({ key: "image-3.webp", contentType: "image/webp", sha256: "c".repeat(64) });
+    expect(validateManifest(sufficient, "octocat", "2026-W32").edition.stories).toHaveLength(3);
   });
 
   test("rejects duplicate image bytes and invalid runtime enum values", () => {
@@ -189,8 +246,9 @@ describe("April broadsheet restoration", () => {
       expect(html).toContain(story.paragraphs[0]);
     }
     expect(html.split('href="https://github.com/octocat/widget/pull/1"').length-1).toBe(2);
-    expect(html).toContain('<span>1 cited sources</span>');
-    expect(html).toContain('Counts describe the sources cited in this edition');
+    expect(html).toContain('<span><strong>1</strong> public commits</span>');
+    expect(html).toContain('Counts cover the public activity collected for this week');
+    expect(html).not.toContain('Counts describe the sources cited in this edition');
     expect(html).toContain('<div class="dispatch-prose"><div class="dispatch-cutout"><img');
     expect(upgradeStructuredEdition(html)).toBe(html);
     expect(html.split("main.gitzette-edition{box-sizing").length-1).toBe(1);
@@ -219,5 +277,28 @@ describe("April broadsheet restoration", () => {
     expect(upgradeStructuredEdition(migrated)).toBe(migrated);
     expect(upgradeStructuredEdition(raw("2026-W53"))).toContain("Dec 28, 2026 – Jan 3, 2027");
     expect(upgradeStructuredEdition(raw("2026-W01"))).toContain("Dec 29, 2025 – Jan 4, 2026");
+  });
+});
+
+
+describe("weekly activity integration", () => {
+  test("renders persisted activity rather than citation-derived substitutes", () => {
+    const m = activeManifest();
+    const complete = (value: number) => ({value, coverage:{status:"complete" as const}});
+    m.evidence.stats = {
+      period:{from:"2026-08-03",toInclusive:"2026-08-09"},observedAt:"2026-09-13T18:00:00Z",
+      scopes:{releases:"discovered_public_contribution_repositories",repositories:"public_repositories_discovered_from_contributions_and_commit_search"},
+      contributionRepositories:{status:"complete"},
+      totals:{publicCommits:complete(42),openedPullRequests:complete(7),mergedPullRequests:complete(5),releases:complete(2)},
+      repositories:[{repo:"octocat/widget",url:"https://github.com/octocat/widget",publicCommits:complete(42),stars:{...complete(1234),observedAt:"2026-09-13T18:00:00Z"}}]
+    };
+    const html=renderEdition(validateManifest(m,"octocat","2026-W32"), k=>`/img/${k}`);
+    expect(html).toContain('<div class="dispatch-bar"><span><strong>42</strong> public commits');
+    expect(html).toContain('1,234');
+    expect(html).toContain('PRs merged');
+    expect(html).not.toContain('Cited sources by repository');
+    expect(upgradeStructuredEdition(html)).toBe(html);
+    m.evidence.stats.period.from="2026-08-04";
+    expect(()=>validateManifest(m,"octocat","2026-W32")).toThrow('statistics period target mismatch');
   });
 });

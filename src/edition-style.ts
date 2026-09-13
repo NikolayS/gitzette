@@ -1,3 +1,5 @@
+import type { ActivityStatistics } from "./statistics";
+import { renderStatisticsSidebar, renderStatisticsBar } from "./statistics-view";
 // Exact PR74 stylesheet: remove only these known rules from stored structured HTML.
 const PREVIOUS_PRESENTATION_STYLE = `
 main.gitzette-edition{box-sizing:border-box;max-width:1180px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 28px}
@@ -32,7 +34,7 @@ main.gitzette-edition{box-sizing:border-box;display:block;max-width:960px;margin
 .gitzette-edition>header .deck{font:italic 14px/1.5 Georgia,serif;color:#666;margin:4px 0 0}
 .gitzette-edition>header .notice{font:10px/1.5 'IBM Plex Mono',monospace;color:#666;margin:8px 0 0}
 .gitzette-edition .dispatch-bar{display:flex;flex-wrap:wrap;gap:6px 20px;background:#0f0f0f;color:#f7f4ee;padding:8px 24px;font:11px/1.5 'IBM Plex Mono',monospace}
-.gitzette-edition .dispatch-body{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:32px;padding:24px 24px 32px}
+.gitzette-edition .dispatch-body{display:grid;grid-template-columns:minmax(0,538px) minmax(0,340px);gap:34px;padding:24px 24px 32px}
 .gitzette-edition .dispatch-stories,.gitzette-edition .dispatch-sidebar{min-width:0}
 .gitzette-edition article{display:flow-root;padding:0 0 28px;margin:0 0 28px;border-bottom:1px solid #c8c2b4;overflow-wrap:anywhere}
 .gitzette-edition article:last-child{margin-bottom:0}
@@ -43,26 +45,29 @@ main.gitzette-edition{box-sizing:border-box;display:block;max-width:960px;margin
 .gitzette-edition .dispatch-prose p{margin:0 0 12px}
 .gitzette-edition .dispatch-cutout{float:left;width:140px;height:140px;max-width:44%;margin:0 12px 6px 0;shape-outside:circle(50% at 50% 50%);shape-margin:6px}
 .gitzette-edition article .dispatch-cutout img{float:none;display:block;width:100%;height:100%;max-height:140px;object-fit:contain;margin:0}
-.gitzette-edition .dispatch-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #c8c2b4;margin:0 0 20px}
+.gitzette-edition .dispatch-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid #c8c2b4;margin:0 0 20px}
 .gitzette-edition .dispatch-metric{text-align:center;padding:8px 3px;border-right:1px solid #c8c2b4}
-.gitzette-edition .dispatch-metric:last-child{border:0}
+.gitzette-edition .dispatch-metric:nth-child(odd){border-right:1px solid #c8c2b4}.gitzette-edition .dispatch-metric:nth-child(even){border-right:0}.gitzette-edition .dispatch-metric:nth-child(n+3){border-top:1px solid #c8c2b4}
 .gitzette-edition .dispatch-metric strong{display:block;font:700 36px/1.2 'IBM Plex Mono',monospace}
 .gitzette-edition .dispatch-metric span{font:9px/1.4 'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.04em}
+.gitzette-edition .dispatch-metric small,.gitzette-edition .dispatch-repo small{display:block;color:#666;font:9px/1.4 'IBM Plex Mono',monospace}
 .gitzette-edition .dispatch-sidebar h2{font:600 10px/1.5 'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.1em;margin:0 0 14px}
 .gitzette-edition .dispatch-repo{padding:10px 0;border-bottom:1px solid #c8c2b4;font:11px/1.5 'IBM Plex Mono',monospace;overflow-wrap:anywhere}
 .gitzette-edition .dispatch-repo-label{display:flex;justify-content:space-between;gap:8px}
 .gitzette-edition .dispatch-repo-track{height:6px;background:#e6e1d6;margin-top:7px}
 .gitzette-edition .dispatch-repo-fill{height:100%;background:#666}
-.gitzette-edition .dispatch-sidebar-note{color:#666;font:10px/1.6 'IBM Plex Mono',monospace;margin:14px 0 0}
+.gitzette-edition .dispatch-stars-heading{margin-top:24px!important}.gitzette-edition .dispatch-stars-heading span{display:block;color:#666;font-weight:400;letter-spacing:.04em}
+.gitzette-edition .dispatch-stars{width:100%;border-collapse:collapse;font:10px/1.4 'IBM Plex Mono',monospace}.gitzette-edition .dispatch-stars th,.gitzette-edition .dispatch-stars td{padding:8px 0;border-bottom:1px solid #c8c2b4;vertical-align:top}.gitzette-edition .dispatch-stars th{text-align:left;font-weight:400;overflow-wrap:anywhere;padding-right:10px}.gitzette-edition .dispatch-stars td{width:38%;text-align:right}.gitzette-edition .dispatch-star-count{display:block;font-weight:700}.gitzette-edition .dispatch-star-bar{display:block;height:3px;background:#e6e1d6;margin:4px 0 0 auto}.gitzette-edition .dispatch-star-bar i{display:block;height:100%;background:#898276}.gitzette-edition .dispatch-empty{color:#666;font:10px/1.6 'IBM Plex Mono',monospace}
+.gitzette-edition .dispatch-sidebar-note{color:#49453d;font:10px/1.6 'IBM Plex Mono',monospace;margin:14px 0 0}
 .gitzette-edition>footer{border-top:1px solid #c8c2b4;padding:12px 24px;font:11px/1.5 'IBM Plex Mono',monospace;color:#666}
 .gitzette-edition a,.gitzette-edition a:visited{color:#292720;text-decoration-color:#aaa393;text-underline-offset:3px}
 .gitzette-edition a:hover{color:#000;text-decoration-color:currentColor}
 .gitzette-edition a:focus-visible,.gitzette-edition summary:focus-visible{outline:2px solid #514b3f;outline-offset:3px}
-.gitzette-edition .sources{clear:both;font:11px/1.5 'IBM Plex Mono',monospace;color:#625c50;margin:14px 0 0}
+.gitzette-edition .sources{clear:both;font:11px/1.5 'IBM Plex Mono',monospace;color:#49453d;margin:14px 0 0}
 .gitzette-edition .sources summary{cursor:pointer}
 .gitzette-edition .sources ol{margin:12px 0 0;padding-left:20px}
 .gitzette-edition .sources li{margin:0 0 9px;padding-left:3px}
-@media(max-width:700px){main.gitzette-edition{margin:0}.gitzette-edition .dispatch-body{grid-template-columns:minmax(0,1fr);padding:20px;gap:24px}.gitzette-edition>header{padding:18px 20px 14px}.gitzette-edition .dispatch-kicker{font-size:9px;flex-direction:column;gap:4px}.gitzette-edition .dispatch-sidebar{border-top:3px solid #0f0f0f;padding-top:20px}.gitzette-edition article h2{font-size:24px}}
+@media(max-width:800px){main.gitzette-edition{margin:0}.gitzette-edition .dispatch-body{grid-template-columns:minmax(0,1fr);padding:20px;gap:24px}.gitzette-edition>header{padding:18px 20px 14px}.gitzette-edition .dispatch-kicker{font-size:9px;flex-direction:column;gap:4px}.gitzette-edition .dispatch-sidebar{border-top:3px solid #0f0f0f;padding-top:20px}.gitzette-edition article h2{font-size:24px}}
 @media print{.gitzette-edition details.sources{display:block}.gitzette-edition details.sources>*{display:block}.gitzette-edition details.sources::details-content{display:block;content-visibility:visible;height:auto}}
 `;
 
@@ -71,7 +76,7 @@ function escapeText(value: string): string {
 }
 
 /** Upgrade only our known structured renderer; leave original April HTML alone. */
-export function upgradeStructuredEdition(html: string): string {
+export function upgradeStructuredEdition(html: string, stats?: ActivityStatistics): string {
   const current = html.includes('<main class="gitzette-edition">');
   const original = html.includes('article{display:flow-root;padding:28px 0;') && html.includes('<main><header>');
   if (!current && !original) return html;
@@ -135,6 +140,10 @@ export function upgradeStructuredEdition(html: string): string {
       const sidebar = `<aside class="dispatch-sidebar" aria-label="Edition at a glance"><h2>In this edition</h2><div class="dispatch-metrics">${metrics}</div><h2>Cited sources by repository</h2>${bars}<p class="dispatch-sidebar-note">Counts describe the sources cited in this edition, not total GitHub activity or repository stars.</p></aside>`;
       return `<main class="gitzette-edition"><header>${header}</header><div class="dispatch-bar"><span>${stories.length} stories</span><span>${sources.size} cited sources</span><span>${repos.size} repositories</span></div><div class="dispatch-body"><section class="dispatch-stories" aria-label="Stories">${wrapped}</section>${sidebar}</div>${footer}</main>`;
     });
+  }
+  if (stats) {
+    result = result.replace(/<aside class="dispatch-sidebar"[^>]*>[\s\S]*?<\/aside>/, () => renderStatisticsSidebar(stats));
+    result = result.replace(/<div class="dispatch-bar">[\s\S]*?<\/div>/, () => `<div class="dispatch-bar">${renderStatisticsBar(stats)}</div>`);
   }
   // PR74 stored this exact CSS in anonymous style blocks, sometimes alongside base CSS.
   result = result.replace(/<style>([\s\S]*?)<\/style>/g, (_block, css: string) => {
