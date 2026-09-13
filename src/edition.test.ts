@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+const previousPresentationStyle = readFileSync(new URL("./fixtures/pr74-presentation.css", import.meta.url), "utf8");
+import { upgradeStructuredEdition } from "./edition-style";
 import { describe, expect, test } from "bun:test";
 import { AI_ACTIVITY_NOTICE, escapeHtml, renderEdition, validateManifest, type PublicationManifest } from "./edition";
 
@@ -170,5 +173,51 @@ describe("typed publication manifest", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("https://github.com/octocat/widget/pull/1");
     expect(escapeHtml(`&<>"'`)).toBe("&amp;&lt;&gt;&quot;&#39;");
+  });
+});
+
+describe("April broadsheet restoration", () => {
+  test("keeps stories, images and citations while wrapping prose and deduplicating sidebar sources", () => {
+    const m=activeManifest();
+    const html=renderEdition(validateManifest(m,"octocat","2026-W32"), k=>`/img/${k}`);
+    expect(html).toContain('class="dispatch-masthead">the <span>dispatch</span>');
+    expect(html).toContain('Aug 3 – Aug 9, 2026');
+    expect((html.match(/class="dispatch-cutout"/g)??[]).length).toBe(2);
+    expect((html.match(/<article>/g)??[]).length).toBe(2);
+    for (const story of m.edition.stories) {
+      expect(html).toContain(story.headline);
+      expect(html).toContain(story.paragraphs[0]);
+    }
+    expect(html.split('href="https://github.com/octocat/widget/pull/1"').length-1).toBe(2);
+    expect(html).toContain('<span>1 cited sources</span>');
+    expect(html).toContain('Counts describe the sources cited in this edition');
+    expect(html).toContain('<div class="dispatch-prose"><div class="dispatch-cutout"><img');
+    expect(upgradeStructuredEdition(html)).toBe(html);
+    expect(html.split("main.gitzette-edition{box-sizing").length-1).toBe(1);
+    expect(upgradeStructuredEdition(html).split("main.gitzette-edition{box-sizing").length-1).toBe(1);
+    const raw = (week: string) => `<!DOCTYPE html><html><head></head><body><main class="gitzette-edition"><header><p>@octocat · ${week}</p></header><article><h2>Story</h2><p>Deck</p><p>Prose</p><details class="sources"><summary>Sources</summary></details></article><footer>End</footer></main></body></html>`;
+    const previous = raw("2026-W32").replace('</head>', `<style>body{margin:0}${previousPresentationStyle}</style><style>${previousPresentationStyle}</style><style>.unrelated{color:red}</style></head>`);
+    const mixedCase = raw("2026-W32").replace('<summary>Sources</summary>', '<summary>Sources</summary><a href="https://github.com/OctoCat/Widget/pull/1">One</a><a href="https://github.com/octocat/widget/pull/2">Two</a>');
+    const grouped = upgradeStructuredEdition(mixedCase);
+    expect(grouped).toContain('<span>1 repositories</span>');
+    expect(grouped).toContain('<span>octocat/widget</span><strong>2</strong>');
+    const apiCitation = mixedCase.replace('https://github.com/OctoCat/Widget/pull/1', 'https://api.github.com/repos/OctoCat/Widget/pulls/1');
+    const apiGrouped = upgradeStructuredEdition(apiCitation);
+    expect(apiGrouped).toContain('<span>2 cited sources</span>');
+    expect(apiGrouped).toContain('<span>1 repositories</span>');
+    expect(apiGrouped).toContain('<span>octocat/widget</span><strong>2</strong>');
+    const nonRepo = mixedCase.replace('<summary>Sources</summary>', '<summary>Sources</summary><a href="https://github.com/orgs/example/discussions/123">Discussion</a><a href="https://github.com/octocat">Profile</a><a href="https://api.github.com/users/octocat">API profile</a>');
+    const counted = upgradeStructuredEdition(nonRepo);
+    expect(counted).toContain('<span>5 cited sources</span>');
+    expect(counted).toContain('<span>1 repositories</span>');
+    expect(counted).not.toContain('<span>orgs/example</span>');
+    const migrated = upgradeStructuredEdition(previous);
+    expect(migrated).not.toContain('max-width:1180px');
+    expect(migrated).toContain('<style>body{margin:0}</style>');
+    expect(migrated).toContain('<style>.unrelated{color:red}</style>');
+    expect(migrated.split('main.gitzette-edition{box-sizing').length-1).toBe(1);
+    expect(upgradeStructuredEdition(migrated)).toBe(migrated);
+    expect(upgradeStructuredEdition(raw("2026-W53"))).toContain("Dec 28, 2026 – Jan 3, 2027");
+    expect(upgradeStructuredEdition(raw("2026-W01"))).toContain("Dec 29, 2025 – Jan 4, 2026");
   });
 });
