@@ -137,3 +137,29 @@ test("incomplete weekly searches use bounded daily windows and still fail closed
     }
   }
 });
+
+test('daily fallback deduplicates and selects newest weekly commits after merging over 500 results', async()=>{
+ const request=async(input:string|URL|Request,init?:RequestInit)=>{
+  const url=new URL(String(input));
+  if(url.pathname==='/graphql') {
+   const body=JSON.parse(String(init?.body));
+   return Response.json(body.query.includes('type:DISCUSSION')?{data:{search:{discussionCount:0,nodes:[]}}}:{data:{user:{contributionsCollection:{}}}});
+  }
+  if(url.pathname!=='/search/commits')return Response.json({items:[],incomplete_results:false});
+  const q=url.searchParams.get('q')!;
+  if(q.includes('2026-08-03..2026-08-09'))return Response.json({items:[],incomplete_results:true});
+  const date=q.match(/committer-date:(\d{4}-\d{2}-\d{2})/)![1];
+  return Response.json({incomplete_results:false,total_count:100,items:Array.from({length:100},(_,i)=>({sha:i===0?'common':`${date}-${i}`,html_url:`https://github.com/octocat/widget/commit/${i}`,repository:{full_name:'octocat/widget'},commit:{message:`Change ${i}`,committer:{date:new Date(Date.parse(date+'T00:00:00Z')+i*60000).toISOString()}}}))});
+ };
+ const result=await new GitHubCollector('test-token',request as typeof fetch).collect('octocat','2026-W32');
+ expect(result.items).toHaveLength(500);
+ expect(result.items[0].id).toBe('commit:2026-08-09-99');
+ expect(result.items.filter(x=>x.id==='commit:common')).toHaveLength(1);
+ expect(result.items.some(x=>x.id.startsWith('commit:2026-08-03-'))).toBe(false);
+});
+
+import {mergeSearchResults} from './github';
+test('daily issue selection follows updated time rather than the created/merged query day',()=>{
+ const result=mergeSearchResults('issues',[{id:1,updated_at:'2026-08-09T01:00:00Z'},{id:2,updated_at:'2026-08-08T01:00:00Z'},{id:1,updated_at:'2026-08-09T01:00:00Z'}]);
+ expect(result.map(x=>x.id)).toEqual([1,2]);
+});

@@ -84,7 +84,9 @@ export async function startBroker(options: { socket: string; state: string; conf
         catch { abort(); await child.exited; throw new Error("inference output exceeded limit"); }
         finally { clearTimeout(timer); req.signal.removeEventListener("abort", abort); }
         // Raw provider diagnostics never cross the socket or enter logs.
-        if (code !== 0) return new Response(null, { status: (classifyOpenClawFailure(stderr) === "auth" || classifyOpenClawFailure(output) === "auth") ? 401 : 502 });
+        let envelope: any;
+        try { envelope = JSON.parse(output); } catch { /* malformed CLI output fails closed */ }
+        if (code !== 0 || envelope?.ok !== true || envelope.error) return new Response(null, { status: (classifyOpenClawFailure(stderr) === "auth" || classifyOpenClawFailure(output) === "auth") ? 401 : 502 });
         let image: string | undefined;
         if (request.operation === "generate") {
           const file = Bun.file(join(directory, "output.png"));

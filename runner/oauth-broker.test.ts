@@ -38,6 +38,7 @@ test("real socket transports results, sanitizes auth errors, and removes tempora
   await Bun.write(cli, `(async () => { const a = process.argv; const prompt = a[a.indexOf('--prompt')+1];
     if (prompt === 'auth') { console.error('OAuth token expired PRIVATE_DIAGNOSTIC'); process.exit(1); }
     if (prompt === 'auth-stdout') { console.log(JSON.stringify({error:{code:'invalid_oauth',message:'OAuth token expired PRIVATE_DIAGNOSTIC'}})); process.exit(1); }
+    if (prompt === 'auth-zero') { console.log(JSON.stringify({ok:false,error:{code:'invalid_oauth',message:'OAuth token expired PRIVATE_DIAGNOSTIC'}})); process.exit(0); }
     if (prompt === 'slow') await new Promise(r => setTimeout(r, 12000));
     console.log(JSON.stringify({ok:true, outputs:[{text:prompt}]})); })();`);
   const server = await startBroker({ socket: join(dir, 'socket'), state: dir, config: join(import.meta.dir, 'openclaw-broker.json'), work: dir, node: process.execPath, cli });
@@ -46,7 +47,7 @@ test("real socket transports results, sanitizes auth errors, and removes tempora
     expect(JSON.parse(await brokerInference(join(dir,'socket'), argv, 10000)).outputs[0].text).toBe('hello');
     argv[5] = 'slow';
     expect(JSON.parse(await brokerInference(join(dir,'socket'), argv, 20000)).outputs[0].text).toBe('slow');
-    for (const scenario of ['auth', 'auth-stdout']) {
+    for (const scenario of ['auth', 'auth-stdout', 'auth-zero']) {
     argv[5] = scenario;
     let failure: unknown;
     try { await brokerInference(join(dir,'socket'), argv, 10000); } catch (e) { failure = e; }
@@ -96,6 +97,7 @@ test('real socket transfers image bytes both ways and cleans up failed image cal
   const cli=join(dir,'fake-cli.js');
   const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jWZkAAAAASUVORK5CYII=','base64');
   await Bun.write(cli, `const fs=require('fs'),path=require('path'),a=process.argv,p=a[a.indexOf('--prompt')+1];
+    if(p==='auth-zero') { console.log(JSON.stringify({ok:false,error:{code:'invalid_oauth'}})); process.exit(0); }
     if(a.includes('generate')) {
       const out=a[a.indexOf('--output')+1];
       if(p!=='missing') fs.writeFileSync(out,p==='oversized'?Buffer.alloc(8*1024*1024+1):Buffer.from('${bytes.toString('base64')}','base64'));
@@ -123,6 +125,9 @@ test('real socket transfers image bytes both ways and cleans up failed image cal
       expect(Buffer.from(await Bun.file(output).arrayBuffer()).equals(bytes)).toBe(true);
       expect((await readdir(dir)).filter(x=>x.startsWith('inference-'))).toEqual([]);
     }
+    gen[5]='auth-zero';
+    let authFailure:unknown;try { await brokerInference(socket,gen,5000); } catch(e) { authFailure=e; }
+    expect(isOAuthAuthFailure(authFailure)).toBe(true);
     review[5]='fail';await expect(brokerInference(socket,review,5000)).rejects.toThrow();
     expect((await readdir(dir)).filter(x=>x.startsWith('inference-'))).toEqual([]);
   } finally { server.stop(true);await rm(dir,{recursive:true,force:true}); }

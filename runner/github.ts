@@ -10,7 +10,8 @@ type SearchItem = {
   title?: string;
   html_url?: string;
   sha?: string;
-  commit?: { message?: string };
+  commit?: { message?: string; committer?: { date?: string } };
+  updated_at?: string;
   repository?: { full_name?: string };
 };
 
@@ -92,7 +93,7 @@ export class GitHubCollector implements Collector {
           const date = new Date(start + day * 86400000).toISOString().slice(0, 10);
           complete.push(...await this.search(kind, query.replace(range[0], range[0].split(":")[0] + ":" + date + ".." + date), false));
         }
-        return complete.slice(0, 500);
+        return mergeSearchResults(kind, complete);
       }
       items.push(...body.items);
       if (body.items.length < 100 || items.length >= Math.min(body.total_count ?? items.length, 500)) break;
@@ -222,4 +223,14 @@ export function isoWeek(weekKey: string): { from: string; toExclusive: string; t
   const { monday, nextMonday, sunday } = parseIsoWeekKey(weekKey);
   const date = (value: Date) => value.toISOString().slice(0, 10);
   return { from: date(monday), toExclusive: date(nextMonday), toInclusive: date(sunday) };
+}
+
+// Match GitHub's descending search order before applying the weekly cap.
+export function mergeSearchResults(kind: "commits" | "issues", items: SearchItem[]): SearchItem[] {
+  const key = (item: SearchItem) => kind === "commits" ? `${item.repository?.full_name}:${item.sha}` : String(item.id);
+  const time = (item: SearchItem) => Date.parse((kind === "commits" ? item.commit?.committer?.date : item.updated_at) ?? "") || 0;
+  const ordered = [...items].sort((a,b) => time(b)-time(a) || key(a).localeCompare(key(b)));
+  const unique = new Map<string, SearchItem>();
+  for (const item of ordered) if (!unique.has(key(item))) unique.set(key(item),item);
+  return [...unique.values()].slice(0,500);
 }
