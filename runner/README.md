@@ -8,12 +8,19 @@ typed result, and submits it under the current lease.
 It renews the lease every 60 seconds while collection or inference is running;
 the Worker rejects stale heartbeats and all writes from an expired lease.
 
-The AI subprocesses receive a deliberately rebuilt environment containing only
-OpenClaw's isolated state paths. They do not receive the GitHub token, runner
-secret, AI API keys, TARS state, messaging configuration, or a tool-capable
-agent session. The OpenClaw config denies every agent tool; text and images use
+Inference subprocesses receive a deliberately rebuilt environment without the
+GitHub token, runner secret, AI API keys, messaging configuration, or a tool-capable
+agent session. In shared-owner broker mode only the owner-side subprocess can
+access the canonical OAuth state; the pull runner receives results, never that
+state or its credentials. Independent direct-CLI installations use their own
+isolated OAuth state. The OpenClaw config denies every agent tool; text and images use
 the direct `openclaw infer` capability surface. It intentionally contains no
 Gateway block, and the systemd service never starts a Gateway process.
+
+The shipped configuration uses keyed `agents.entries` for OpenClaw 2026.9.2.
+Image selection is explicit on each `infer image generate --model` call; do not
+restore the retired `agents.defaults.imageGenerationModel` setting. Validate the
+configuration with the installed OpenClaw before attempting OAuth activation.
 Public commit messages and PR/issue titles are untrusted third-party input. They
 are serialized inside the hostile-evidence delimiter, never interpolated into a
 shell, and reach an agent with `tools.deny=["*"]`, no channels, elevation off,
@@ -47,31 +54,16 @@ narrow `RUNNER_SECRET` is configured on both sides. Never put an AI API key in
 the environment file; startup rejects broad credential patterns and known AI
 provider variables. `bun.lock` is the sole dependency lockfile used by CI.
 
-OpenClaw 2026.7 does not import OAuth material from a legacy `~/.codex`
-directory. Do not copy another user's Codex files into this account or treat
-their presence as proof of usable runner auth. After the dedicated GitZette
-account and revocation policy are approved, authenticate directly into the
-isolated OpenClaw store as the service user:
-
-```bash
-sudo -u gitzette-runner env -i \
-  HOME=/var/lib/gitzette-runner \
-  PATH=/var/lib/gitzette-runner/.bun/bin:/usr/local/bin:/usr/bin:/bin \
-  OPENCLAW_STATE_DIR=/var/lib/gitzette-runner/.openclaw \
-  OPENCLAW_CONFIG_PATH=/var/lib/gitzette-runner/.openclaw/openclaw.json \
-  /var/lib/gitzette-runner/.bun/bin/openclaw models auth login \
-    --provider openai --device-code
-```
-
-Run the same sealed environment with `openclaw infer model auth status --json`
-and require an available OpenAI OAuth route with no fallback before running the
-text and image canaries. Missing, expired, or rate-limited auth keeps the
-service disabled. Never add an API key to make a canary pass.
-
-Before activation, the operator must attach a written authorization/terms-of-use
-determination for automated use of the dedicated account to the release record.
-This repository does not assert that approval exists. Without that record the
-runner and weekly scheduler remain disabled, even if device-code login works.
+Provisioning follows the [authorized subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update).
+Production shared-subscription inference uses `GITZETTE_INFERENCE_SOCKET=/run/gitzette-inference/infer.sock`.
+The pull runner remains `gitzette-runner`; a local inference service runs as the
+existing OpenClaw owner and uses its canonical state directory and OAuth refresh
+lock. Credentials are not sent over the socket or copied into the pull runner.
+The broker accepts only writing, image generation, and image review, with fixed
+models, tool-denied configuration, and owner-local temporary image paths.
+Verify text and image canaries before enabling publication. No API-key fallback
+is permitted. The older direct-CLI mode remains available for independent OAuth
+installations, but must not refresh a copied session in a separate state root.
 
 The runner classifies OpenClaw auth failures primarily from structured JSON
 `status`, `statusCode`, and `code` fields; a bounded message matcher is only a
@@ -83,11 +75,13 @@ emitted after five consecutive failures of any class, so unknown provider
 wording cannot suppress the operator signal.
 
 Treat either alert as a total generation outage: disable the runner, inspect
-the dedicated identity with the sealed `auth status` command, revoke the broken
-session if it still appears active, and repeat device-code login as
-`gitzette-runner`. Then rerun auth status plus the text and image canaries before
-re-enabling the service. Never copy another account's state or install an
-API-key fallback. The restore target is four hours from the first alert; an
+the authorized identity with the sealed `auth status` command. Do not revoke
+the shared session casually: revocation or refresh-token rotation can disrupt
+TARS too. Recover the existing owner's canonical OAuth profile once, rather
+than creating or refreshing a second copied store. If interactive sign-in is
+required, keep authentication codes in the trusted terminal, never chat/logs.
+Then rerun auth status plus the text and image canaries before
+re-enabling the service. Never import an unauthorized account or install an API-key fallback. The restore target is four hours from the first alert; an
 outage may exceed that target when the provider or account owner is unavailable.
 Existing editions remain served, and queued work fails closed or ages out
 during the accepted generation outage.
@@ -102,9 +96,10 @@ stat -c '%U:%G %a %n' /var/lib/gitzette-runner /etc/gitzette-runner/environment
 ```
 
 Expected ownership/modes are `gitzette-runner:gitzette-runner 700` and
-`root:root 600`. The OAuth identity must be a dedicated GitZette account, never
-a person's primary ChatGPT identity. Account-policy approval and a tested
-revocation response are production activation gates; if OAuth is revoked or
+`root:root 600`. In broker mode the pull runner needs no OAuth credentials.
+Nik's existing personal subscription is allowed under the recorded authorization;
+the pull runner remains behind the Unix-socket boundary. A tested revocation response remains
+required; if OAuth is revoked or
 limited, generation intentionally fails closed and operators disable the runner
 while existing editions remain available.
 
@@ -129,7 +124,7 @@ not hard-refuse or leave a first-time user blocked for days.
 Every successful job records input tokens, output tokens, token measurement
 source, generated image count, and runner wall time on `generation_jobs` in the
 same lease-guarded batch that publishes it. `/status` shows rolling-seven-day
-aggregates. OpenClaw 2026.7.1-beta.5 does not expose token usage in its local
+aggregates. The installed OpenClaw does not expose token usage in its local
 capability JSON, so the runner currently stores a deterministic UTF-8-byte/4
 estimate and labels it `estimated`; if a future envelope supplies bounded
 provider counts, it records them as `provider`. Image count and wall time are
@@ -137,7 +132,98 @@ measured directly. The initial 100-start setting, its worst-case call shape,
 and the production calibration procedure are documented in
 [`docs/usage-calibration.md`](../docs/usage-calibration.md).
 
-The dedicated ChatGPT OAuth subscription is not an API-key billing account, so
+The authorized ChatGPT OAuth subscription is not an API-key billing account, so
 the old API-dollar ledger does not represent its cost model. If the account
 moves to metered billing, disable the runner until a reviewed monetary budget
 gate is added.
+
+## Model policy
+
+Writing and illustration review use `openai/gpt-6-astra`; image generation
+is pinned to `openai/gpt-image-2.5-sunburst`. Update the Worker publication validator
+and the runner together: new active manifests must declare Astra provenance.
+Do not enable the updated runner against a Worker still enforcing the older
+text-model pin. Historical stored editions are not rewritten by this change.
+
+GPT-Image-2.5 Sunburst is the owner-selected illustration target. Before
+production activation, prove availability through the owner-authorized subscription
+OAuth transport and validate a real generated image. API availability alone is
+insufficient; do not fall back to Image-2 or an API key if OAuth rejects it.
+
+## Coordinated model cutover
+
+Before deploying the Astra/Sunburst Worker and runner together, stop the runner
+and drain or expire outstanding generation leases; do not mix old and new runners.
+`validateManifest` is called only by the runner publication endpoint
+(`src/runner.ts`), not when reading existing R2 editions. Existing published HTML
+remains readable. Live authorized-account canaries must capture the returned model
+and provider envelopes before activation; exact model checks intentionally fail
+closed until that transport is verified. There is no model/API-key fallback.
+
+Development dependency note: Miniflare 5.20260811.1-alpha pins sharp 0.35.2.
+The root override patches it to 0.35.4 (same minor line) for the libheif advisory
+GHSA-rgj7-g3m4-5g8c. Worker/D1/R2 E2E passes with that override. Remove it once
+the upstream Miniflare dependency includes the fixed patch.
+
+See the canonical [subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update) for authorization, shared-session effects, and recovery constraints.
+
+
+### Shared-owner inference service
+
+Install `runner/gitzette-inference.service` and the root-owned
+`runner/openclaw-broker.json` at `/etc/gitzette-runner/openclaw-broker.json`.
+Create `/var/lib/gitzette-inference` owned by the existing OpenClaw owner, mode
+0700. The supplied unit is host-specific: `User=tars` and
+`GITZETTE_BROKER_STATE=/home/tars/.openclaw` must identify the **same owner and
+canonical state directory** as the existing gateway. Do not point it at a copied
+state directory. The service shares OpenClaw's native cross-agent refresh lock.
+The socket directory is 0710 and socket 0660, accessible only to the service owner
+and `gitzette-runner` group. Only root owns the installed code/configuration.
+
+The broker has no TCP listener, credentials endpoint, arbitrary command/model
+selection, or caller-selected owner-side file paths. It processes one request
+at a time, bounds requests/results, removes temporary images, and returns only
+sanitized failure status. Its OpenClaw configuration denies all model tools,
+elevation, channels, and fallbacks, and pins one OAuth profile. The systemd unit
+hides the owner's home except for the canonical OpenClaw state needed by the CLI.
+Revocation/account limits still affect the shared subscription; coordination
+prevents separate clients racing the same refresh token, not provider outages.
+
+Set `GITZETTE_INFERENCE_SOCKET` in the runner environment, start the inference
+service first, and run the complete canary before enabling the pull runner.
+An unavailable broker fails closed; there is no automatic direct-CLI fallback.
+
+Install the broker's `runner/oauth-broker*.ts`, `runner/inference-error.ts`, and
+`runner/oauth-owner.ts`, and `src/models.ts` under root-owned `/opt/gitzette-inference` (preserve directories).
+Use the same tested Bun runtime as the pull runner. On this host the service was
+validated with `systemd-analyze verify` and a real Astra call under its filesystem
+restrictions. Provisioning must still validate a complete generation before
+turning on publication. Install a runner drop-in with `Requires=` and `After=`
+`gitzette-inference.service` when selecting broker mode. Do not enable a second
+copied-store inference service alongside it.
+
+### Deployment credential synchronization
+
+The protected Deploy job runs `scripts/provision-runner-credentials.ts` before
+the explicit read-only `check` phase, schema/profile preflights, then `sync`, Worker deploy, `retire`, and final binding verification. GitHub repository secrets
+`GITZETTE_RUNNER_SECRET` and `GITZETTE_STATUS_TOKEN` are prepared using private
+stdin, never literal command arguments or logs. The runner secret must match
+the root-only service environment. The status token is used only when its Worker
+binding is absent; an existing dashboard token is preserved. Existing GitHub
+OAuth client and session bindings must already exist and are never overwritten.
+Unknown bindings or missing application bindings stop the job before mutation.
+Legacy bindings remain intact until the Worker deploy succeeds. Only then does
+`retire` remove the four named unused bindings. For partial retirement failure,
+keep the new Worker in place and the pull runner stopped, rerun retirement and final binding
+verification; see the root README credential-cutover recovery procedure.
+This step changes credentials and therefore remains behind the production
+approval gate; it is not executed by pull-request CI. Keep the pull runner off
+until the reviewed Worker and immediate site smoke test succeed.
+
+Before each provider call, the broker checks the canonical owner metadata: the
+authorized profile must still be OAuth and any store-level order must contain
+only that profile. Missing/replaced profiles or a broadened order fail closed
+instead of letting OpenClaw recover to an unrelated credential. This deployment
+requires the installed state-db auth-store ownership; a future storage migration
+must update and revalidate the adapter before activation. No token values leave
+the owner process.

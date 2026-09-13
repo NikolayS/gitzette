@@ -12,6 +12,22 @@ describe("runtime profile suppression", () => {
     expect(incomplete.username).toBe("octocat");
   });
 
+  test("serves a stored pre-Astra edition without model revalidation", async () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(await Bun.file("schema.sql").text());
+    sqlite.query("INSERT INTO users(id,username) VALUES ('1','octocat')").run();
+    sqlite.query("INSERT INTO dispatches(user_id,week_key,r2_key) VALUES ('1','2026-W32','legacy.html')").run();
+    const env = { DB: new SqliteD1(sqlite), DISPATCHES: { async get(key: string) {
+      expect(key).toBe("legacy.html");
+      return { customMetadata: { model: "openai/gpt-5.6-sol" }, async text() { return '<article class="article"><h2>Pre-Astra headline</h2><p>Stored body</p></article>'; } };
+    } } } as never;
+    const app = new Hono().route("/", pageRoutes as never);
+    const response = await app.request("/octocat/2026-W32", {}, env);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("Pre-Astra headline");
+    sqlite.close();
+  });
+
   test("immediately hides public content and blocks generation without a deploy", async () => {
     const sqlite = new Database(":memory:");
     sqlite.exec("PRAGMA foreign_keys = ON");

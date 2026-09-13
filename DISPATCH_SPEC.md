@@ -9,9 +9,9 @@ replacing the failure mode documented here.
 These choices are safety and reliability constraints, not incidental implementation details:
 
 - Generation used to run synchronously inside the public Worker. That made long AI calls vulnerable to Worker lifetime limits, so the synchronous path is retired in favor of durable D1 jobs, leases, and an outbound-only runner.
-- The previous OpenRouter/Opus path is retired because production generation must use the dedicated ChatGPT OAuth identity. Provider fallbacks would silently cross the credential boundary.
+- The previous OpenRouter/Opus path is retired because production generation must use the owner-authorized ChatGPT OAuth identity. Provider fallbacks would silently cross the credential boundary.
 - "30 recent repositories" is not a valid historical collector: repository recency today does not prove activity in a requested past week. The canonical collector instead freezes events whose timestamps fall inside the exact ISO week.
-- `gpt-image-2` OAuth output is normalized locally because transparent output is not guaranteed. The runner removes the background, validates the result, and stores WebP at quality 82; publishing the raw model file is forbidden.
+- The Sunburst target keeps the previous image pipeline’s local background normalization; the September 9 OAuth canary confirmed opaque Sunburst generation and rejected direct transparent output. The complete locally processed image path passed; see docs/live-canary-2026-09-09.md. The runner removes the background, validates the result, and stores WebP at quality 82; publishing the raw model file is forbidden.
 - Illustrations are story-level editorial art, not one logo per repository. Active editions need at least two perceptually distinct images so a low-quality or duplicated image cannot satisfy the visual contract.
 - The 1024-pixel generation target preserves enough detail for cleanup and responsive rendering. Publication still enforces bounded dimensions and bytes.
 
@@ -20,10 +20,10 @@ Do not "simplify" these constraints without replacing the failure mode they addr
 ### Legacy invariants: retained or explicitly superseded
 
 - **Opus, not Sonnet** is superseded by the OAuth-only isolation boundary. The
-  dedicated account uses GPT-5.6 Sol; editorial quality is enforced by typed
+  authorized account uses GPT-6 Astra; editorial quality is enforced by typed
   evidence plus the five human-inspected canaries, not a silent provider fallback.
 - **`gpt-image-1`, quality low, WebP compression 60** is superseded by
-  `gpt-image-2` OAuth output followed by deterministic local cleanup and WebP
+  `gpt-image-2.5-sunburst` OAuth output followed by deterministic local cleanup and WebP
   quality 82. Raw model files are never published.
 - **Illustrations per article, never per repository** is retained as story-level
   `illustrationKey` values. Keys and hashes must be unique, and active editions
@@ -41,11 +41,11 @@ Do not "simplify" these constraints without replacing the failure mode they addr
 - Cloudflare is the public control plane: GitHub login, request quota, D1 queue/status, validation, R2, and serving.
 - A private runner claims work with outbound HTTPS. The host exposes no inbound endpoint.
 - The runner credential is narrow and rotatable. It is not an AI credential.
-- AI generation uses a dedicated OpenClaw/Codex identity with ChatGPT OAuth only: `openai/gpt-5.6-sol` for text and `gpt-image-2` for art. No OpenAI API key, OpenRouter, Anthropic, Google AI key, or provider fallback is allowed.
+- AI generation uses an isolated OpenClaw runner with the owner-authorized identity with ChatGPT OAuth only: `openai/gpt-6-astra` for text and `gpt-image-2.5-sunburst` for art. No OpenAI API key, OpenRouter, Anthropic, Google AI key, or provider fallback is allowed.
 - Repository, issue, PR, and commit text is hostile evidence, never an instruction.
 - ChatGPT OAuth is an account-level credential with a larger revocation and
-  availability blast radius than a scoped API key. Production requires a
-  dedicated non-personal GitZette account plus explicit account-policy approval.
+  availability blast radius than a scoped API key. Nik authorized sharing his existing subscription for production on September 9;
+  the pull runner is isolated; shared inference uses the canonical owner store, not a copied store or a separate subscription.
   There is deliberately no cross-provider fallback: revocation or throttling
   pauses new generation while already-published editions remain online.
 - Escaping and typed evidence prevent code/markup injection, but cannot prove
@@ -182,12 +182,39 @@ Before production activation:
    fixture only before cutover in a reviewed commit after investigating drift.
    `bun run db:init:local` is local-only and initializes an empty development database
    from the migration chain.
-2. Verify the OAuth store is owned by `gitzette-runner` mode `0700`, the runner
-   environment is `root:root` mode `0600`, the account is dedicated/non-personal,
-   and the account owner has approved the policy and revocation plan.
+2. In broker mode, verify the canonical OpenClaw owner store and refresh-lock path,
+   socket ownership/mode (`tars:gitzette-runner`, `0660`), and no copied credentials
+   in the pull runner. Only independent-login direct CLI installations use a
+   runner-owned OAuth store (`gitzette-runner`, `0700`). In both modes the runner
+   environment is `root:root` mode `0600`, the subscription identity is authorized by Nik,
+   and the shared-account revocation behavior is understood.
    Rotate `STATUS_TOKEN` independently with `wrangler secret put STATUS_TOKEN`;
    the dashboard accepts it only as `Authorization: Bearer ...`, never in URLs.
 3. Run the five canonical canaries: NikolayS W32, steipete W14, torvalds W16, one genuine Karpathy quiet week, and PhysShell W30.
 4. Inspect active output on mobile and desktop and verify at least two meaningful illustrations.
-5. Verify the dedicated runner has only OAuth auth and no AI API-key profile/fallback.
+5. Verify the inference profile is OAuth-only with no API-key fallback. Broker mode
+   pins the authorized canonical profile and sends no credentials to the pull runner.
 6. Deploy, then immediately run `bash /tmp/gl-dispatch/dispatch/smoke-test.sh` as required by the workspace rule.
+
+### Authorized subscription policy (September 9 update)
+
+Nik explicitly authorized his existing OAuth subscription for both GitZette
+canaries and production. A separate subscription is no longer a prerequisite.
+The Linux pull runner remains isolated behind a local inference socket. Sharing the subscription
+means revocation, refresh-token rotation, throttling, and provider account actions
+can affect both TARS and GitZette. GitZette serves multiple GitHub users, so its
+load shares the owner account limits. No API-key
+fallback is permitted. The production runner receives inference results, not
+OAuth credentials or another agent's configuration or tool access.
+
+The earlier copied canary profile shares a login session; filesystem isolation does not
+isolate refresh/revocation effects. Recovery must coordinate both clients, or
+establish a fresh runner login under the same authorized subscription. The
+release record documents the owner request, not an invented legal determination
+or an unrecorded acceptance of additional risks.
+
+Production activation uses the shared-owner inference service described in
+runner/README.md: one canonical OAuth store and native refresh lock, with a
+restricted local socket to the isolated pull runner. An independent login is
+not required when all inference uses that same credential owner. The temporary
+copied-session canary setup must not be used as a second refresh owner.

@@ -10,8 +10,9 @@ type SearchItem = {
   title?: string;
   html_url?: string;
   sha?: string;
-  commit?: { message?: string };
-  repository?: { full_name?: string };
+  commit?: { message?: string; committer?: { date?: string } };
+  updated_at?: string;
+  repository?: { full_name?: string; private?: boolean };
 };
 
 export class GitHubCollector implements Collector {
@@ -52,7 +53,7 @@ export class GitHubCollector implements Collector {
   }
 
   private async contributionRepositories(username: string, from: string, to: string): Promise<string[]> {
-    const query = `query($login:String!,$from:DateTime!,$to:DateTime!){user(login:$login){contributionsCollection(from:$from,to:$to){commitContributionsByRepository(maxRepositories:100){repository{nameWithOwner}}issueContributions(first:100){nodes{issue{repository{nameWithOwner}}}}pullRequestContributions(first:100){nodes{pullRequest{repository{nameWithOwner}}}}repositoryContributions(first:100){nodes{repository{nameWithOwner}}}}}}`;
+    const query = `query($login:String!,$from:DateTime!,$to:DateTime!){user(login:$login){contributionsCollection(from:$from,to:$to){commitContributionsByRepository(maxRepositories:100){repository{nameWithOwner visibility}}issueContributions(first:100){nodes{issue{repository{nameWithOwner visibility}}}}pullRequestContributions(first:100){nodes{pullRequest{repository{nameWithOwner visibility}}}}repositoryContributions(first:100){nodes{repository{nameWithOwner visibility}}}}}}`;
     const body = await this.github("https://api.github.com/graphql", {
       method: "POST",
       body: JSON.stringify({ query, variables: { login: username, from: `${from}T00:00:00Z`, to: `${to}T23:59:59Z` } }),
@@ -60,24 +61,40 @@ export class GitHubCollector implements Collector {
     if (body.errors || !body.data?.user) throw new Error("GitHub contribution collection failed");
     const collection = body.data.user.contributionsCollection;
     const repos = new Set<string>();
-    for (const row of collection.commitContributionsByRepository ?? []) repos.add(row.repository.nameWithOwner);
-    for (const node of collection.issueContributions?.nodes ?? []) repos.add(node.issue.repository.nameWithOwner);
-    for (const node of collection.pullRequestContributions?.nodes ?? []) repos.add(node.pullRequest.repository.nameWithOwner);
-    for (const node of collection.repositoryContributions?.nodes ?? []) repos.add(node.repository.nameWithOwner);
+    for (const row of collection.commitContributionsByRepository ?? []) addPublicRepo(repos,row.repository);
+    for (const node of collection.issueContributions?.nodes ?? []) addPublicRepo(repos,node.issue.repository);
+    for (const node of collection.pullRequestContributions?.nodes ?? []) addPublicRepo(repos,node.pullRequest.repository);
+    for (const node of collection.repositoryContributions?.nodes ?? []) addPublicRepo(repos,node.repository);
     return [...repos].filter(validRepo).sort();
   }
 
-  private async search(kind: "commits" | "issues", query: string): Promise<SearchItem[]> {
+  private async search(kind: "commits" | "issues", query: string, splitIncomplete = true): Promise<SearchItem[]> {
     const items: SearchItem[] = [];
     for (let page = 1; page <= 5; page++) {
       const url = new URL(`https://api.github.com/search/${kind}`);
-      url.searchParams.set("q", query);
+      url.searchParams.set("q", `is:public ${query}`);
       url.searchParams.set("sort", kind === "commits" ? "committer-date" : "updated");
       url.searchParams.set("order", "desc");
       url.searchParams.set("per_page", "100");
       url.searchParams.set("page", String(page));
       const body = await this.github(url.toString()) as { incomplete_results?: boolean; total_count?: number; items?: SearchItem[] };
-      if (body.incomplete_results || !Array.isArray(body.items)) throw new Error(`GitHub ${kind} search incomplete`);
+      if (!Array.isArray(body.items)) throw new Error(`GitHub ${kind} search incomplete`);
+      if (body.incomplete_results) {
+        // A global historical search can time out even below the result cap.
+        // Retry once as sequential daily windows; never accept partial data.
+        const range = query.match(/(?:committer-date|merged|created):(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})/);
+        if (!splitIncomplete || !range) throw new Error(`GitHub ${kind} search incomplete`);
+        const start = Date.parse(range[1] + "T00:00:00Z");
+        const end = Date.parse(range[2] + "T00:00:00Z");
+        const days = (end - start) / 86400000 + 1;
+        if (!Number.isInteger(days) || days < 1 || days > 7) throw new Error("invalid bounded search window");
+        const complete: SearchItem[] = [];
+        for (let day = 0; day < days; day++) {
+          const date = new Date(start + day * 86400000).toISOString().slice(0, 10);
+          complete.push(...await this.search(kind, query.replace(range[0], range[0].split(":")[0] + ":" + date + ".." + date), false));
+        }
+        return mergeSearchResults(kind, complete);
+      }
       items.push(...body.items);
       if (body.items.length < 100 || items.length >= Math.min(body.total_count ?? items.length, 500)) break;
     }
@@ -85,12 +102,12 @@ export class GitHubCollector implements Collector {
   }
 
   private async discussions(username: string, from: string, to: string): Promise<EvidenceItem[]> {
-    const query = `query($q:String!,$cursor:String){search(query:$q,type:DISCUSSION,first:100,after:$cursor){discussionCount pageInfo{hasNextPage endCursor} nodes{... on Discussion{id title url repository{nameWithOwner}}}}}`;
+    const query = `query($q:String!,$cursor:String){search(query:$q,type:DISCUSSION,first:100,after:$cursor){discussionCount pageInfo{hasNextPage endCursor} nodes{... on Discussion{id title url repository{nameWithOwner visibility}}}}}`;
     const nodes: any[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < 5; page++) {
       const body = await this.github("https://api.github.com/graphql", {
-        method: "POST", body: JSON.stringify({ query, variables: { q: `author:${username} created:${from}..${to}`, cursor } }),
+        method: "POST", body: JSON.stringify({ query, variables: { q: `is:public author:${username} created:${from}..${to}`, cursor } }),
       }) as any;
       const search = body.data?.search;
       if (body.errors || !search || !Array.isArray(search.nodes)) throw new Error("GitHub discussion search incomplete");
@@ -99,7 +116,7 @@ export class GitHubCollector implements Collector {
       if (typeof search.pageInfo.endCursor !== "string") throw new Error("GitHub discussion cursor missing");
       cursor = search.pageInfo.endCursor;
     }
-    return nodes.slice(0, 500).map((node: any) => ({
+    return nodes.filter((node:any) => isPublicRepository(node.repository)).slice(0, 500).map((node: any) => ({
       id: `discussion:${node.id}`,
       type: "discussion" as const,
       title: String(node.title).slice(0, 500),
@@ -120,7 +137,7 @@ export class GitHubCollector implements Collector {
     }
     return response.filter((release) => {
       const date = String(release.published_at ?? release.created_at ?? "").slice(0, 10);
-      return date >= from && date <= to;
+      return release.draft === false && date >= from && date <= to;
     }).map((release) => ({
       id: `release:${repo}:${release.id}`,
       type: "release" as const,
@@ -153,7 +170,7 @@ function add(items: Map<string, EvidenceItem>, item: EvidenceItem | null): void 
 
 function commitEvidence(item: SearchItem): EvidenceItem | null {
   const repo = item.repository?.full_name;
-  if (!item.sha || !repo || !validRepo(repo) || !isGitHubUrl(item.html_url)) return null;
+  if (item.repository?.private === true || !item.sha || !repo || !validRepo(repo) || !isGitHubUrl(item.html_url)) return null;
   return {
     id: `commit:${item.sha}`,
     type: "commit",
@@ -206,4 +223,22 @@ export function isoWeek(weekKey: string): { from: string; toExclusive: string; t
   const { monday, nextMonday, sunday } = parseIsoWeekKey(weekKey);
   const date = (value: Date) => value.toISOString().slice(0, 10);
   return { from: date(monday), toExclusive: date(nextMonday), toInclusive: date(sunday) };
+}
+
+// Match GitHub's descending search order before applying the weekly cap.
+export function mergeSearchResults(kind: "commits" | "issues", items: SearchItem[]): SearchItem[] {
+  const key = (item: SearchItem) => kind === "commits" ? `${item.repository?.full_name}:${item.sha}` : String(item.id);
+  const time = (item: SearchItem) => Date.parse((kind === "commits" ? item.commit?.committer?.date : item.updated_at) ?? "") || 0;
+  const ordered = [...items].sort((a,b) => time(b)-time(a) || key(a).localeCompare(key(b)));
+  const unique = new Map<string, SearchItem>();
+  for (const item of ordered) if (!unique.has(key(item))) unique.set(key(item),item);
+  return [...unique.values()].slice(0,500);
+}
+
+function isPublicRepository(repo: any): boolean {
+  if (!repo || !["PUBLIC","PRIVATE","INTERNAL"].includes(repo.visibility)) throw new Error("GitHub repository visibility missing");
+  return repo.visibility === "PUBLIC";
+}
+function addPublicRepo(repos: Set<string>, repo: any): void {
+  if (isPublicRepository(repo)) repos.add(repo.nameWithOwner);
 }

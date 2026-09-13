@@ -12,6 +12,12 @@ const base = {
 };
 
 describe("runner configuration boundary", () => {
+  test("broker configuration accepts only an explicit local socket path", () => {
+    expect(loadConfig({ ...base, GITZETTE_INFERENCE_SOCKET: "/run/gitzette-inference/infer.sock" }).inferenceSocket).toBe("/run/gitzette-inference/infer.sock");
+    for (const value of ["", "http://example.test", "relative.sock"]) {
+      expect(() => loadConfig({ ...base, GITZETTE_INFERENCE_SOCKET: value })).toThrow("absolute local path");
+    }
+  });
   test("accepts an HTTPS origin and emits a secret-free inference environment", () => {
     const config = loadConfig(base);
     expect(config.controlPlaneOrigin).toBe("https://gitzette.online");

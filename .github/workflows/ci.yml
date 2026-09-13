@@ -23,6 +23,8 @@ jobs:
             imagemagick-6.q16=8:6.9.12.98+dfsg1-5.2build2
           sudo install -o root -g root -m 0644 runner/imagemagick/policy.xml /etc/ImageMagick-6/policy.xml
       - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Verify patched Miniflare image dependency
+        run: bun -e 'if ((await Bun.file("node_modules/sharp/package.json").json()).version !== (await Bun.file("package.json").json()).overrides.sharp) throw new Error("patched sharp override missing")'
       - name: Verify systemd Bun invocation flag
         run: bun --no-env-file --version
       - name: Validate protected-main policy definition

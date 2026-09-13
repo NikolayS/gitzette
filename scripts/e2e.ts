@@ -1,3 +1,4 @@
+import { TEXT_MODEL } from "../src/models";
 import { expect } from "bun:test";
 import { ControlPlaneClient } from "../runner/control-plane";
 import { RunnerEngine } from "../runner/run";
@@ -31,7 +32,7 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 function manifest(weekKey: string, imageHashes: Record<string, string>) {
   return {
     generatorVersion: "e2e-1",
-    model: "openai/gpt-5.6-sol",
+    model: TEXT_MODEL,
     promptVersion: "e2e-editor-1",
     evidence: {
       state: "active",

@@ -32,7 +32,7 @@ export async function runPollLoop(engine: LoopEngine, pollSeconds: number, contr
           at: new Date().toISOString(),
           event: "oauth_auth_failure_alert",
           consecutiveAuthFailures,
-          action: "disable runner and restore the dedicated OAuth session",
+          action: "disable runner and restore the authorized OAuth owner session",
         }));
       }
     } catch (error) {

@@ -18,8 +18,8 @@ describe("canonical GitHub collector", () => {
         if (requestBody.query?.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
         return Response.json({ data: { user: { contributionsCollection: {
           commitContributionsByRepository: [
-            { repository: { nameWithOwner: "octocat/widget" } },
-            { repository: { nameWithOwner: "../evil" } },
+            { repository: { visibility: "PUBLIC", nameWithOwner: "octocat/widget" } },
+            { repository: { visibility: "PUBLIC", nameWithOwner: "../evil" } },
           ],
           issueContributions: { nodes: [] }, pullRequestContributions: { nodes: [] }, repositoryContributions: { nodes: [] },
         } } } });
@@ -88,7 +88,7 @@ describe("canonical GitHub collector", () => {
               id: `D${start + index}`,
               title: `Discussion ${start + index}`,
               url: `https://github.com/octocat/widget/discussions/${start + index}`,
-              repository: { nameWithOwner: "octocat/widget" },
+              repository: { visibility: "PUBLIC", nameWithOwner: "octocat/widget" },
             })),
           } } });
         }
@@ -103,4 +103,103 @@ describe("canonical GitHub collector", () => {
     expect(cursors).toEqual([null, "page-2"]);
     expect(evidence.items).toHaveLength(101);
   });
+});
+
+
+test("incomplete weekly searches use bounded daily windows and still fail closed", async () => {
+  for (const failDaily of [false, true]) {
+    const commitQueries: string[] = [];
+    const request = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/graphql") {
+        const body = JSON.parse(String(init?.body));
+        if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
+        return Response.json({ data: { user: { contributionsCollection: {} } } });
+      }
+      if (url.pathname !== "/search/commits") return Response.json({ items: [], incomplete_results: false });
+      const q = url.searchParams.get("q")!;
+      commitQueries.push(q);
+      const weekly = q.includes("2026-08-03..2026-08-09");
+      return Response.json({ incomplete_results: weekly || failDaily, items: weekly ? [] : [{
+        sha: q, html_url: "https://github.com/octocat/widget/commit/abc",
+        commit: { message: "Daily change" }, repository: { full_name: "octocat/widget" },
+      }] });
+    };
+    const collected = new GitHubCollector("test-token", request as typeof fetch).collect("octocat", "2026-W32");
+    if (failDaily) {
+      await expect(collected).rejects.toThrow("GitHub commits search incomplete");
+      expect(commitQueries).toHaveLength(2);
+    } else {
+      expect((await collected).items).toHaveLength(7);
+      expect(commitQueries).toHaveLength(8);
+      expect(commitQueries[1]).toContain("2026-08-03..2026-08-03");
+      expect(commitQueries[7]).toContain("2026-08-09..2026-08-09");
+    }
+  }
+});
+
+test('daily fallback deduplicates and selects newest weekly commits after merging over 500 results', async()=>{
+ const request=async(input:string|URL|Request,init?:RequestInit)=>{
+  const url=new URL(String(input));
+  if(url.pathname==='/graphql') {
+   const body=JSON.parse(String(init?.body));
+   return Response.json(body.query.includes('type:DISCUSSION')?{data:{search:{discussionCount:0,nodes:[]}}}:{data:{user:{contributionsCollection:{}}}});
+  }
+  if(url.pathname!=='/search/commits')return Response.json({items:[],incomplete_results:false});
+  const q=url.searchParams.get('q')!;
+  if(q.includes('2026-08-03..2026-08-09'))return Response.json({items:[],incomplete_results:true});
+  const date=q.match(/committer-date:(\d{4}-\d{2}-\d{2})/)![1];
+  return Response.json({incomplete_results:false,total_count:100,items:Array.from({length:100},(_,i)=>({sha:i===0?'common':`${date}-${i}`,html_url:`https://github.com/octocat/widget/commit/${i}`,repository:{full_name:'octocat/widget'},commit:{message:`Change ${i}`,committer:{date:new Date(Date.parse(date+'T00:00:00Z')+i*60000).toISOString()}}}))});
+ };
+ const result=await new GitHubCollector('test-token',request as typeof fetch).collect('octocat','2026-W32');
+ expect(result.items).toHaveLength(500);
+ expect(result.items[0].id).toBe('commit:2026-08-09-99');
+ expect(result.items.filter(x=>x.id==='commit:common')).toHaveLength(1);
+ expect(result.items.some(x=>x.id.startsWith('commit:2026-08-03-'))).toBe(false);
+});
+
+import {mergeSearchResults} from './github';
+test('daily issue selection follows updated time rather than the created/merged query day',()=>{
+ const result=mergeSearchResults('issues',[{id:1,updated_at:'2026-08-09T01:00:00Z'},{id:2,updated_at:'2026-08-08T01:00:00Z'},{id:1,updated_at:'2026-08-09T01:00:00Z'}]);
+ expect(result.map(x=>x.id)).toEqual([1,2]);
+});
+
+test('public collection excludes private/internal repositories and draft releases even with a privileged token',async()=>{
+ const releaseRepos:string[]=[];
+ const request=async(input:string|URL|Request,init?:RequestInit)=>{
+  const url=new URL(String(input));
+  if(url.pathname==='/graphql'){
+   const body=JSON.parse(String(init?.body));
+   expect(body.query).toContain('visibility');
+   if(body.query.includes('type:DISCUSSION')){
+    expect(body.variables.q).toContain('is:public');
+    return Response.json({data:{search:{discussionCount:2,nodes:[
+     {id:'private-discussion',title:'Private discussion',url:'https://github.com/example/private/discussions/1',repository:{nameWithOwner:'example/private',visibility:'PRIVATE'}},
+     {id:'public-discussion',title:'Public discussion',url:'https://github.com/example/public/discussions/2',repository:{nameWithOwner:'example/public',visibility:'PUBLIC'}},
+    ]}}});
+   }
+   return Response.json({data:{user:{contributionsCollection:{commitContributionsByRepository:[
+    {repository:{nameWithOwner:'example/private',visibility:'PRIVATE'}},
+    {repository:{nameWithOwner:'example/internal',visibility:'INTERNAL'}},
+    {repository:{nameWithOwner:'example/public',visibility:'PUBLIC'}},
+   ]}}}});
+  }
+  if(url.pathname.startsWith('/search/')){
+   expect(url.searchParams.get('q')).toContain('is:public');
+   return Response.json({items:[]});
+  }
+  releaseRepos.push(url.pathname);
+  return Response.json([
+   {id:1,name:'Draft',html_url:'https://github.com/example/public/releases/tag/draft',created_at:'2026-08-04T00:00:00Z',draft:true},
+   {id:2,name:'Published',html_url:'https://github.com/example/public/releases/tag/v1',published_at:'2026-08-04T00:00:00Z',draft:false},
+  ]);
+ };
+ const result=await new GitHubCollector('test-privileged-token',request as typeof fetch).collect('octocat','2026-W32');
+ expect(releaseRepos).toEqual(['/repos/example/public/releases']);
+ expect(result.items.map(x=>x.id)).toEqual(['discussion:public-discussion','release:example/public:2','repository:example/public']);
+});
+
+test('unknown repository visibility fails instead of declaring a quiet public week',async()=>{
+ const request=async(_input:string|URL|Request)=>Response.json({data:{user:{contributionsCollection:{commitContributionsByRepository:[{repository:{nameWithOwner:'example/repo'}}]}}}});
+ await expect(new GitHubCollector('test-token',request as typeof fetch).collect('octocat','2026-W32')).rejects.toThrow('visibility missing');
 });
