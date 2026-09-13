@@ -38,7 +38,7 @@ test("real socket transports results, sanitizes auth errors, and removes tempora
   await Bun.write(cli, `const fs = require('fs'); const a = process.argv; const prompt = a[a.indexOf('--prompt')+1];
     if (prompt === 'auth') { console.error('OAuth token expired PRIVATE_DIAGNOSTIC'); process.exit(1); }
     console.log(JSON.stringify({ok:true, outputs:[{text:prompt}]}));`);
-  const server = await startBroker({ socket: join(dir, 'socket'), state: dir, config: join(import.meta.dir, 'openclaw-broker.json'), work: dir, node: '/usr/bin/node', cli });
+  const server = await startBroker({ socket: join(dir, 'socket'), state: dir, config: join(import.meta.dir, 'openclaw-broker.json'), work: dir, node: process.execPath, cli });
   const argv = ['openclaw','infer','model','run','--prompt','hello'];
   try {
     expect(JSON.parse(await brokerInference(join(dir,'socket'), argv, 10000)).outputs[0].text).toBe('hello');
