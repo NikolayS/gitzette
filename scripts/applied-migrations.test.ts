@@ -48,6 +48,7 @@ describe("applied migration replay boundary", () => {
       "0004_normalize_github_usernames.sql",
       "0005_profile_suppressions.sql",
       "0006_artifact_cleanup_queue.sql",
+      "0007_revival_canaries.sql",
     ]);
   });
 });
