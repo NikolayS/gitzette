@@ -73,8 +73,23 @@ test('idle claim integrates opt-in archive work without preempting an ordinary j
 test('only the explicitly audited legacy repair pages can regenerate existing content',async()=>{
  const db=await fixture();try{
  for(const t of ARCHIVE_TARGETS) db.query('INSERT INTO dispatches(user_id,week_key,r2_key) VALUES(?,?,?)').run(t.username==='nikolays'?'1345402':t.username,t.weekKey,`legacy/${t.username}/${t.weekKey}`);
- for(let i=0;i<10;i++)enqueue(db);
+ for(let i=0;i<10;i++){enqueue(db);db.exec("UPDATE generation_jobs SET status='published'");}
  expect(rows(db).map(r=>(r as {id:string}).id).sort()).toEqual(ARCHIVE_TARGETS.filter(t=>t.repair).map(t=>t.id).sort());
  expect(db.query('SELECT COUNT(*) n FROM dispatches WHERE r2_key LIKE ?').get('legacy/%')).toEqual({n:184});
+ }finally{db.close();}
+});
+
+test('concurrent idle enqueues leave only one outstanding archive attempt, including retry waits',async()=>{
+ const db=await fixture();try{
+ const e=env(db);
+ await Promise.all(Array.from({length:12},()=>enqueueIdleArchiveJob(e,now,100)));
+ expect(rows(db).length).toBe(1);
+ for(const status of ['collecting','writing','illustrating','validating','retryable_failed']){
+ db.query('UPDATE generation_jobs SET status=?').run(status);
+ await Promise.all(Array.from({length:12},()=>enqueueIdleArchiveJob(e,now,100)));
+ expect(rows(db).length).toBe(1);
+ }
+ db.exec("UPDATE generation_jobs SET status='permanent_failed'");
+ await enqueueIdleArchiveJob(e,now,100);expect(rows(db).length).toBe(2);
  }finally{db.close();}
 });

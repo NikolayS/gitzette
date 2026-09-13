@@ -25,6 +25,7 @@ SELECT t.id,u.id,owner.id,t.week_key,'queued'
 FROM targets t JOIN users u ON u.username=t.username COLLATE NOCASE
 JOIN users owner ON owner.id=? AND owner.username='nikolays' COLLATE NOCASE
 WHERE NOT EXISTS (SELECT 1 FROM profile_suppressions p WHERE p.username=u.username COLLATE NOCASE OR p.username=owner.username COLLATE NOCASE)
+AND NOT EXISTS (SELECT 1 FROM generation_jobs outstanding WHERE outstanding.id LIKE 'b4cf1100-2026-4000-8000-%' AND outstanding.status IN ('queued','collecting','writing','illustrating','validating','retryable_failed'))
 AND (t.repair=1 OR NOT EXISTS (SELECT 1 FROM dispatches d WHERE d.user_id=u.id AND d.week_key=t.week_key AND d.r2_key IS NOT NULL))
 AND NOT EXISTS (SELECT 1 FROM generation_jobs j WHERE j.id=t.id OR (j.user_id=u.id AND j.week_key=t.week_key AND j.status IN ('queued','collecting','writing','illustrating','validating','retryable_failed','published')))
 AND (SELECT COUNT(*) FROM generation_jobs j WHERE j.capacity_started_at>=? OR (j.capacity_started_at IS NULL AND j.created_at>=? AND j.status IN ('queued','collecting','writing','illustrating','validating','retryable_failed'))) < ?

@@ -45,3 +45,5 @@ to stop new archive enqueueing without stopping normal generation or scheduling.
   legacy repairs passed real generation; a configured flag is not completion.
   Record missing/failed targets separately. The backlog is larger than one
   rolling-week budget, so do not promise same-day full completion.
+
+The insertion statement atomically permits only one outstanding archive job. Retryable failures reserve that slot until normal retry/expiry handling makes the job terminal; concurrent idle claims cannot accumulate an archive queue.
