@@ -23,3 +23,8 @@ test('deployment validates schema before credential mutation and retires only af
   expect(retire).toBeGreaterThan(deploy);
   expect(workflow.indexOf('bash scripts/check-production-secrets.sh')).toBeGreaterThan(retire);
 });
+test('observed legacy D1 and Google bindings retire only through the existing retirement plan',()=>{
+ const plan=credentialPlan([...app,'RUNNER_SECRET','STATUS_TOKEN','ADMIN_USER_ID','CF_D1_TOKEN','GOOGLE_AI_KEY']);
+ expect(plan).toEqual({put:['RUNNER_SECRET'],remove:['CF_D1_TOKEN','GOOGLE_AI_KEY']});
+ expect(()=>credentialPlan([...app,'UNREVIEWED_PROVIDER_KEY'])).toThrow('unreviewed Worker bindings');
+});

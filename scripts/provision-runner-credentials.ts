@@ -1,6 +1,6 @@
 /** Reviewed deployment-only synchronization. Never print or pass secret values as argv. */
 const existingAppBindings = ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "SESSION_SECRET"];
-const retired = ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN", "NEWSPAPERIFY_SECRET"];
+const retired = ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN", "NEWSPAPERIFY_SECRET", "CF_D1_TOKEN", "GOOGLE_AI_KEY"];
 export function credentialPlan(names: string[]) {
   if (new Set(names).size !== names.length) throw new Error("duplicate Worker binding names");
   const missingApp = existingAppBindings.filter(name => !names.includes(name));
