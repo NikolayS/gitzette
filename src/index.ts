@@ -20,6 +20,7 @@ export interface Env {
   MAX_QUEUE_AGE_SECONDS?: string;
   CLEANUP_SWEEP_ENABLED?: string;
   WEEKLY_GENERATION_ENABLED?: string;
+  ARCHIVE_BACKFILL_ENABLED?: string;
   RUNNER_SECRET: string;
   RUNNER_LEASE_SECONDS?: string;
 }

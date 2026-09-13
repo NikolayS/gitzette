@@ -53,6 +53,7 @@ for _attempt in $(seq 1 5); do
     --var MAX_QUEUE_AGE_SECONDS:20 \
     --var CLEANUP_SWEEP_ENABLED:true \
     --var WEEKLY_GENERATION_ENABLED:true \
+    --var ARCHIVE_BACKFILL_ENABLED:false \
     --var RUNNER_LEASE_SECONDS:2 \
     --show-interactive-dev-session=false >"$state_dir/wrangler.log" 2>&1 &
   server_pid=$!
