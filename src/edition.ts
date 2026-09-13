@@ -163,9 +163,13 @@ export function validateManifest(input: unknown, username: string, weekKey: stri
     if (manifest.model !== TEXT_MODEL) throw new Error(`active edition requires ${TEXT_MODEL_ID}`);
     if (edition.stories.length === 0) throw new Error("active edition has no stories");
     if (evidence.stats === undefined) throw new Error("active edition requires activity statistics");
-    const requiredIllustrations = edition.stories.length >= 3 ? ACTIVE_MAX_IMAGES : ACTIVE_MIN_IMAGES;
-    if (manifest.images.length < requiredIllustrations || usedIllustrations.size < requiredIllustrations) {
-      throw new Error(`active edition requires at least ${requiredIllustrations} illustrations`);
+    const requiredImageKeys = edition.stories.length >= 3
+      ? ["image-1.webp", "image-2.webp", "image-3.webp"]
+      : ["image-1.webp", "image-2.webp"];
+    if (imageKeys.size !== requiredImageKeys.length
+      || usedIllustrations.size !== requiredImageKeys.length
+      || requiredImageKeys.some((key) => !imageKeys.has(key) || !usedIllustrations.has(key))) {
+      throw new Error(`active edition requires exact illustration set: ${requiredImageKeys.join(", ")}`);
     }
   } else if (edition.stories.length !== 0 || manifest.images.length !== 0) {
     throw new Error("quiet edition must be deterministic and image-free");

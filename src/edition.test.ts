@@ -143,7 +143,20 @@ describe("typed publication manifest", () => {
     const manifest = activeManifest();
     manifest.images.pop();
     manifest.edition.stories.pop();
-    expect(() => validateManifest(manifest, "octocat", "2026-W32")).toThrow("requires at least 2 illustrations");
+    expect(() => validateManifest(manifest, "octocat", "2026-W32")).toThrow("requires exact illustration set: image-1.webp, image-2.webp");
+  });
+
+  test("requires the exact two-image key set for a two-story active edition", () => {
+    const extraArtifact = activeManifest();
+    extraArtifact.images.push({ key: "image-3.webp", contentType: "image/webp", sha256: "c".repeat(64) });
+    expect(() => validateManifest(extraArtifact, "octocat", "2026-W32")).toThrow("requires exact illustration set: image-1.webp, image-2.webp");
+
+    const shiftedKeys = activeManifest();
+    shiftedKeys.edition.stories[0].illustrationKey = "image-2.webp";
+    shiftedKeys.edition.stories[1].illustrationKey = "image-3.webp";
+    shiftedKeys.images[0].key = "image-2.webp";
+    shiftedKeys.images[1].key = "image-3.webp";
+    expect(() => validateManifest(shiftedKeys, "octocat", "2026-W32")).toThrow("requires exact illustration set: image-1.webp, image-2.webp");
   });
 
   test("requires three used illustrations for active editions with three or more stories", () => {
@@ -156,7 +169,7 @@ describe("typed publication manifest", () => {
       tag: "FEATURE",
     });
     insufficient.images.push({ key: "image-3.webp", contentType: "image/webp", sha256: "c".repeat(64) });
-    expect(() => validateManifest(insufficient, "octocat", "2026-W32")).toThrow("requires at least 3 illustrations");
+    expect(() => validateManifest(insufficient, "octocat", "2026-W32")).toThrow("requires exact illustration set: image-1.webp, image-2.webp, image-3.webp");
 
     const sufficient = activeManifest();
     sufficient.edition.stories.push({
