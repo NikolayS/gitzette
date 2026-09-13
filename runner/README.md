@@ -8,10 +8,12 @@ typed result, and submits it under the current lease.
 It renews the lease every 60 seconds while collection or inference is running;
 the Worker rejects stale heartbeats and all writes from an expired lease.
 
-The AI subprocesses receive a deliberately rebuilt environment containing only
-OpenClaw's isolated state paths. They do not receive the GitHub token, runner
-secret, AI API keys, TARS state, messaging configuration, or a tool-capable
-agent session. The OpenClaw config denies every agent tool; text and images use
+Inference subprocesses receive a deliberately rebuilt environment without the
+GitHub token, runner secret, AI API keys, messaging configuration, or a tool-capable
+agent session. In shared-owner broker mode only the owner-side subprocess can
+access the canonical OAuth state; the pull runner receives results, never that
+state or its credentials. Independent direct-CLI installations use their own
+isolated OAuth state. The OpenClaw config denies every agent tool; text and images use
 the direct `openclaw infer` capability surface. It intentionally contains no
 Gateway block, and the systemd service never starts a Gateway process.
 

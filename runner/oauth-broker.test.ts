@@ -132,3 +132,31 @@ test('real socket transfers image bytes both ways and cleans up failed image cal
     expect((await readdir(dir)).filter(x=>x.startsWith('inference-'))).toEqual([]);
   } finally { server.stop(true);await rm(dir,{recursive:true,force:true}); }
 });
+
+test('disconnect and deadline terminate the inference process group and release the socket',async()=>{
+ const {createConnection}=await import('node:net');
+ const {readFile,readdir}=await import('node:fs/promises');
+ const until=async(check:()=>Promise<boolean>,ms=1500)=>{const end=Date.now()+ms;while(Date.now()<end){if(await check())return;await Bun.sleep(10);}throw new Error('bounded condition not reached');};
+ const stopped=async(pid:number)=>{try{return /\) Z /.test(await readFile(`/proc/${pid}/stat`,'utf8'));}catch(e:any){if(e.code==='ENOENT')return true;throw e;}};
+ for(const mode of ['disconnect','deadline']){
+  const dir=await mkdtemp(join(tmpdir(),'gz-process-group-')),socket=join(dir,'socket'),pidsFile=join(dir,'pids.json'),cli=join(dir,'fake-cli.js');
+  await Bun.write(cli,`const fs=require('fs'),a=process.argv;
+   if(a[a.indexOf('--prompt')+1]==='hang') {
+    const child=require('child_process').spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{stdio:['ignore','inherit','inherit']});
+    fs.writeFileSync(${JSON.stringify(pidsFile)},JSON.stringify({parent:process.pid,child:child.pid}));process.on('SIGTERM',()=>{});setInterval(()=>{},1000);
+   } else console.log(JSON.stringify({ok:true,outputs:[{text:'ready'}]}));`);
+  const server=await startBroker({socket,state:dir,config:join(import.meta.dir,'openclaw-broker.json'),work:dir,node:process.execPath,cli,inferenceTimeoutMs:mode==='disconnect'?5000:500});
+  const raw=createConnection(socket);let pids:{parent:number;child:number}|undefined;
+  raw.on('error',()=>{});raw.on('data',()=>{});
+  try{
+   await new Promise<void>(resolve=>raw.once('connect',resolve));
+   const body=JSON.stringify({operation:'write',prompt:'hang'});
+   raw.write(`POST /infer HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+   await until(async()=>{try{pids=JSON.parse(await readFile(pidsFile,'utf8'));return true;}catch{return false;}});
+   if(mode==='disconnect')raw.destroy();
+   await until(async()=>await stopped(pids!.parent)&&await stopped(pids!.child));
+   await until(async()=>(await readdir(dir)).every(x=>!x.startsWith('inference-')));
+   expect(JSON.parse(await brokerInference(socket,['openclaw','infer','model','run','--prompt','ready'],2000)).outputs[0].text).toBe('ready');
+  }finally{raw.destroy();if(pids){try{process.kill(-pids.parent,'SIGKILL');}catch{}}server.stop(true);await rm(dir,{recursive:true,force:true});}
+ }
+},10000);

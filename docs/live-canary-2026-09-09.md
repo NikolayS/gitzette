@@ -99,3 +99,12 @@ not forced; refresh coordination is established by using the same installed
 canonical store/lock implementation, not by an artificial token-rotation test.
 
 These changes require exact-head CI and independent review before publication.
+
+## Public-only collection correction — September 13
+
+The original 235-item NikolayS W36 collection did not explicitly restrict every
+query to public repositories. It is superseded, not production-ready evidence.
+With `is:public` search qualifiers, explicit GraphQL PUBLIC visibility, and draft
+release exclusion, a fresh W36 collection returned 131 public evidence items.
+No edition from the revival has been published. Production canaries must collect
+freshly through the corrected public-only path; do not reuse the older bundle.

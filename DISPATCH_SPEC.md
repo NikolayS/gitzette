@@ -45,7 +45,7 @@ Do not "simplify" these constraints without replacing the failure mode they addr
 - Repository, issue, PR, and commit text is hostile evidence, never an instruction.
 - ChatGPT OAuth is an account-level credential with a larger revocation and
   availability blast radius than a scoped API key. Nik authorized sharing his existing subscription for production on September 9;
-  an isolated runner store is required, not a separate subscription.
+  the pull runner is isolated; shared inference uses the canonical owner store, not a copied store or a separate subscription.
   There is deliberately no cross-provider fallback: revocation or throttling
   pauses new generation while already-published editions remain online.
 - Escaping and typed evidence prevent code/markup injection, but cannot prove
@@ -182,14 +182,18 @@ Before production activation:
    fixture only before cutover in a reviewed commit after investigating drift.
    `bun run db:init:local` is local-only and initializes an empty development database
    from the migration chain.
-2. Verify the OAuth store is owned by `gitzette-runner` mode `0700`, the runner
-   environment is `root:root` mode `0600`, the subscription identity is the one authorized by Nik,
+2. In broker mode, verify the canonical OpenClaw owner store and refresh-lock path,
+   socket ownership/mode (`tars:gitzette-runner`, `0660`), and no copied credentials
+   in the pull runner. Only independent-login direct CLI installations use a
+   runner-owned OAuth store (`gitzette-runner`, `0700`). In both modes the runner
+   environment is `root:root` mode `0600`, the subscription identity is authorized by Nik,
    and the shared-account revocation behavior is understood.
    Rotate `STATUS_TOKEN` independently with `wrangler secret put STATUS_TOKEN`;
    the dashboard accepts it only as `Authorization: Bearer ...`, never in URLs.
 3. Run the five canonical canaries: NikolayS W32, steipete W14, torvalds W16, one genuine Karpathy quiet week, and PhysShell W30.
 4. Inspect active output on mobile and desktop and verify at least two meaningful illustrations.
-5. Verify the isolated runner store has only OAuth auth and no AI API-key profile/fallback.
+5. Verify the inference profile is OAuth-only with no API-key fallback. Broker mode
+   pins the authorized canonical profile and sends no credentials to the pull runner.
 6. Deploy, then immediately run `bash /tmp/gl-dispatch/dispatch/smoke-test.sh` as required by the workspace rule.
 
 ### Authorized subscription policy (September 9 update)

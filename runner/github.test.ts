@@ -18,8 +18,8 @@ describe("canonical GitHub collector", () => {
         if (requestBody.query?.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
         return Response.json({ data: { user: { contributionsCollection: {
           commitContributionsByRepository: [
-            { repository: { nameWithOwner: "octocat/widget" } },
-            { repository: { nameWithOwner: "../evil" } },
+            { repository: { visibility: "PUBLIC", nameWithOwner: "octocat/widget" } },
+            { repository: { visibility: "PUBLIC", nameWithOwner: "../evil" } },
           ],
           issueContributions: { nodes: [] }, pullRequestContributions: { nodes: [] }, repositoryContributions: { nodes: [] },
         } } } });
@@ -88,7 +88,7 @@ describe("canonical GitHub collector", () => {
               id: `D${start + index}`,
               title: `Discussion ${start + index}`,
               url: `https://github.com/octocat/widget/discussions/${start + index}`,
-              repository: { nameWithOwner: "octocat/widget" },
+              repository: { visibility: "PUBLIC", nameWithOwner: "octocat/widget" },
             })),
           } } });
         }
@@ -162,4 +162,44 @@ import {mergeSearchResults} from './github';
 test('daily issue selection follows updated time rather than the created/merged query day',()=>{
  const result=mergeSearchResults('issues',[{id:1,updated_at:'2026-08-09T01:00:00Z'},{id:2,updated_at:'2026-08-08T01:00:00Z'},{id:1,updated_at:'2026-08-09T01:00:00Z'}]);
  expect(result.map(x=>x.id)).toEqual([1,2]);
+});
+
+test('public collection excludes private/internal repositories and draft releases even with a privileged token',async()=>{
+ const releaseRepos:string[]=[];
+ const request=async(input:string|URL|Request,init?:RequestInit)=>{
+  const url=new URL(String(input));
+  if(url.pathname==='/graphql'){
+   const body=JSON.parse(String(init?.body));
+   expect(body.query).toContain('visibility');
+   if(body.query.includes('type:DISCUSSION')){
+    expect(body.variables.q).toContain('is:public');
+    return Response.json({data:{search:{discussionCount:2,nodes:[
+     {id:'private-discussion',title:'Private discussion',url:'https://github.com/example/private/discussions/1',repository:{nameWithOwner:'example/private',visibility:'PRIVATE'}},
+     {id:'public-discussion',title:'Public discussion',url:'https://github.com/example/public/discussions/2',repository:{nameWithOwner:'example/public',visibility:'PUBLIC'}},
+    ]}}});
+   }
+   return Response.json({data:{user:{contributionsCollection:{commitContributionsByRepository:[
+    {repository:{nameWithOwner:'example/private',visibility:'PRIVATE'}},
+    {repository:{nameWithOwner:'example/internal',visibility:'INTERNAL'}},
+    {repository:{nameWithOwner:'example/public',visibility:'PUBLIC'}},
+   ]}}}});
+  }
+  if(url.pathname.startsWith('/search/')){
+   expect(url.searchParams.get('q')).toContain('is:public');
+   return Response.json({items:[]});
+  }
+  releaseRepos.push(url.pathname);
+  return Response.json([
+   {id:1,name:'Draft',html_url:'https://github.com/example/public/releases/tag/draft',created_at:'2026-08-04T00:00:00Z',draft:true},
+   {id:2,name:'Published',html_url:'https://github.com/example/public/releases/tag/v1',published_at:'2026-08-04T00:00:00Z',draft:false},
+  ]);
+ };
+ const result=await new GitHubCollector('test-privileged-token',request as typeof fetch).collect('octocat','2026-W32');
+ expect(releaseRepos).toEqual(['/repos/example/public/releases']);
+ expect(result.items.map(x=>x.id)).toEqual(['discussion:public-discussion','release:example/public:2','repository:example/public']);
+});
+
+test('unknown repository visibility fails instead of declaring a quiet public week',async()=>{
+ const request=async(_input:string|URL|Request)=>Response.json({data:{user:{contributionsCollection:{commitContributionsByRepository:[{repository:{nameWithOwner:'example/repo'}}]}}}});
+ await expect(new GitHubCollector('test-token',request as typeof fetch).collect('octocat','2026-W32')).rejects.toThrow('visibility missing');
 });
