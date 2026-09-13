@@ -110,3 +110,22 @@ describe("legacy dispatch reads", () => {
     expect(boundUsernames).toEqual(["octocat", "octocat", "octocat", "octocat", "octocat", "octocat"]);
   });
 });
+
+describe('front-page freshness', () => {
+  test('orders edition weeks before backfill time, with latest publication first within a week', async () => {
+    const { Database } = await import('bun:sqlite');
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE users(id TEXT,username TEXT); CREATE TABLE dispatches(user_id TEXT,week_key TEXT,generated_at INTEGER,r2_key TEXT); CREATE TABLE profile_suppressions(username TEXT);
+      INSERT INTO users VALUES('1','nikolays'),('2','torvalds'),('3','steipete');
+      INSERT INTO dispatches VALUES('1','2026-W36',10,'new'),('2','2026-W10',999,'backfill'),('3','2026-W36',20,'newer');`);
+    try {
+      const env = { DB: { prepare(query: string) { return { async all() { return {results: db.query(query).all()}; } }; } } };
+      const app = new Hono().route('/',pageRoutes as never);
+      const response=await app.request('/',{},env as never);
+      expect(response.status).toBe(200);
+      const html=await response.text();
+      const rows=[...html.matchAll(/href="([^\"]+)" class="dispatch-row"/g)].map(m=>m[1]);
+      expect(rows).toEqual(['/steipete/2026-W36','/nikolays/2026-W36','/torvalds/2026-W10']);
+    } finally {db.close();}
+  });
+});
