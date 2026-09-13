@@ -16,6 +16,23 @@ function activeManifest(): PublicationManifest {
       items: [
         { id: "pr:1", type: "pull_request", title: "Fix parser", url: "https://github.com/octocat/widget/pull/1", repo: "octocat/widget" },
       ],
+      stats: {
+        period: { from: "2026-08-03", toInclusive: "2026-08-09" },
+        observedAt: "2026-08-10T00:00:00Z",
+        scopes: { releases: "discovered_public_contribution_repositories", repositories: "public_repositories_discovered_from_contributions_and_commit_search" },
+        contributionRepositories: { status: "complete" },
+        totals: {
+          publicCommits: { value: 1, coverage: { status: "complete" } },
+          openedPullRequests: { value: 1, coverage: { status: "complete" } },
+          mergedPullRequests: { value: 0, coverage: { status: "complete" } },
+          releases: { value: 0, coverage: { status: "complete" } },
+        },
+        repositories: [{
+          repo: "octocat/widget", url: "https://github.com/octocat/widget",
+          publicCommits: { value: 1, coverage: { status: "complete" } },
+          stars: { value: 17, observedAt: "2026-08-10T00:00:00Z", coverage: { status: "complete" } },
+        }],
+      },
     },
     edition: {
       headline: "The parser reaches the end",
@@ -47,6 +64,12 @@ function activeManifest(): PublicationManifest {
 describe("typed publication manifest", () => {
   test("accepts an evidence-backed active edition with two images", () => {
     expect(validateManifest(activeManifest(), "octocat", "2026-W32").edition.stories).toHaveLength(2);
+  });
+
+  test("rejects new active publications without weekly activity statistics", () => {
+    const manifest = activeManifest();
+    delete manifest.evidence.stats;
+    expect(() => validateManifest(manifest, "octocat", "2026-W32")).toThrow("active edition requires activity statistics");
   });
 
   test("retains the legacy nonempty-publication and known-source guards", () => {
@@ -210,8 +233,9 @@ describe("April broadsheet restoration", () => {
       expect(html).toContain(story.paragraphs[0]);
     }
     expect(html.split('href="https://github.com/octocat/widget/pull/1"').length-1).toBe(2);
-    expect(html).toContain('<span>1 cited sources</span>');
-    expect(html).toContain('Counts describe the sources cited in this edition');
+    expect(html).toContain('<span><strong>1</strong> public commits</span>');
+    expect(html).toContain('Counts cover the public activity collected for this week');
+    expect(html).not.toContain('Counts describe the sources cited in this edition');
     expect(html).toContain('<div class="dispatch-prose"><div class="dispatch-cutout"><img');
     expect(upgradeStructuredEdition(html)).toBe(html);
     expect(html.split("main.gitzette-edition{box-sizing").length-1).toBe(1);
