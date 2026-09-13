@@ -90,3 +90,40 @@ test('owner database startup failures retain auth classification over the socket
     expect(isOAuthAuthFailure(failure)).toBe(true);
   } finally { server.stop(true);await rm(dir,{recursive:true,force:true}); }
 });
+
+test('real socket transfers image bytes both ways and cleans up failed image calls', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'gz-image-socket-'));
+  const cli=join(dir,'fake-cli.js');
+  const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jWZkAAAAASUVORK5CYII=','base64');
+  await Bun.write(cli, `const fs=require('fs'),path=require('path'),a=process.argv,p=a[a.indexOf('--prompt')+1];
+    if(a.includes('generate')) {
+      const out=a[a.indexOf('--output')+1];
+      if(p!=='missing') fs.writeFileSync(out,p==='oversized'?Buffer.alloc(8*1024*1024+1):Buffer.from('${bytes.toString('base64')}','base64'));
+      console.log(JSON.stringify({ok:true,ownerLocal:path.dirname(out)===process.cwd()&&path.basename(out)==='output.png'}));
+    } else {
+      const input=a[a.indexOf('--file')+1];
+      if(p==='fail') process.exit(1);
+      console.log(JSON.stringify({ok:true,hex:fs.readFileSync(input).toString('hex'),ownerLocal:path.dirname(input)===process.cwd()&&path.basename(input)==='input.webp'}));
+    }`);
+  const socket=join(dir,'socket');
+  const server=await startBroker({socket,state:dir,config:join(import.meta.dir,'openclaw-broker.json'),work:dir,node:process.execPath,cli});
+  const output=join(dir,'runner-output.png'),input=join(dir,'runner-input.webp');
+  const gen=['openclaw','infer','image','generate','--prompt','good','--output',output];
+  const review=['openclaw','infer','image','describe','--prompt','good','--file',input];
+  const {readdir}=await import('node:fs/promises');
+  try {
+    expect(JSON.parse(await brokerInference(socket,gen,5000)).ownerLocal).toBe(true);
+    expect(Buffer.from(await Bun.file(output).arrayBuffer()).equals(bytes)).toBe(true);
+    await Bun.write(input,bytes);
+    const verdict=JSON.parse(await brokerInference(socket,review,5000));
+    expect(verdict.ownerLocal).toBe(true);expect(verdict.hex).toBe(bytes.toString('hex'));
+    for(const kind of ['missing','oversized']) {
+      gen[5]=kind;
+      await expect(brokerInference(socket,gen,5000)).rejects.toThrow();
+      expect(Buffer.from(await Bun.file(output).arrayBuffer()).equals(bytes)).toBe(true);
+      expect((await readdir(dir)).filter(x=>x.startsWith('inference-'))).toEqual([]);
+    }
+    review[5]='fail';await expect(brokerInference(socket,review,5000)).rejects.toThrow();
+    expect((await readdir(dir)).filter(x=>x.startsWith('inference-'))).toEqual([]);
+  } finally { server.stop(true);await rm(dir,{recursive:true,force:true}); }
+});

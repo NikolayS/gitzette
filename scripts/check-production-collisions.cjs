@@ -6,7 +6,7 @@
   }
   const envelope = document[0];
   if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)
-    || Object.hasOwn(envelope, "error") || !Array.isArray(envelope.results)) {
+    || envelope.success === false || Object.hasOwn(envelope, "error") || !Array.isArray(envelope.results)) {
     throw new Error("invalid production username-collision preflight response");
   }
   if (envelope.results.length !== 0) {

@@ -15,6 +15,7 @@ test("preflights distinguish policy failures from malformed input", async () => 
       ["check-production-collisions.cjs", '[]', "invalid production username-collision preflight response"],
       ["check-production-collisions.cjs", '[{"error":"unauthorized"}]', "invalid production username-collision preflight response"],
       ["check-production-collisions.cjs", '[{"success":false}]', "invalid production username-collision preflight response"],
+      ["check-production-collisions.cjs", '[{"success":false,"results":[]}]', "invalid production username-collision preflight response"],
 
     ]) {
       const file = join(dir, "input with spaces.json");
