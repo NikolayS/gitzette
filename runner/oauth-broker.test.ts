@@ -57,3 +57,36 @@ test("real socket transports results, sanitizes auth errors, and removes tempora
     expect((await readdir(dir)).filter(x => x.startsWith('inference-'))).toEqual([]);
   } finally { server.stop(true); await rm(dir,{recursive:true,force:true}); }
 }, 30000);
+
+test('unfinished uploads and SIGTERM-resistant children cannot monopolize the socket', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'gz-bounded-'));
+  const cli=join(dir,'fake-cli.js');
+  await Bun.write(cli, `const a=process.argv; if(a[a.indexOf('--prompt')+1]==='hang') { process.on('SIGTERM',()=>{}); setInterval(()=>{},1000); } else console.log(JSON.stringify({ok:true,outputs:[{text:'ready'}]}));`);
+  const socket=join(dir,'socket');
+  const server=await startBroker({socket,state:dir,config:join(import.meta.dir,'openclaw-broker.json'),work:dir,node:process.execPath,cli,bodyTimeoutMs:100,inferenceTimeoutMs:200});
+  const {createConnection}=await import('node:net');
+  const raw=createConnection(socket);
+  try {
+    await new Promise<void>((resolve,reject)=>{ raw.once('connect',resolve);raw.once('error',reject); });
+    const rejected=new Promise<string>(resolve=>raw.once('data',b=>resolve(b.toString())));
+    raw.write('POST /infer HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\n{');
+    expect(await rejected).toContain('400');
+    raw.destroy();
+    const argv=['openclaw','infer','model','run','--prompt','hang'];
+    await expect(brokerInference(socket,argv,5000)).rejects.toThrow();
+    argv[5]='ready';
+    expect(JSON.parse(await brokerInference(socket,argv,5000)).outputs[0].text).toBe('ready');
+  } finally { raw.destroy();server.stop(true);await rm(dir,{recursive:true,force:true}); }
+},10000);
+
+test('owner database startup failures retain auth classification over the socket', async () => {
+  const {checkOAuthOwner}=await import('./oauth-owner');
+  const dir=await mkdtemp(join(tmpdir(),'gz-owner-socket-'));
+  const socket=join(dir,'socket');
+  const server=await startBroker({socket,state:dir,config:join(import.meta.dir,'openclaw-broker.json'),work:dir,node:process.execPath,cli:'unused',beforeRequest:()=>checkOAuthOwner(dir,'openai:owner')});
+  try {
+    let failure:unknown;
+    try { await brokerInference(socket,['openclaw','infer','model','run','--prompt','hello'],5000); } catch(e) { failure=e; }
+    expect(isOAuthAuthFailure(failure)).toBe(true);
+  } finally { server.stop(true);await rm(dir,{recursive:true,force:true}); }
+});

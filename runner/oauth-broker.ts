@@ -53,7 +53,7 @@ export async function brokerInference(socket: string, argv: string[], timeout: n
   return result.output;
 }
 
-export async function startBroker(options: { socket: string; state: string; config: string; work: string; node: string; cli: string; beforeRequest?: () => void }) {
+export async function startBroker(options: { socket: string; state: string; config: string; work: string; node: string; cli: string; beforeRequest?: () => void; bodyTimeoutMs?: number; inferenceTimeoutMs?: number }) {
   validateBrokerConfig(await Bun.file(options.config).json());
   let busy = false;
   const server = Bun.serve({ unix: options.socket, maxRequestBodySize: 12 * 1024 * 1024,
@@ -65,22 +65,23 @@ export async function startBroker(options: { socket: string; state: string; conf
       let directory: string | undefined;
       try {
         let request: Request;
-        try { request = validateBrokerRequest(await req.json()); } catch { return new Response(null, { status: 400 }); }
+        try { request = validateBrokerRequest(JSON.parse(await boundedText(req.body!, 12 * 1024 * 1024, options.bodyTimeoutMs ?? 5000))); } catch { return new Response(null, { status: 400 }); }
         options.beforeRequest?.();
         directory = await mkdtemp(join(options.work, "inference-"));
         if (request.image) await Bun.write(join(directory, "input.webp"), Buffer.from(request.image, "base64"));
         const child = Bun.spawn([options.node, options.cli, ...brokerArguments(request, directory)], {
-          cwd: directory, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+          cwd: directory, detached: true, stdin: "ignore", stdout: "pipe", stderr: "pipe",
           env: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: options.work, TMPDIR: directory,
             OPENCLAW_STATE_DIR: options.state, OPENCLAW_CONFIG_PATH: options.config },
         });
-        const abort = () => child.kill();
+        const abort = () => { try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); } };
         req.signal.addEventListener("abort", abort, { once: true });
-        if (req.signal.aborted) child.kill();
-        const timer = setTimeout(() => child.kill(), 600_000);
+        if (req.signal.aborted) abort();
+        const deadline = options.inferenceTimeoutMs ?? 600_000;
+        const timer = setTimeout(abort, deadline);
         let output: string, stderr: string, code: number;
-        try { [output, stderr, code] = await Promise.all([boundedText(child.stdout, 2_000_000), boundedText(child.stderr, 100_000), child.exited]); }
-        catch { child.kill(); await child.exited; throw new Error("inference output exceeded limit"); }
+        try { [output, stderr, code] = await Promise.all([boundedText(child.stdout, 2_000_000, deadline + 1000), boundedText(child.stderr, 100_000, deadline + 1000), child.exited]); }
+        catch { abort(); await child.exited; throw new Error("inference output exceeded limit"); }
         finally { clearTimeout(timer); req.signal.removeEventListener("abort", abort); }
         // Raw provider diagnostics never cross the socket or enter logs.
         if (code !== 0) return new Response(null, { status: (classifyOpenClawFailure(stderr) === "auth" || classifyOpenClawFailure(output) === "auth") ? 401 : 502 });
@@ -92,7 +93,7 @@ export async function startBroker(options: { socket: string; state: string; conf
         }
         return Response.json({ output, image });
       } catch (error) { return new Response(null, { status: error instanceof OpenClawInferenceError && error.kind === "auth" ? 401 : 502 }); }
-      finally { if (directory) await rm(directory, { recursive: true, force: true }); busy = false; }
+      finally { try { if (directory) await rm(directory, { recursive: true, force: true }); } finally { busy = false; } }
     },
   });
   await chmod(options.socket, 0o660);
@@ -112,18 +113,20 @@ export function validateBrokerConfig(config: any): void {
   }
 }
 
-async function boundedText(stream: ReadableStream<Uint8Array>, limit: number): Promise<string> {
+async function boundedText(stream: ReadableStream<Uint8Array>, limit: number, timeoutMs: number): Promise<string> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("stream deadline exceeded")), timeoutMs); });
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await Promise.race([reader.read(), deadline]);
       if (done) break;
       size += value.byteLength;
       if (size > limit) throw new Error("response too large");
       chunks.push(value);
     }
     return Buffer.concat(chunks).toString("utf8");
-  } finally { reader.releaseLock(); }
+  } finally { clearTimeout(timer!); void reader.cancel().catch(() => {}); reader.releaseLock(); }
 }

@@ -203,15 +203,17 @@ copied-store inference service alongside it.
 ### Deployment credential synchronization
 
 The protected Deploy job runs `scripts/provision-runner-credentials.ts` before
-its existing secret/schema checks. GitHub repository secrets
+the explicit read-only `check` phase, schema/profile preflights, then `sync`, Worker deploy, `retire`, and final binding verification. GitHub repository secrets
 `GITZETTE_RUNNER_SECRET` and `GITZETTE_STATUS_TOKEN` are prepared using private
 stdin, never literal command arguments or logs. The runner secret must match
 the root-only service environment. The status token is used only when its Worker
 binding is absent; an existing dashboard token is preserved. Existing GitHub
 OAuth client and session bindings must already exist and are never overwritten.
 Unknown bindings or missing application bindings stop the job before mutation.
-The script retires only the four named old provider/legacy-runner bindings,
-then the normal strict binding check, schema migration and reviewed deploy run.
+Legacy bindings remain intact until the Worker deploy succeeds. Only then does
+`retire` remove the four named unused bindings. For partial retirement failure,
+keep the new Worker in place and the pull runner stopped, rerun retirement and final binding
+verification; see the root README credential-cutover recovery procedure.
 This step changes credentials and therefore remains behind the production
 approval gate; it is not executed by pull-request CI. Keep the pull runner off
 until the reviewed Worker and immediate site smoke test succeed.
