@@ -90,11 +90,19 @@ export function upgradeStructuredEdition(html: string): string {
       for (const citation of body.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>/g)) {
         try {
           const u = new URL(citation[1].replace(/&amp;/g, '&'));
-          let parts = u.pathname.split('/').filter(Boolean);
-          if (u.hostname === 'api.github.com' && parts[0] === 'repos') parts = parts.slice(1);
-          else if (u.hostname !== 'github.com') continue;
-          if (parts.length < 2 || sources.has(u.href)) continue;
+          if (!['github.com', 'api.github.com'].includes(u.hostname) || sources.has(u.href)) continue;
           sources.add(u.href);
+          let parts = u.pathname.split('/').filter(Boolean);
+          if (u.hostname === 'api.github.com') {
+            if (parts[0] !== 'repos') continue;
+            parts = parts.slice(1);
+          } else {
+            // GitHub's global/profile/organization routes do not identify repositories.
+            const reserved = new Set(['orgs','users','organizations','marketplace','topics','collections','settings','search','login','logout','signup','join','explore','sponsors','notifications','new','codespaces','features','enterprise','pricing','about','security','site','apps','events','account','copilot','discussions','issues','pulls','trending']);
+            if (reserved.has(parts[0]?.toLowerCase())) continue;
+            if (parts.length > 2 && !['pull','pulls','issues','commit','commits','releases','tree','blob','compare','actions','discussions','wiki','tags','branches','milestones','projects'].includes(parts[2])) continue;
+          }
+          if (parts.length < 2) continue;
           const repo = `${parts[0]}/${parts[1]}`.toLowerCase();
           repos.set(repo, (repos.get(repo) ?? 0) + 1);
         } catch { /* Only count recognizable source destinations. */ }
