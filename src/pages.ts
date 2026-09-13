@@ -298,14 +298,13 @@ async function fetchAndServeDispatch(
           <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#666;">${week_key.replace(/^\d{4}-/, "")}</span>
         </div>`;
     const ownerBar = isOwner
-      ? `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
+      ? `<div style="position:sticky;top:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
           ${breadcrumb}
           <div style="display:flex;gap:12px;align-items:center;flex-shrink:0;">
             ${weekNavBar(username, week_key, prevExists, nextExists)}
             <button style="background:none;border:1px solid #555;color:#aaa;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 10px;cursor:pointer;" onmouseover="this.style.borderColor='#f7f4ee';this.style.color='#f7f4ee'" onmouseout="this.style.borderColor='#555';this.style.color='#aaa'" onclick="regenerate()">regenerate</button>
           </div>
         </div>
-        <div style="min-height:48px;"></div>
         <script>
         ${generationRequestClient()}
         var _regenPending=false,_regenTimer=null;
@@ -330,13 +329,13 @@ async function fetchAndServeDispatch(
           },5000);
         }
         </script>`
-      : `<div style="position:fixed;top:0;left:0;right:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
+      : `<div style="position:sticky;top:0;z-index:999;background:#0f0f0f;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;gap:12px;flex-wrap:wrap;">
           ${breadcrumb}
           <div style="flex-shrink:0;">
             ${weekNavBar(username, week_key, prevExists, nextExists)}
           </div>
         </div>
-        <div style="min-height:40px;"></div>`;
+        `;
 
     const out = processedHtml
       .replace("</head>", `${IMG_FIX_STYLE}</head>`)

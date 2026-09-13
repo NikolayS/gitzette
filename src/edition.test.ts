@@ -201,6 +201,11 @@ describe("April broadsheet restoration", () => {
     const grouped = upgradeStructuredEdition(mixedCase);
     expect(grouped).toContain('<span>1 repositories</span>');
     expect(grouped).toContain('<span>octocat/widget</span><strong>2</strong>');
+    const apiCitation = mixedCase.replace('https://github.com/OctoCat/Widget/pull/1', 'https://api.github.com/repos/OctoCat/Widget/pulls/1');
+    const apiGrouped = upgradeStructuredEdition(apiCitation);
+    expect(apiGrouped).toContain('<span>2 cited sources</span>');
+    expect(apiGrouped).toContain('<span>1 repositories</span>');
+    expect(apiGrouped).toContain('<span>octocat/widget</span><strong>2</strong>');
     const migrated = upgradeStructuredEdition(previous);
     expect(migrated).not.toContain('max-width:1180px');
     expect(migrated).toContain('<style>body{margin:0}</style>');

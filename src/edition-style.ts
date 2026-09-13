@@ -62,7 +62,7 @@ main.gitzette-edition{box-sizing:border-box;display:block;max-width:960px;margin
 .gitzette-edition .sources summary{cursor:pointer}
 .gitzette-edition .sources ol{margin:12px 0 0;padding-left:20px}
 .gitzette-edition .sources li{margin:0 0 9px;padding-left:3px}
-@media(max-width:700px){main.gitzette-edition{margin:0}.gitzette-edition .dispatch-body{grid-template-columns:minmax(0,1fr);padding:20px;gap:24px}.gitzette-edition>header{padding:18px 20px 14px}.gitzette-edition .dispatch-kicker{font-size:9px}.gitzette-edition .dispatch-sidebar{border-top:3px solid #0f0f0f;padding-top:20px}.gitzette-edition article h2{font-size:24px}}
+@media(max-width:700px){main.gitzette-edition{margin:0}.gitzette-edition .dispatch-body{grid-template-columns:minmax(0,1fr);padding:20px;gap:24px}.gitzette-edition>header{padding:18px 20px 14px}.gitzette-edition .dispatch-kicker{font-size:9px;flex-direction:column;gap:4px}.gitzette-edition .dispatch-sidebar{border-top:3px solid #0f0f0f;padding-top:20px}.gitzette-edition article h2{font-size:24px}}
 @media print{.gitzette-edition details.sources{display:block}.gitzette-edition details.sources>*{display:block}.gitzette-edition details.sources::details-content{display:block;content-visibility:visible;height:auto}}
 `;
 
@@ -90,8 +90,10 @@ export function upgradeStructuredEdition(html: string): string {
       for (const citation of body.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>/g)) {
         try {
           const u = new URL(citation[1].replace(/&amp;/g, '&'));
-          const parts = u.pathname.split('/').filter(Boolean);
-          if (u.hostname !== 'github.com' || parts.length < 2 || sources.has(u.href)) continue;
+          let parts = u.pathname.split('/').filter(Boolean);
+          if (u.hostname === 'api.github.com' && parts[0] === 'repos') parts = parts.slice(1);
+          else if (u.hostname !== 'github.com') continue;
+          if (parts.length < 2 || sources.has(u.href)) continue;
           sources.add(u.href);
           const repo = `${parts[0]}/${parts[1]}`.toLowerCase();
           repos.set(repo, (repos.get(repo) ?? 0) + 1);
