@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+const previousPresentationStyle = readFileSync(new URL("./fixtures/pr74-presentation.css", import.meta.url), "utf8");
 import { upgradeStructuredEdition } from "./edition-style";
 import { describe, expect, test } from "bun:test";
 import { AI_ACTIVITY_NOTICE, escapeHtml, renderEdition, validateManifest, type PublicationManifest } from "./edition";
@@ -194,6 +196,13 @@ describe("April broadsheet restoration", () => {
     expect(html.split("main.gitzette-edition{box-sizing").length-1).toBe(1);
     expect(upgradeStructuredEdition(html).split("main.gitzette-edition{box-sizing").length-1).toBe(1);
     const raw = (week: string) => `<!DOCTYPE html><html><head></head><body><main class="gitzette-edition"><header><p>@octocat · ${week}</p></header><article><h2>Story</h2><p>Deck</p><p>Prose</p><details class="sources"><summary>Sources</summary></details></article><footer>End</footer></main></body></html>`;
+    const previous = raw("2026-W32").replace('</head>', `<style>body{margin:0}${previousPresentationStyle}</style><style>${previousPresentationStyle}</style><style>.unrelated{color:red}</style></head>`);
+    const migrated = upgradeStructuredEdition(previous);
+    expect(migrated).not.toContain('max-width:1180px');
+    expect(migrated).toContain('<style>body{margin:0}</style>');
+    expect(migrated).toContain('<style>.unrelated{color:red}</style>');
+    expect(migrated.split('main.gitzette-edition{box-sizing').length-1).toBe(1);
+    expect(upgradeStructuredEdition(migrated)).toBe(migrated);
     expect(upgradeStructuredEdition(raw("2026-W53"))).toContain("Dec 28, 2026 – Jan 3, 2027");
     expect(upgradeStructuredEdition(raw("2026-W01"))).toContain("Dec 29, 2025 – Jan 4, 2026");
   });

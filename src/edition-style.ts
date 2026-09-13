@@ -1,3 +1,24 @@
+// Exact PR74 stylesheet: remove only these known rules from stored structured HTML.
+const PREVIOUS_PRESENTATION_STYLE = `
+main.gitzette-edition{box-sizing:border-box;max-width:1180px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 28px}
+.gitzette-edition>header,.gitzette-edition>footer{grid-column:1/-1}
+.gitzette-edition>header{text-align:center;padding-bottom:20px}
+.gitzette-edition>header h1{font-size:clamp(30px,4vw,48px);line-height:1.1;margin:12px 0}
+.gitzette-edition>article{min-width:0;overflow-wrap:anywhere}
+.gitzette-edition>article h2{font-size:25px;line-height:1.15;margin:12px 0}
+.gitzette-edition>article img{float:none;display:block;width:100%;height:auto;max-height:230px;object-fit:contain;margin:0 auto 20px}
+.gitzette-edition>footer{padding-top:20px}
+.gitzette-edition a,.gitzette-edition a:visited{color:#292720;text-decoration-color:#aaa393;text-underline-offset:3px}
+.gitzette-edition a:hover{color:#000;text-decoration-color:currentColor}
+.gitzette-edition a:focus-visible,.gitzette-edition summary:focus-visible{outline:2px solid #514b3f;outline-offset:3px}
+.gitzette-edition .sources{font:12px/1.5 Georgia,serif;color:#625c50;margin:20px 0 0;border-top:1px solid #d8d1c3;padding-top:10px}
+.gitzette-edition .sources summary{cursor:pointer;letter-spacing:.04em}
+.gitzette-edition .sources ol{margin:12px 0 0;padding-left:20px}
+.gitzette-edition .sources li{margin:0 0 9px;padding-left:3px}
+@media(max-width:999px){main.gitzette-edition{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:699px){main.gitzette-edition{display:block;margin:0;padding:20px}.gitzette-edition>article img{width:100%;max-height:230px}.gitzette-edition>header h1{font-size:32px}}
+`;
+
 // The April broadsheet: stacked stories, a narrow sidebar, and cutout text flow.
 export const EDITION_STYLE = `
 main.gitzette-edition{box-sizing:border-box;display:block;max-width:960px;margin:24px auto;padding:0;background:#f7f4ee;border:1px solid #c8c2b4;box-shadow:0 2px 12px #0002;color:#0f0f0f;font:15px/1.6 Georgia,serif}
@@ -105,6 +126,11 @@ export function upgradeStructuredEdition(html: string): string {
       return `<main class="gitzette-edition"><header>${header}</header><div class="dispatch-bar"><span>${stories.length} stories</span><span>${sources.size} cited sources</span><span>${repos.size} repositories</span></div><div class="dispatch-body"><section class="dispatch-stories" aria-label="Stories">${wrapped}</section>${sidebar}</div>${footer}</main>`;
     });
   }
+  // PR74 stored this exact CSS in anonymous style blocks, sometimes alongside base CSS.
+  result = result.replace(/<style>([\s\S]*?)<\/style>/g, (_block, css: string) => {
+    const retained = css.split(PREVIOUS_PRESENTATION_STYLE).join('');
+    return retained.trim() ? `<style>${retained}</style>` : '';
+  });
   // Refresh a prior version of the serving stylesheet instead of accumulating it.
   result = result.replace(/<style id="gitzette-edition-style">[\s\S]*?<\/style>/g,'');
   return result.replace('</head>', `<style id="gitzette-edition-style">${EDITION_STYLE}</style></head>`);
