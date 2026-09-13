@@ -128,6 +128,11 @@ export class GitHubCollector implements Collector {
       url.searchParams.set("page", String(page));
       const body = await this.github(url.toString()) as { incomplete_results?: boolean; total_count?: number; items?: SearchItem[] };
       if (!Array.isArray(body.items)) throw new Error(`GitHub ${kind} search incomplete`);
+      if (!Number.isSafeInteger(body.total_count) || body.total_count! < 0) throw new Error(`GitHub ${kind} search total missing`);
+      if (page === 1) total = body.total_count!;
+      else if (body.total_count !== total) throw new Error(`GitHub ${kind} search total changed during pagination`);
+      if (body.items.length > 100) throw new Error(`GitHub ${kind} search page too large`);
+      for (const item of body.items) assertSearchItem(kind, query, item);
       if (body.incomplete_results) {
         // A global historical search can time out even below the result cap.
         // Retry once as sequential daily windows; never accept partial data.
@@ -150,20 +155,14 @@ export class GitHubCollector implements Collector {
         const merged = mergeSearchResults(kind, complete);
         return { items: merged, total: completeTotal, itemCoverage: truncated || completeTotal > merged.length ? { status: "truncated", observed: merged.length, limit: 500 } : { status: "complete" } };
       }
-      if (page === 1) {
-        if (body.total_count === undefined && body.items.length < 100) total = body.items.length;
-        else {
-          if (!Number.isSafeInteger(body.total_count) || body.total_count! < 0) throw new Error(`GitHub ${kind} search total missing`);
-          total = body.total_count!;
-        }
-      }
       items.push(...body.items);
-      if (body.items.length < 100 || items.length >= Math.min(body.total_count ?? items.length, 500)) break;
+      if (body.items.length < 100 || items.length >= Math.min(total, 500)) break;
     }
     // Search pages can shift while they are being read and repeat an item.
     // Keep GitHub's total_count as the aggregate, but never double-count a
     // retained item when attributing commits to repositories or citing it.
     const selected = mergeSearchResults(kind, items);
+    if (selected.length > total) throw new Error(`GitHub ${kind} search items exceed total`);
     return { items: selected, total, itemCoverage: total > selected.length ? { status: "truncated", observed: selected.length, limit: 500 } : { status: "complete" } };
   }
 
@@ -261,6 +260,30 @@ function issueEvidence(item: SearchItem, type: "pull_request" | "issue"): Eviden
   const repo = `${parts[0]}/${parts[1]}`;
   if (!validRepo(repo)) return null;
   return { id: `${type}:${repo}#${item.number}`, type, title: item.title.slice(0, 500), url: item.html_url!, repo };
+}
+
+function assertSearchItem(kind: "commits" | "issues", query: string, item: SearchItem): void {
+  if (!item || typeof item !== "object") throw new Error(`GitHub ${kind} search item invalid`);
+  if (kind === "commits") {
+    const repo = item.repository?.full_name;
+    if (typeof item.sha !== "string" || !item.sha || item.sha.length > 100
+      || typeof repo !== "string" || !validRepo(repo) || item.repository?.private === true
+      || !isGitHubUrl(item.html_url)) throw new Error("GitHub commits search item invalid");
+    const parts = new URL(item.html_url!).pathname.split("/").filter(Boolean);
+    if (parts.length < 4 || `${parts[0]}/${parts[1]}`.toLowerCase() !== repo.toLowerCase() || parts[2] !== "commit" || !parts[3]) {
+      throw new Error("GitHub commits search item invalid");
+    }
+    return;
+  }
+  if (!Number.isSafeInteger(item.id) || item.id! <= 0 || !Number.isSafeInteger(item.number) || item.number! <= 0
+    || typeof item.title !== "string" || !item.title.trim() || item.title.length > 500 || !isGitHubUrl(item.html_url)) {
+    throw new Error("GitHub issues search item invalid");
+  }
+  const parts = new URL(item.html_url!).pathname.split("/").filter(Boolean);
+  const expectedPath = query.includes("is:pr") ? "pull" : "issues";
+  if (parts.length < 4 || !validRepo(`${parts[0]}/${parts[1]}`) || parts[2] !== expectedPath || Number(parts[3]) !== item.number) {
+    throw new Error("GitHub issues search item invalid");
+  }
 }
 
 function firstLine(value: string): string {

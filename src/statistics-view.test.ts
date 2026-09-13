@@ -11,7 +11,7 @@ function statistics(): ActivityStatistics {
       repositories: "public_repositories_discovered_from_contributions_and_commit_search",
     },
     totals: {
-      publicCommits: { value: 42, coverage: { status: "complete" } },
+      publicCommits: { value: 32, coverage: { status: "complete" } },
       openedPullRequests: { value: 7, coverage: { status: "complete" } },
       mergedPullRequests: { value: 5, coverage: { status: "complete" } },
       releases: { value: 2, coverage: { status: "complete" } },

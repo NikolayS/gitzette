@@ -98,6 +98,7 @@ function validateCountMetric(value: unknown, field: string): CountMetric {
   if (coverage.status === "unavailable") {
     if (value.value !== null) throw new Error(`invalid ${field}.value`);
   } else natural(value.value, `${field}.value`);
+  if (coverage.status === "truncated" && value.value !== coverage.observed) throw new Error(`invalid ${field}.value`);
   return value as unknown as CountMetric;
 }
 
@@ -142,6 +143,15 @@ export function validateActivityStatistics(value: unknown, weekKey?: string): Ac
     exact(row.stars, "statistics repository.stars", ["value", "coverage", "observedAt"]);
     validateCountMetric({ value: row.stars.value, coverage: row.stars.coverage }, "statistics repository.stars metric");
     isoInstant(row.stars.observedAt, "statistics repository.stars.observedAt");
+  }
+  const publicCommitTotal = value.totals.publicCommits as unknown as CountMetric;
+  if (publicCommitTotal.coverage.status === "complete") {
+    const repositoryMetrics = (value.repositories as unknown as RepositoryStatistics[]).map((row) => row.publicCommits);
+    const observed = repositoryMetrics.reduce((sum, metric) => sum + (metric.value ?? 0), 0);
+    if (observed > publicCommitTotal.value!) throw new Error("statistics repository public commits exceed total");
+    if (repositoryMetrics.every((metric) => metric.coverage.status === "complete") && observed !== publicCommitTotal.value) {
+      throw new Error("statistics repository public commits do not match total");
+    }
   }
   return value as unknown as ActivityStatistics;
 }

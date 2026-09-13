@@ -26,8 +26,8 @@ describe("canonical GitHub collector", () => {
         } } } });
       }
       if (url.includes("/releases?")) return Response.json([]);
-      if (url.includes("/search/commits")) return Response.json({ incomplete_results: false, items: [{ sha: "abc", html_url: "https://github.com/octocat/widget/commit/abc", commit: { message: "Fix parser\nbody" }, repository: { full_name: "octocat/widget" } }] });
-      return Response.json({ incomplete_results: false, items: [] });
+      if (url.includes("/search/commits")) return Response.json({ incomplete_results: false, total_count: 1, items: [{ sha: "abc", html_url: "https://github.com/octocat/widget/commit/abc", commit: { message: "Fix parser\nbody" }, repository: { full_name: "octocat/widget" } }] });
+      return Response.json({ incomplete_results: false, total_count: 0, items: [] });
     };
     const evidence = await new GitHubCollector("token", request as typeof fetch).collect("OctoCat", "2026-W32");
     expect(urls.every((url) => new URL(url).hostname === "api.github.com")).toBe(true);
@@ -105,6 +105,71 @@ describe("canonical GitHub collector", () => {
     expect(result.items.filter((item: any) => item.type === "commit")).toHaveLength(100);
   });
 
+  test("fails closed on changing totals and when unique search items exceed a stable total", async () => {
+    for (const { secondPageTotal, error } of [
+      { secondPageTotal: 102, error: "GitHub commits search total changed during pagination" },
+      { secondPageTotal: 100, error: "GitHub commits search total changed during pagination" },
+      { secondPageTotal: 101, error: "GitHub commits search items exceed total" },
+    ]) {
+      const request = async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/graphql") {
+          const body = JSON.parse(String(init?.body));
+          return Response.json(body.query.includes("type:DISCUSSION")
+            ? { data: { search: { discussionCount: 0, nodes: [] } } }
+            : { data: { user: { contributionsCollection: {} } } });
+        }
+        if (url.pathname !== "/search/commits") return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+        const page = Number(url.searchParams.get("page"));
+        const start = page === 1 ? 0 : 100;
+        const count = page === 1 ? 100 : 2;
+        return Response.json({
+          incomplete_results: false,
+          total_count: page === 1 ? 101 : secondPageTotal,
+          items: Array.from({ length: count }, (_, offset) => ({
+            sha: `sha-${start + offset}`,
+            html_url: `https://github.com/octocat/widget/commit/sha-${start + offset}`,
+            commit: { message: `Commit ${start + offset}` },
+            repository: { full_name: "octocat/widget" },
+          })),
+        });
+      };
+      await expect(new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32"))
+        .rejects.toThrow(error);
+    }
+  });
+
+  test("requires explicit totals and valid public search items before certifying statistics", async () => {
+    const validCommit = {
+      sha: "abc", html_url: "https://github.com/octocat/widget/commit/abc",
+      commit: { message: "Change" }, repository: { full_name: "octocat/widget", private: false },
+    };
+    const validPr = { id: 1, number: 1, title: "PR", html_url: "https://github.com/octocat/widget/pull/1" };
+    const cases = [
+      { path: "/search/commits", response: { incomplete_results: false, items: [] }, error: "GitHub commits search total missing" },
+      { path: "/search/commits", response: { incomplete_results: false, total_count: 1, items: [{ ...validCommit, sha: undefined }] }, error: "GitHub commits search item invalid" },
+      { path: "/search/commits", response: { incomplete_results: false, total_count: 1, items: [{ ...validCommit, repository: { full_name: "octocat/widget", private: true } }] }, error: "GitHub commits search item invalid" },
+      { path: "/search/commits", response: { incomplete_results: false, total_count: 1, items: [{ ...validCommit, repository: {} }] }, error: "GitHub commits search item invalid" },
+      { path: "/search/commits", response: { incomplete_results: false, total_count: 1, items: [{ ...validCommit, html_url: undefined }] }, error: "GitHub commits search item invalid" },
+      { path: "/search/issues", response: { incomplete_results: false, total_count: 1, items: [{ ...validPr, id: undefined }] }, error: "GitHub issues search item invalid" },
+    ];
+    for (const testCase of cases) {
+      const request = async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/graphql") {
+          const body = JSON.parse(String(init?.body));
+          return Response.json(body.query.includes("type:DISCUSSION")
+            ? { data: { search: { discussionCount: 0, nodes: [] } } }
+            : { data: { user: { contributionsCollection: {} } } });
+        }
+        if (url.pathname === testCase.path) return Response.json(testCase.response);
+        return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+      };
+      await expect(new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32"))
+        .rejects.toThrow(testCase.error);
+    }
+  });
+
   test("paginates discussion evidence with GraphQL cursors", async () => {
     const cursors: Array<string | null> = [];
     const request = async (input: string | URL | Request, init?: RequestInit) => {
@@ -151,11 +216,11 @@ test("incomplete weekly searches use bounded daily windows and still fail closed
         if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
         return Response.json({ data: { user: { contributionsCollection: {} } } });
       }
-      if (url.pathname !== "/search/commits") return Response.json({ items: [], incomplete_results: false });
+      if (url.pathname !== "/search/commits") return Response.json({ items: [], incomplete_results: false, total_count: 0 });
       const q = url.searchParams.get("q")!;
       commitQueries.push(q);
       const weekly = q.includes("2026-08-03..2026-08-09");
-      return Response.json({ incomplete_results: weekly || failDaily, items: weekly ? [] : [{
+      return Response.json({ incomplete_results: weekly || failDaily, total_count: weekly ? 0 : 1, items: weekly ? [] : [{
         sha: q, html_url: "https://github.com/octocat/widget/commit/abc",
         commit: { message: "Daily change" }, repository: { full_name: "octocat/widget" },
       }] });
@@ -180,9 +245,9 @@ test('daily fallback deduplicates and selects newest weekly commits after mergin
    const body=JSON.parse(String(init?.body));
    return Response.json(body.query.includes('type:DISCUSSION')?{data:{search:{discussionCount:0,nodes:[]}}}:{data:{user:{contributionsCollection:{}}}});
   }
-  if(url.pathname!=='/search/commits')return Response.json({items:[],incomplete_results:false});
+  if(url.pathname!=='/search/commits')return Response.json({items:[],incomplete_results:false,total_count:0});
   const q=url.searchParams.get('q')!;
-  if(q.includes('2026-08-03..2026-08-09'))return Response.json({items:[],incomplete_results:true});
+  if(q.includes('2026-08-03..2026-08-09'))return Response.json({items:[],incomplete_results:true,total_count:0});
   const date=q.match(/committer-date:(\d{4}-\d{2}-\d{2})/)![1];
   return Response.json({incomplete_results:false,total_count:100,items:Array.from({length:100},(_,i)=>({sha:i===0?'common':`${date}-${i}`,html_url:`https://github.com/octocat/widget/commit/${i}`,repository:{full_name:'octocat/widget'},commit:{message:`Change ${i}`,committer:{date:new Date(Date.parse(date+'T00:00:00Z')+i*60000).toISOString()}}}))});
  };
@@ -249,12 +314,23 @@ test("statistics validation is exact, nullable when unavailable, and tied to the
   expect(() => validateActivityStatistics({ ...stats, totals: { ...stats.totals, mergedPullRequests: { value: 0, coverage: { status: "unavailable", reason: "missing" } } } }, "2026-W01")).toThrow("invalid statistics totals.mergedPullRequests.value");
   expect(() => validateActivityStatistics({ ...stats, observedAt: "2026-02-30T00:00:00.000Z" }, "2026-W01")).toThrow("invalid statistics observedAt");
   expect(() => validateActivityStatistics({ ...stats, repositories: [{ ...stats.repositories[0], stars: { ...stats.repositories[0].stars, observedAt: "2026-04-31T00:00:00Z" } }] }, "2026-W01")).toThrow("invalid statistics repository.stars.observedAt");
+  expect(() => validateActivityStatistics({ ...stats, totals: { ...stats.totals,
+    publicCommits: { value: 2, coverage: { status: "truncated", observed: 1, limit: 500 } },
+  } }, "2026-W01")).toThrow("invalid statistics totals.publicCommits.value");
+  expect(() => validateActivityStatistics({ ...stats, totals: { ...stats.totals,
+    publicCommits: { value: 1, coverage: { status: "complete" } },
+  } }, "2026-W01")).toThrow("statistics repository public commits exceed total");
+  expect(() => validateActivityStatistics({ ...stats, totals: { ...stats.totals,
+    publicCommits: { value: 3, coverage: { status: "complete" } },
+  } }, "2026-W01")).toThrow("statistics repository public commits do not match total");
   const repository = stats.repositories[0];
   const maximumRows = Array.from({ length: MAX_STATISTICS_REPOSITORIES }, (_, index) => ({
     ...repository, repo: `owner/repo-${index}`, url: `https://github.com/owner/repo-${index}`,
+    publicCommits: { value: 0, coverage: { status: "complete" } },
   }));
-  expect(validateActivityStatistics({ ...stats, repositories: maximumRows }, "2026-W01").repositories).toHaveLength(MAX_STATISTICS_REPOSITORIES);
-  expect(() => validateActivityStatistics({ ...stats, repositories: [...maximumRows, {
+  const zeroCommitStats = { ...stats, totals: { ...stats.totals, publicCommits: { value: 0, coverage: { status: "complete" } } } };
+  expect(validateActivityStatistics({ ...zeroCommitStats, repositories: maximumRows }, "2026-W01").repositories).toHaveLength(MAX_STATISTICS_REPOSITORIES);
+  expect(() => validateActivityStatistics({ ...zeroCommitStats, repositories: [...maximumRows, {
     ...repository, repo: "owner/overflow", url: "https://github.com/owner/overflow",
   }] }, "2026-W01")).toThrow("invalid statistics repositories");
 });
@@ -352,7 +428,7 @@ test('public collection excludes private/internal repositories and draft release
   }
   if(url.pathname.startsWith('/search/')){
    expect(url.searchParams.get('q')).toContain('is:public');
-   return Response.json({items:[]});
+   return Response.json({items:[],incomplete_results:false,total_count:0});
   }
   releaseRepos.push(url.pathname);
   return Response.json([
