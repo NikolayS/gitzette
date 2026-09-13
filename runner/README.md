@@ -53,11 +53,15 @@ the environment file; startup rejects broad credential patterns and known AI
 provider variables. `bun.lock` is the sole dependency lockfile used by CI.
 
 Provisioning follows the [authorized subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update).
-The current activation copied only Nik's explicitly authorized OAuth profile into
-the isolated runner store; it did not mint an independent login session or copy
-TARS's configuration, tools, or other profiles. Legacy Codex files are not proof
-of usable OpenClaw authentication. Verify auth status and both live model
-canaries before enabling the service. No API-key fallback is permitted.
+Production shared-subscription inference uses `GITZETTE_INFERENCE_SOCKET=/run/gitzette-inference/infer.sock`.
+The pull runner remains `gitzette-runner`; a local inference service runs as the
+existing OpenClaw owner and uses its canonical state directory and OAuth refresh
+lock. Credentials are not sent over the socket or copied into the pull runner.
+The broker accepts only writing, image generation, and image review, with fixed
+models, tool-denied configuration, and owner-local temporary image paths.
+Verify text and image canaries before enabling publication. No API-key fallback
+is permitted. The older direct-CLI mode remains available for independent OAuth
+installations, but must not refresh a copied session in a separate state root.
 
 The runner classifies OpenClaw auth failures primarily from structured JSON
 `status`, `statusCode`, and `code` fields; a bounded message matcher is only a
@@ -71,9 +75,9 @@ wording cannot suppress the operator signal.
 Treat either alert as a total generation outage: disable the runner, inspect
 the authorized identity with the sealed `auth status` command. Do not revoke
 the shared session casually: revocation or refresh-token rotation can disrupt
-TARS too. Coordinate recovery of both clients. A fresh device-code login under
-the same authorized account can establish an independent runner session; keep
-all authentication codes in the trusted terminal, never chat or logs.
+TARS too. Recover the existing owner's canonical OAuth profile once, rather
+than creating or refreshing a second copied store. If interactive sign-in is
+required, keep authentication codes in the trusted terminal, never chat/logs.
 Then rerun auth status plus the text and image canaries before
 re-enabling the service. Never import an unauthorized account or install an API-key fallback. The restore target is four hours from the first alert; an
 outage may exceed that target when the provider or account owner is unavailable.
@@ -90,9 +94,9 @@ stat -c '%U:%G %a %n' /var/lib/gitzette-runner /etc/gitzette-runner/environment
 ```
 
 Expected ownership/modes are `gitzette-runner:gitzette-runner 700` and
-`root:root 600`. The runner store must contain only the owner-authorized OAuth profile.
+`root:root 600`. In broker mode the pull runner needs no OAuth credentials.
 Nik's existing personal subscription is allowed under the recorded authorization;
-isolation is at the Linux user/store boundary. A tested revocation response remains
+the pull runner remains behind the Unix-socket boundary. A tested revocation response remains
 required; if OAuth is revoked or
 limited, generation intentionally fails closed and operators disable the runner
 while existing editions remain available.
@@ -162,17 +166,36 @@ the upstream Miniflare dependency includes the fixed patch.
 See the canonical [subscription policy](../DISPATCH_SPEC.md#authorized-subscription-policy-september-9-update) for authorization, shared-session effects, and recovery constraints.
 
 
-### Independent session before production activation
+### Shared-owner inference service
 
-The copied profile is temporary canary authentication, not the final service
-login. The release review requires an independent login session under Nik's
-same authorized subscription before enabling the service. It does not require
-a separate subscription or API billing account. In a trusted host terminal:
+Install `runner/gitzette-inference.service` and the root-owned
+`runner/openclaw-broker.json` at `/etc/gitzette-runner/openclaw-broker.json`.
+Create `/var/lib/gitzette-inference` owned by the existing OpenClaw owner, mode
+0700. The supplied unit is host-specific: `User=tars` and
+`GITZETTE_BROKER_STATE=/home/tars/.openclaw` must identify the **same owner and
+canonical state directory** as the existing gateway. Do not point it at a copied
+state directory. The service shares OpenClaw's native cross-agent refresh lock.
+The socket directory is 0710 and socket 0660, accessible only to the service owner
+and `gitzette-runner` group. Only root owns the installed code/configuration.
 
-```bash
-sudo -H -u gitzette-runner node /opt/openclaw-global/node_modules/openclaw/dist/index.js models auth login --provider openai --device-code
-```
+The broker has no TCP listener, credentials endpoint, arbitrary command/model
+selection, or caller-selected owner-side file paths. It processes one request
+at a time, bounds requests/results, removes temporary images, and returns only
+sanitized failure status. Its OpenClaw configuration denies all model tools,
+elevation, channels, and fallbacks, and pins one OAuth profile. The systemd unit
+hides the owner's home except for the canonical OpenClaw state needed by the CLI.
+Revocation/account limits still affect the shared subscription; coordination
+prevents separate clients racing the same refresh token, not provider outages.
 
-Complete the provider sign-in there, never in chat. Verify the selected identity
-and OAuth status, then rerun text/image canaries before service activation.
-Do not revoke the copied session during replacement: TARS still uses it.
+Set `GITZETTE_INFERENCE_SOCKET` in the runner environment, start the inference
+service first, and run the complete canary before enabling the pull runner.
+An unavailable broker fails closed; there is no automatic direct-CLI fallback.
+
+Install the broker's `runner/oauth-broker*.ts`, `runner/inference-error.ts`, and
+`src/models.ts` under root-owned `/opt/gitzette-inference` (preserve directories).
+Use the same tested Bun runtime as the pull runner. On this host the service was
+validated with `systemd-analyze verify` and a real Astra call under its filesystem
+restrictions. Provisioning must still validate a complete generation before
+turning on publication. Install a runner drop-in with `Requires=` and `After=`
+`gitzette-inference.service` when selecting broker mode. Do not enable a second
+copied-store inference service alongside it.

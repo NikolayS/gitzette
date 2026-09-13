@@ -7,6 +7,7 @@ export type RunnerConfig = {
   githubToken: string;
   openclawBin: string;
   openclawHome: string;
+  inferenceSocket?: string;
   pollSeconds: number;
   heartbeatSeconds: number;
   workDir: string;
@@ -27,6 +28,9 @@ function required(env: Record<string, string | undefined>, name: string): string
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): RunnerConfig {
+  if (env.GITZETTE_INFERENCE_SOCKET !== undefined && !env.GITZETTE_INFERENCE_SOCKET.startsWith("/")) {
+    throw new Error("GITZETTE_INFERENCE_SOCKET must be an absolute local path");
+  }
   for (const [key, value] of Object.entries(env)) {
     if (value && !ALLOWED_RUNNER_CREDENTIALS.has(key) && (FORBIDDEN_AI_ENV.test(key) || CREDENTIAL_SUFFIX.test(key))) {
       throw new Error(`${key} is forbidden; GitZette AI auth must be OAuth-only`);
@@ -65,6 +69,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     githubToken: required(env, "GITZETTE_GITHUB_TOKEN"),
     openclawBin: env.GITZETTE_OPENCLAW_BIN ?? "/var/lib/gitzette-runner/.bun/bin/openclaw",
     openclawHome: env.GITZETTE_OPENCLAW_HOME ?? "/var/lib/gitzette-runner",
+    inferenceSocket: env.GITZETTE_INFERENCE_SOCKET,
     pollSeconds,
     heartbeatSeconds,
     workDir: env.GITZETTE_WORK_DIR ?? "/var/lib/gitzette-runner/work",

@@ -80,3 +80,22 @@ production deployment or a reliability rate. Earlier local NikolayS W32,
 PhysShell W30, and genuine quiet Karpathy W20 cases passed as recorded above.
 An independent login session under the same authorized subscription remains
 required before production service activation; the September 10 attempt expired.
+
+## September 13: shared OAuth owner transport
+
+The `steipete/2026-W14` edition passed freshly through the Unix-socket inference
+transport at 09:03:59 UTC (writing, two Sunburst images, Astra review, distinctness,
+and complete manifest validation). Evidence remains the 39-item historical bundle.
+Artifacts: `/var/lib/gitzette-runner/canaries/steipete/2026-W14`, diagnostic
+`diagnostic-1789290103974`. This was a local-file publication, not production.
+
+The pull runner process remained `gitzette-runner`. The inference process used
+TARS's existing canonical `/home/tars/.openclaw` state, with its shared profile
+and native refresh-lock path, and a separate tool-denied configuration. No OAuth
+credentials were copied or returned to the runner. This supersedes the temporary
+separate-store copied-session setup. A second live Astra test also passed under
+the installed systemd service's filesystem restrictions. Actual token expiry was
+not forced; refresh coordination is established by using the same installed
+canonical store/lock implementation, not by an artificial token-rotation test.
+
+These changes require exact-head CI and independent review before publication.

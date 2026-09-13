@@ -1,0 +1,38 @@
+[Unit]
+Description=GitZette local inference using the existing OpenClaw OAuth owner
+After=network-online.target
+
+[Service]
+Type=simple
+# The owner and state path must match the existing OpenClaw installation.
+User=tars
+Group=gitzette-runner
+SupplementaryGroups=tars
+RuntimeDirectory=gitzette-inference
+RuntimeDirectoryMode=0710
+WorkingDirectory=/var/lib/gitzette-inference
+ExecStart=/usr/local/bin/bun --no-env-file /opt/gitzette-inference/runner/oauth-broker-main.ts
+Environment=GITZETTE_BROKER_SOCKET=/run/gitzette-inference/infer.sock
+Environment=GITZETTE_BROKER_STATE=/home/tars/.openclaw
+Environment=GITZETTE_BROKER_CONFIG=/etc/gitzette-runner/openclaw-broker.json
+Environment=GITZETTE_BROKER_WORK=/var/lib/gitzette-inference
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/tars/.openclaw
+ReadWritePaths=/var/lib/gitzette-inference /run/gitzette-inference
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0007
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

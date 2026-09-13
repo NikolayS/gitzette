@@ -1,0 +1,57 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/var/lib/gitzette-inference/workspace",
+      "model": {
+        "primary": "openai/gpt-6-astra",
+        "fallbacks": []
+      },
+      "sandbox": {
+        "mode": "all",
+        "scope": "agent",
+        "workspaceAccess": "none"
+      }
+    },
+    "entries": {
+      "main": {
+        "name": "GitZette sealed inference",
+        "workspace": "/var/lib/gitzette-inference/workspace",
+        "agentDir": "/var/lib/gitzette-inference/agent",
+        "models": {
+          "openai/gpt-6-astra": {
+            "agentRuntime": {
+              "id": "codex"
+            }
+          }
+        },
+        "tools": {
+          "deny": [
+            "*"
+          ]
+        }
+      }
+    }
+  },
+  "tools": {
+    "deny": [
+      "*"
+    ],
+    "elevated": {
+      "enabled": false
+    }
+  },
+  "channels": {},
+  "auth": {
+    "profiles": {
+      "openai:nik@postgres.ai": {
+        "provider": "openai",
+        "mode": "oauth"
+      }
+    },
+    "order": {
+      "openai": [
+        "openai:nik@postgres.ai"
+      ]
+    }
+  }
+}

@@ -196,19 +196,21 @@ Before production activation:
 
 Nik explicitly authorized his existing OAuth subscription for both GitZette
 canaries and production. A separate subscription is no longer a prerequisite.
-The Linux runner and its auth store remain isolated. Sharing the subscription
+The Linux pull runner remains isolated behind a local inference socket. Sharing the subscription
 means revocation, refresh-token rotation, throttling, and provider account actions
 can affect both TARS and GitZette. GitZette serves multiple GitHub users, so its
 load shares the owner account limits. No API-key
-fallback is permitted. Only the authorized OAuth profile is copied, not another
-agent's complete configuration or tool access.
+fallback is permitted. The production runner receives inference results, not
+OAuth credentials or another agent's configuration or tool access.
 
-The current copied profile shares a login session; filesystem isolation does not
+The earlier copied canary profile shares a login session; filesystem isolation does not
 isolate refresh/revocation effects. Recovery must coordinate both clients, or
 establish a fresh runner login under the same authorized subscription. The
 release record documents the owner request, not an invented legal determination
 or an unrecorded acceptance of additional risks.
 
-Production activation requires an independent runner login session under the
-same authorized subscription; see runner/README.md. The copied session is
-temporary canary setup only, following the independent release review.
+Production activation uses the shared-owner inference service described in
+runner/README.md: one canonical OAuth store and native refresh lock, with a
+restricted local socket to the isolated pull runner. An independent login is
+not required when all inference uses that same credential owner. The temporary
+copied-session canary setup must not be used as a second refresh owner.
