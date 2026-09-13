@@ -123,6 +123,27 @@ describe("typed publication manifest", () => {
     expect(() => validateManifest(manifest, "octocat", "2026-W32")).toThrow("requires at least 2 illustrations");
   });
 
+  test("requires three used illustrations for active editions with three or more stories", () => {
+    const insufficient = activeManifest();
+    insufficient.edition.stories.push({
+      headline: "The third angle",
+      deck: "Broader coverage needs its full illustration budget.",
+      paragraphs: ["A third meaningful story remains evidence-bound."],
+      evidenceIds: ["pr:1"],
+      tag: "FEATURE",
+    });
+    insufficient.images.push({ key: "image-3.webp", contentType: "image/webp", sha256: "c".repeat(64) });
+    expect(() => validateManifest(insufficient, "octocat", "2026-W32")).toThrow("requires at least 3 illustrations");
+
+    const sufficient = activeManifest();
+    sufficient.edition.stories.push({
+      ...insufficient.edition.stories[2],
+      illustrationKey: "image-3.webp",
+    });
+    sufficient.images.push({ key: "image-3.webp", contentType: "image/webp", sha256: "c".repeat(64) });
+    expect(validateManifest(sufficient, "octocat", "2026-W32").edition.stories).toHaveLength(3);
+  });
+
   test("rejects duplicate image bytes and invalid runtime enum values", () => {
     const duplicate = activeManifest();
     duplicate.images[1].sha256 = duplicate.images[0].sha256;
