@@ -89,4 +89,25 @@ describe("statistics view", () => {
     expect(stars).toContain('Observed <time datetime="2026-09-12T12:00:00.000Z">Sep 12, 2026, 12:00 PM UTC</time>');
     expect(stars.match(/>Observed <time/g)).toHaveLength(1);
   });
+
+  test("preserves mixed unavailable repository rows with reasons and no fabricated bars", () => {
+    const input = statistics();
+    input.repositories.push({
+      repo: "octocat/missing",
+      url: "https://github.com/octocat/missing",
+      publicCommits: { value: null, coverage: { status: "unavailable", reason: "commit <cap> reached" } },
+      stars: { value: null, coverage: { status: "unavailable", reason: "stars & private" }, observedAt: input.observedAt },
+    });
+    const html = renderStatisticsSidebar(input);
+    const missingCommitStart = html.indexOf("octocat/missing", html.indexOf("Public commits by repository"));
+    const commitRow = html.slice(missingCommitStart, html.indexOf("Repository stars", missingCommitStart));
+    const starRow = html.match(/<tr><th scope="row"><a[^>]*>octocat\/missing<\/a>[\s\S]*?<\/tr>/)?.[0] ?? "";
+    expect(commitRow).toContain("—");
+    expect(commitRow).toContain("not available: commit &lt;cap&gt; reached");
+    expect(commitRow).not.toContain("dispatch-repo-track");
+    expect(starRow).toContain("—");
+    expect(starRow).toContain("not available: stars &amp; private");
+    expect(starRow).not.toContain("dispatch-star-bar");
+    expect(html).toContain("measurements are incomplete for 1 commit row and 1 star row");
+  });
 });

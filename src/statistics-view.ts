@@ -16,6 +16,12 @@ function renderCount(metric: CountMetric): { value: string; note: string } {
   return { value: formatNumber(metric.value), note: "" };
 }
 
+function metricNote(metric: CountMetric): string {
+  if (metric.coverage.status === "unavailable") return `not available: ${metric.coverage.reason}`;
+  if (metric.coverage.status === "truncated") return "partial count";
+  return "";
+}
+
 function formatObservedAt(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return value;
@@ -62,40 +68,51 @@ function renderMetric(metric: CountMetric, label: string): string {
 
 function coverageNote(statistics: ActivityStatistics): string {
   const coverage = statistics.contributionRepositories;
-  if (coverage.status === "complete") return "Counts cover the public activity collected for this week.";
-  if (coverage.status === "truncated") return `Partial repository coverage: ${formatNumber(coverage.observed)} observed (collection limit ${formatNumber(coverage.limit)}). Counts marked ≥ are lower bounds.`;
-  return `Repository coverage unavailable: ${coverage.reason}`;
+  let note: string;
+  if (coverage.status === "complete") note = "Counts cover the public activity collected for this week.";
+  else if (coverage.status === "truncated") note = `Partial repository coverage: ${formatNumber(coverage.observed)} observed (collection limit ${formatNumber(coverage.limit)}). Counts marked ≥ are lower bounds.`;
+  else note = `Repository coverage unavailable: ${coverage.reason}`;
+  const incompleteCommits = statistics.repositories.filter((repository) => repository.publicCommits.coverage.status !== "complete").length;
+  const incompleteStars = statistics.repositories.filter((repository) => repository.stars.coverage.status !== "complete").length;
+  if (incompleteCommits || incompleteStars) {
+    note += ` Repository-level measurements are incomplete for ${formatNumber(incompleteCommits)} commit row${incompleteCommits === 1 ? "" : "s"} and ${formatNumber(incompleteStars)} star row${incompleteStars === 1 ? "" : "s"}.`;
+  }
+  return note;
 }
 
 /** Render the newspaper statistics rail. All externally supplied text is escaped. */
 export function renderStatisticsSidebar(statistics: ActivityStatistics): string {
   const commitRows = statistics.repositories
-    .filter((repository) => repository.publicCommits.value !== null)
-    .sort((a, b) => (b.publicCommits.value ?? 0) - (a.publicCommits.value ?? 0) || a.repo.localeCompare(b.repo));
-  const maxCommits = Math.max(1, ...commitRows.map((repository) => repository.publicCommits.value ?? 0));
+    .slice()
+    .sort((a, b) => Number(b.publicCommits.value !== null) - Number(a.publicCommits.value !== null)
+      || (b.publicCommits.value ?? 0) - (a.publicCommits.value ?? 0) || a.repo.localeCompare(b.repo));
+  const maxCommits = Math.max(1, ...commitRows.flatMap((repository) => repository.publicCommits.value === null ? [] : [repository.publicCommits.value]));
   const commits = commitRows.length
     ? commitRows.map((repository) => {
       const count = renderCount(repository.publicCommits);
-      const value = repository.publicCommits.value ?? 0;
-      const width = value === 0 ? 0 : Math.max(2, Math.round(value / maxCommits * 100));
-      return `<div class="dispatch-repo"><div class="dispatch-repo-label"><span>${escapeHtml(repository.repo)}</span><strong>${escapeHtml(count.value)}</strong></div><div class="dispatch-repo-track" aria-hidden="true"><div class="dispatch-repo-fill" style="width:${width}%"></div></div>${count.note ? `<small>${count.note}</small>` : ""}</div>`;
+      const value = repository.publicCommits.value;
+      const bar = value === null ? "" : `<div class="dispatch-repo-track" aria-hidden="true"><div class="dispatch-repo-fill" style="width:${value === 0 ? 0 : Math.max(2, Math.round(value / maxCommits * 100))}%"></div></div>`;
+      const note = metricNote(repository.publicCommits);
+      return `<div class="dispatch-repo"><div class="dispatch-repo-label"><span>${escapeHtml(repository.repo)}</span><strong>${escapeHtml(count.value)}</strong></div>${bar}${note ? `<small>${escapeHtml(note)}</small>` : ""}</div>`;
     }).join("")
     : '<p class="dispatch-empty">No repository-level commit counts are available.</p>';
 
   const stars = statistics.repositories
-    .filter((repository) => repository.stars.value !== null)
-    .sort((a, b) => (b.stars.value ?? 0) - (a.stars.value ?? 0) || a.repo.localeCompare(b.repo));
-  const maxStars = Math.max(1, ...stars.map((repository) => repository.stars.value ?? 0));
+    .slice()
+    .sort((a, b) => Number(b.stars.value !== null) - Number(a.stars.value !== null)
+      || (b.stars.value ?? 0) - (a.stars.value ?? 0) || a.repo.localeCompare(b.repo));
+  const maxStars = Math.max(1, ...stars.flatMap((repository) => repository.stars.value === null ? [] : [repository.stars.value]));
   const starRows = stars.length
     ? stars.map((repository) => {
       const url = safeRepositoryUrl(repository);
       const label = escapeHtml(repository.repo);
       const repositoryLabel = url ? `<a rel="noopener noreferrer" href="${escapeHtml(url)}">${label}</a>` : label;
-      const value = repository.stars.value ?? 0;
+      const value = repository.stars.value;
       const count = renderCount(repository.stars);
-      const width = Math.round(value / maxStars * 100);
+      const bar = value === null ? "" : `<span class="dispatch-star-bar" aria-hidden="true"><i style="width:${Math.round(value / maxStars * 100)}%"></i></span>`;
+      const note = metricNote(repository.stars);
       const observed = repository.stars.observedAt === statistics.observedAt ? "" : `<small>Observed <time datetime="${escapeHtml(repository.stars.observedAt)}">${escapeHtml(formatObservedAt(repository.stars.observedAt))}</time></small>`;
-      return `<tr><th scope="row">${repositoryLabel}</th><td><span class="dispatch-star-count">${escapeHtml(count.value)}</span><span class="dispatch-star-bar" aria-hidden="true"><i style="width:${width}%"></i></span>${count.note ? `<small>${count.note}</small>` : ""}${observed}</td></tr>`;
+      return `<tr><th scope="row">${repositoryLabel}</th><td><span class="dispatch-star-count">${escapeHtml(count.value)}</span>${bar}${note ? `<small>${escapeHtml(note)}</small>` : ""}${observed}</td></tr>`;
     }).join("")
     : '<tr><td colspan="2" class="dispatch-empty">No star snapshots are available.</td></tr>';
 
