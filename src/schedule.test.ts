@@ -498,7 +498,8 @@ describe("weekly profile scheduling", () => {
 
   test("couples hourly expiry and redundant weekly triggers to the handler", async () => {
     const config = await Bun.file("wrangler.toml").text();
-    expect(config).toMatch(/^CLEANUP_SWEEP_ENABLED\s*=\s*"false"$/m);
+    expect(config).toMatch(/^CLEANUP_SWEEP_ENABLED\s*=\s*"true"$/m);
+    expect(config).toMatch(/^WEEKLY_GENERATION_ENABLED\s*=\s*"true"$/m);
     const configured = config.match(/^crons\s*=\s*(\[[^\n]+\])\s*$/m);
     expect(configured).not.toBeNull();
     expect(JSON.parse(configured![1])).toEqual([JOB_EXPIRY_CRON, ...WEEKLY_GENERATION_CRONS]);
