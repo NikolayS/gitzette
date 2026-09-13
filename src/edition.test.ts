@@ -1,3 +1,4 @@
+import { upgradeStructuredEdition } from "./edition-style";
 import { describe, expect, test } from "bun:test";
 import { AI_ACTIVITY_NOTICE, escapeHtml, renderEdition, validateManifest, type PublicationManifest } from "./edition";
 
@@ -170,5 +171,25 @@ describe("typed publication manifest", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("https://github.com/octocat/widget/pull/1");
     expect(escapeHtml(`&<>"'`)).toBe("&amp;&lt;&gt;&quot;&#39;");
+  });
+});
+
+describe("April broadsheet restoration", () => {
+  test("keeps stories, images and citations while wrapping prose and deduplicating sidebar sources", () => {
+    const m=activeManifest();
+    const html=renderEdition(validateManifest(m,"octocat","2026-W32"), k=>`/img/${k}`);
+    expect(html).toContain('class="dispatch-masthead">the <span>dispatch</span>');
+    expect(html).toContain('Aug 3 – Aug 9, 2026');
+    expect((html.match(/class="dispatch-cutout"/g)??[]).length).toBe(2);
+    expect((html.match(/<article>/g)??[]).length).toBe(2);
+    for (const story of m.edition.stories) {
+      expect(html).toContain(story.headline);
+      expect(html).toContain(story.paragraphs[0]);
+    }
+    expect(html.split('href="https://github.com/octocat/widget/pull/1"').length-1).toBe(2);
+    expect(html).toContain('<span>1 cited sources</span>');
+    expect(html).toContain('Counts describe the sources cited in this edition');
+    expect(html).toContain('<div class="dispatch-prose"><div class="dispatch-cutout"><img');
+    expect(upgradeStructuredEdition(html)).toBe(html);
   });
 });
