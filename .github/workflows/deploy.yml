@@ -64,6 +64,7 @@ jobs:
 
   deploy:
     needs: review-gate
+    timeout-minutes: 15
     environment: production
     permissions:
       contents: read
@@ -74,6 +75,13 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile
+      - name: Synchronize pull-runner credentials without exporting values
+        run: bun scripts/provision-runner-credentials.ts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITZETTE_RUNNER_SECRET: ${{ secrets.GITZETTE_RUNNER_SECRET }}
+          GITZETTE_STATUS_TOKEN: ${{ secrets.GITZETTE_STATUS_TOKEN }}
       - name: Verify required Worker secrets
         run: bash scripts/check-production-secrets.sh
         env:

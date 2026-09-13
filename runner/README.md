@@ -192,10 +192,34 @@ service first, and run the complete canary before enabling the pull runner.
 An unavailable broker fails closed; there is no automatic direct-CLI fallback.
 
 Install the broker's `runner/oauth-broker*.ts`, `runner/inference-error.ts`, and
-`src/models.ts` under root-owned `/opt/gitzette-inference` (preserve directories).
+`runner/oauth-owner.ts`, and `src/models.ts` under root-owned `/opt/gitzette-inference` (preserve directories).
 Use the same tested Bun runtime as the pull runner. On this host the service was
 validated with `systemd-analyze verify` and a real Astra call under its filesystem
 restrictions. Provisioning must still validate a complete generation before
 turning on publication. Install a runner drop-in with `Requires=` and `After=`
 `gitzette-inference.service` when selecting broker mode. Do not enable a second
 copied-store inference service alongside it.
+
+### Deployment credential synchronization
+
+The protected Deploy job runs `scripts/provision-runner-credentials.ts` before
+its existing secret/schema checks. GitHub repository secrets
+`GITZETTE_RUNNER_SECRET` and `GITZETTE_STATUS_TOKEN` are prepared using private
+stdin, never literal command arguments or logs. The runner secret must match
+the root-only service environment. The status token is used only when its Worker
+binding is absent; an existing dashboard token is preserved. Existing GitHub
+OAuth client and session bindings must already exist and are never overwritten.
+Unknown bindings or missing application bindings stop the job before mutation.
+The script retires only the four named old provider/legacy-runner bindings,
+then the normal strict binding check, schema migration and reviewed deploy run.
+This step changes credentials and therefore remains behind the production
+approval gate; it is not executed by pull-request CI. Keep the pull runner off
+until the reviewed Worker and immediate site smoke test succeed.
+
+Before each provider call, the broker checks the canonical owner metadata: the
+authorized profile must still be OAuth and any store-level order must contain
+only that profile. Missing/replaced profiles or a broadened order fail closed
+instead of letting OpenClaw recover to an unrelated credential. This deployment
+requires the installed state-db auth-store ownership; a future storage migration
+must update and revalidate the adapter before activation. No token values leave
+the owner process.

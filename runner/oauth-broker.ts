@@ -6,6 +6,7 @@ import { classifyOpenClawFailure, OpenClawInferenceError } from "./inference-err
 
 const MAX_IMAGE = 8 * 1024 * 1024;
 const MAX_PROMPT = 96 * 1024;
+export const OAUTH_PROFILE_ID = "openai:nik@postgres.ai";
 type Request = { operation: "write" | "generate" | "review"; prompt: string; image?: string };
 
 export function validateBrokerRequest(value: unknown): Request {
@@ -52,7 +53,7 @@ export async function brokerInference(socket: string, argv: string[], timeout: n
   return result.output;
 }
 
-export async function startBroker(options: { socket: string; state: string; config: string; work: string; node: string; cli: string }) {
+export async function startBroker(options: { socket: string; state: string; config: string; work: string; node: string; cli: string; beforeRequest?: () => void }) {
   validateBrokerConfig(await Bun.file(options.config).json());
   let busy = false;
   const server = Bun.serve({ unix: options.socket, maxRequestBodySize: 12 * 1024 * 1024,
@@ -64,6 +65,7 @@ export async function startBroker(options: { socket: string; state: string; conf
       try {
         let request: Request;
         try { request = validateBrokerRequest(await req.json()); } catch { return new Response(null, { status: 400 }); }
+        options.beforeRequest?.();
         directory = await mkdtemp(join(options.work, "inference-"));
         if (request.image) await Bun.write(join(directory, "input.webp"), Buffer.from(request.image, "base64"));
         const child = Bun.spawn([options.node, options.cli, ...brokerArguments(request, directory)], {
@@ -85,7 +87,7 @@ export async function startBroker(options: { socket: string; state: string; conf
           image = Buffer.from(await file.arrayBuffer()).toString("base64");
         }
         return Response.json({ output, image });
-      } catch { return new Response(null, { status: 502 }); }
+      } catch (error) { return new Response(null, { status: error instanceof OpenClawInferenceError && error.kind === "auth" ? 401 : 502 }); }
       finally { if (directory) await rm(directory, { recursive: true, force: true }); busy = false; }
     },
   });
@@ -100,7 +102,7 @@ export function validateBrokerConfig(config: any): void {
   if (JSON.stringify(config?.tools?.deny) !== '["*"]' || config?.tools?.elevated?.enabled !== false
     || JSON.stringify(main?.tools?.deny) !== '["*"]' || Object.keys(config?.channels ?? {}).length
     || JSON.stringify(config?.agents?.defaults?.model?.fallbacks) !== '[]'
-    || !Array.isArray(order) || order.length !== 1 || Object.keys(profiles ?? {}).length !== 1
+    || !Array.isArray(order) || order.length !== 1 || order[0] !== OAUTH_PROFILE_ID || Object.keys(profiles ?? {}).length !== 1
     || profiles[order[0]]?.provider !== "openai" || profiles[order[0]]?.mode !== "oauth") {
     throw new Error("broker requires sealed tools, no channels/fallbacks, and one OAuth profile");
   }
