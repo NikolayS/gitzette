@@ -160,7 +160,10 @@ export class GitHubCollector implements Collector {
       items.push(...body.items);
       if (body.items.length < 100 || items.length >= Math.min(body.total_count ?? items.length, 500)) break;
     }
-    const selected = items.slice(0, 500);
+    // Search pages can shift while they are being read and repeat an item.
+    // Keep GitHub's total_count as the aggregate, but never double-count a
+    // retained item when attributing commits to repositories or citing it.
+    const selected = mergeSearchResults(kind, items);
     return { items: selected, total, itemCoverage: total > selected.length ? { status: "truncated", observed: selected.length, limit: 500 } : { status: "complete" } };
   }
 
@@ -201,7 +204,7 @@ export class GitHubCollector implements Collector {
       // there are no later pages containing an in-window publication.
       if (batch.length < 100) { complete = true; break; }
     }
-    const items = response.filter((release) => {
+    const mappedItems = response.filter((release) => {
       const date = String(release.published_at ?? release.created_at ?? "").slice(0, 10);
       return release.draft === false && date >= from && date <= to;
     }).map((release) => ({
@@ -211,6 +214,9 @@ export class GitHubCollector implements Collector {
       url: String(release.html_url),
       repo,
     })).filter((item) => isGitHubUrl(item.url));
+    const uniqueItems = new Map<string, EvidenceItem>();
+    for (const item of mappedItems) uniqueItems.set(item.id, item);
+    const items = [...uniqueItems.values()];
     return { items, coverage: complete ? { status: "complete" } : { status: "truncated", observed: items.length, limit: 500 } };
   }
 

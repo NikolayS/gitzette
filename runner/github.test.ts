@@ -76,6 +76,35 @@ describe("canonical GitHub collector", () => {
     expect(evidence.items).toHaveLength(101);
   });
 
+  test("deduplicates shifting commit search pages without changing the exact aggregate", async () => {
+    const request = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/graphql") {
+        const body = JSON.parse(String(init?.body));
+        return Response.json(body.query.includes("type:DISCUSSION")
+          ? { data: { search: { discussionCount: 0, nodes: [] } } }
+          : { data: { user: { contributionsCollection: {} } } });
+      }
+      if (url.pathname !== "/search/commits") return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+      const page = Number(url.searchParams.get("page"));
+      const item = (id: number) => ({
+        sha: `sha-${id}`, html_url: `https://github.com/octocat/widget/commit/sha-${id}`,
+        commit: { message: `Commit ${id}`, committer: { date: `2026-08-05T00:${String(id % 60).padStart(2, "0")}:00Z` } },
+        repository: { full_name: "octocat/widget" },
+      });
+      return Response.json({
+        incomplete_results: false, total_count: 101,
+        items: page === 1 ? Array.from({ length: 100 }, (_, id) => item(id)) : [item(99)],
+      });
+    };
+    const result = await new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32") as any;
+    expect(result.stats.totals.publicCommits).toEqual({ value: 101, coverage: { status: "complete" } });
+    expect(result.stats.repositories[0].publicCommits).toEqual({
+      value: 100, coverage: { status: "truncated", observed: 100, limit: 500 },
+    });
+    expect(result.items.filter((item: any) => item.type === "commit")).toHaveLength(100);
+  });
+
   test("paginates discussion evidence with GraphQL cursors", async () => {
     const cursors: Array<string | null> = [];
     const request = async (input: string | URL | Request, init?: RequestInit) => {
@@ -260,6 +289,39 @@ test("release collection does not stop on old dates because old drafts can be ne
   expect(releasePages).toEqual([1, 2]);
   expect(result.stats.totals.releases).toEqual({ value: 1, coverage: { status: "complete" } });
   expect(result.items.some((item: any) => item.id === "release:octocat/widget:101")).toBe(true);
+});
+
+test("deduplicates a release repeated across shifting pages before evidence and totals", async () => {
+  const repeatedRelease = {
+    id: 42, draft: false, name: "Repeated", created_at: "2026-08-04T00:00:00Z", published_at: "2026-08-05T00:00:00Z",
+    html_url: "https://github.com/octocat/widget/releases/tag/repeated",
+  };
+  const request = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/graphql") {
+      const body = JSON.parse(String(init?.body));
+      if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: { discussionCount: 0, nodes: [] } } });
+      return Response.json({ data: { user: { contributionsCollection: {
+        commitContributionsByRepository: [{ repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC", stargazerCount: 1 } }],
+      } } } });
+    }
+    if (url.pathname.startsWith("/search/")) return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+    if (url.pathname === "/repos/octocat/widget/releases") {
+      const page = Number(url.searchParams.get("page"));
+      if (page === 1) return Response.json([
+        repeatedRelease,
+        ...Array.from({ length: 99 }, (_, id) => ({
+          id: id + 100, draft: false, name: `Old ${id}`, created_at: "2020-01-01T00:00:00Z", published_at: "2020-01-02T00:00:00Z",
+          html_url: `https://github.com/octocat/widget/releases/tag/old-${id}`,
+        })),
+      ]);
+      if (page === 2) return Response.json([repeatedRelease]);
+    }
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const result = await new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32") as any;
+  expect(result.stats.totals.releases).toEqual({ value: 1, coverage: { status: "complete" } });
+  expect(result.items.filter((item: any) => item.id === "release:octocat/widget:42")).toHaveLength(1);
 });
 
 import {mergeSearchResults} from './github';
