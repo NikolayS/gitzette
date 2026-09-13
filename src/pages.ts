@@ -1,3 +1,4 @@
+import { upgradeStructuredEdition } from "./edition-style";
 import { Hono } from "hono";
 import { getUser } from "./auth";
 import { bearerToken, secretMatches } from "./credentials";
@@ -284,7 +285,7 @@ async function fetchAndServeDispatch(
   const IMG_FIX_STYLE = `${ogTags}\n${headTags()}<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&display=swap" rel="stylesheet"><style>body img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;width:100%!important;}td,th{word-break:break-word;}.sources{overflow-wrap:anywhere;}/* normalize old broadsheet left/right layout (#24) */.broadsheet-left{display:none!important;}.broadsheet-right{width:100%!important;max-width:960px!important;margin:0 auto!important;}/* fix: .col:last-child rule hides articles when only one col exists — restore if sole child */.broadsheet-wrap .paper .grid-2-1 .col:only-child{display:block!important;}/* cap illustration height to 40vh so square images dont dominate the column */.article-image{max-height:40vh!important;}.article-image img{max-height:40vh!important;width:100%!important;height:auto!important;display:block!important;background:none!important;}/* override legacy --link blue (#50) */body{--link:var(--ink,#0f0f0f)!important;}</style>`;
 
   // Fix unclosed <a class="headline-link"> tags in legacy dispatch HTML (#49)
-  const processedHtml = fixUnclosedHeadlineLinks(html);
+  const processedHtml = upgradeStructuredEdition(fixUnclosedHeadlineLinks(html));
 
   const documentStart = processedHtml.trimStart().toLowerCase();
   if (documentStart.startsWith("<!doctype") || documentStart.startsWith("<html")) {
@@ -443,7 +444,7 @@ pageRoutes.get("/", async (c) => {
        AND NOT EXISTS (
          SELECT 1 FROM profile_suppressions ps WHERE ps.username=u.username COLLATE NOCASE
        )
-     ORDER BY d.generated_at DESC LIMIT 100`
+     ORDER BY d.week_key DESC, d.generated_at DESC, u.username COLLATE NOCASE ASC LIMIT 100`
   ).all<{ username: string; week_key: string; generated_at: number }>();
 
   const cwk = currentWeekKey();
