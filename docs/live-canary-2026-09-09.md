@@ -58,3 +58,25 @@ with the new bounded sequential daily-window fallback; it fails closed.
 Production activation also awaits an independent login session under the same
 subscription, as required by the independent review of 3e84f23. No review retry
 can substitute for that login or the missing passing generation evidence.
+
+## September 13 resolution: prompt v5 and complete historical search
+
+Fresh local editions now pass for both remaining cases:
+- steipete / 2026-W14: processed at 00:40:26 UTC; two illustrations,
+  relevance/no-text checks, image metrics/distinctness and manifest validation.
+- torvalds / 2026-W16: complete collector result (6 evidence items), then
+  processed at 00:41:33 UTC with the same two-image validation pipeline.
+
+The prior v4 rejection was a review-rubric mismatch: the saved image depicted a
+robotic hand installing a component in a computer; an independent descriptive
+call identified it as a software-release metaphor. Prompt v5 explicitly judges
+release illustrations by the depicted installation/update activity, not by a
+recognizable product brand. Live regression checks accepted that saved image
+and continued to reject the previous generic-gears picture (relevant=false,
+containsText=false). Both new full editions generated fresh text and images.
+
+These results supersede the failed September 10 canaries; they do not claim
+production deployment or a reliability rate. Earlier local NikolayS W32,
+PhysShell W30, and genuine quiet Karpathy W20 cases passed as recorded above.
+An independent login session under the same authorized subscription remains
+required before production service activation; the September 10 attempt expired.

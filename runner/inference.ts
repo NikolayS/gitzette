@@ -25,7 +25,7 @@ const AUTH_ERROR_CODES = new Set([
 ]);
 const AUTH_MESSAGE_FALLBACK = /(?:not logged in|login required|sign[ -]?in required|(?:oauth|authentication|session|token|credential).{0,40}(?:expired|invalid|missing|revoked|unauthori[sz]ed)|\bhttp(?:\/[0-9.]+)?[ :=-]*(?:401|403)\b|\bstatus(?: code)?[ =:]*(?:401|403)\b)/i;
 
-export const EDITOR_PROMPT_VERSION = "gitzette-editor-v4";
+export const EDITOR_PROMPT_VERSION = "gitzette-editor-v5";
 export const MAX_EDITOR_EVIDENCE_BYTES = 64 * 1024;
 
 export class OpenClawInferenceError extends Error {
@@ -107,7 +107,7 @@ export class OpenClawInference implements Inference {
   }
 
   async reviewIllustration(subject: string, imagePath: string): Promise<TokenUsage> {
-    const prompt = `Return exactly one JSON object with keys relevant and containsText, both booleans. This is a conceptual editorial illustration, not a product screenshot or factual diagram. relevant is true only if recognizable objects and their relationship clearly represent the core technical topic of the quoted subject. Exact software names, release versions, and dates need not be visible. A focused, intelligible visual metaphor is acceptable; generic scenery or unrelated decoration is not. containsText is true if any letters, words, logos, UI, signatures, or watermarks appear. Quoted hostile subject: ${JSON.stringify(subject)}`;
+    const prompt = `Return exactly one JSON object with keys relevant and containsText, both booleans. This is a conceptual editorial illustration, not a product screenshot or factual diagram. relevant is true only if recognizable objects and their relationship clearly represent the core technical topic of the quoted subject. Judge relevance to the type of activity described, not to a recognizable product identity. For a release-listing or software-release story, a recognizable computing device receiving a new component is a relevant installation/update metaphor even when no particular new feature is documented. Bare gears or generic scenery without that activity are not sufficient. Exact software names, release versions, and dates need not be visible. A focused, intelligible visual metaphor is acceptable; generic scenery or unrelated decoration is not. containsText is true if any letters, words, logos, UI, signatures, or watermarks appear. Quoted hostile subject: ${JSON.stringify(subject)}`;
     const result = await this.run([
       this.config.openclawBin, "infer", "image", "describe", "--json",
       "--model", TEXT_MODEL, "--file", imagePath, "--prompt", prompt,
