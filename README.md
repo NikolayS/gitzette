@@ -72,9 +72,13 @@ or out-of-band DDL, and prepare a new forward-only repair migration. Re-run
 Cloudflare D1 migrations have no automatic down path, so rollback means a
 reviewed forward repair or restoring a verified pre-migration backup.
 
-Before cutover, delete the retired Worker secrets `OPENROUTER_API_KEY`,
-`OPENAI_API_KEY`, `GITHUB_TOKEN`, and `NEWSPAPERIFY_SECRET` with
-`wrangler secret delete`, and revoke the corresponding provider-side keys.
+Only after successful Worker deployment, retire the unused Worker secrets
+`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `GITHUB_TOKEN`, `NEWSPAPERIFY_SECRET`,
+`CF_D1_TOKEN`, and `GOOGLE_AI_KEY`. The protected deployment runs
+`scripts/provision-runner-credentials.ts retire`; manual recovery must use the
+same post-deploy phase. Separately revoke corresponding provider-side keys
+after verifying they are not used by another service; deleting a Worker binding
+does not revoke its underlying credential.
 `scripts/check-production-secrets.sh` enforces the exact remaining Worker secret
 set and rejects any retired or unknown standing credential.
 

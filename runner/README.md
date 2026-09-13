@@ -213,7 +213,7 @@ binding is absent; an existing dashboard token is preserved. Existing GitHub
 OAuth client and session bindings must already exist and are never overwritten.
 Unknown bindings or missing application bindings stop the job before mutation.
 Legacy bindings remain intact until the Worker deploy succeeds. Only then does
-`retire` remove the four named unused bindings. For partial retirement failure,
+`retire` remove the six explicitly named unused bindings. For partial retirement failure,
 keep the new Worker in place and the pull runner stopped, rerun retirement and final binding
 verification; see the root README credential-cutover recovery procedure.
 This step changes credentials and therefore remains behind the production
