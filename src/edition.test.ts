@@ -191,5 +191,10 @@ describe("April broadsheet restoration", () => {
     expect(html).toContain('Counts describe the sources cited in this edition');
     expect(html).toContain('<div class="dispatch-prose"><div class="dispatch-cutout"><img');
     expect(upgradeStructuredEdition(html)).toBe(html);
+    expect(html.split("main.gitzette-edition{box-sizing").length-1).toBe(1);
+    expect(upgradeStructuredEdition(html).split("main.gitzette-edition{box-sizing").length-1).toBe(1);
+    const raw = (week: string) => `<!DOCTYPE html><html><head></head><body><main class="gitzette-edition"><header><p>@octocat · ${week}</p></header><article><h2>Story</h2><p>Deck</p><p>Prose</p><details class="sources"><summary>Sources</summary></details></article><footer>End</footer></main></body></html>`;
+    expect(upgradeStructuredEdition(raw("2026-W53"))).toContain("Dec 28, 2026 – Jan 3, 2027");
+    expect(upgradeStructuredEdition(raw("2026-W01"))).toContain("Dec 29, 2025 – Jan 4, 2026");
   });
 });
