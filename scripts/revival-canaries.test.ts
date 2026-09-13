@@ -52,3 +52,19 @@ test('eligible target users cannot queue without the fixed authorized owner iden
  expect(db.query('SELECT COUNT(*) n FROM generation_jobs').get()).toEqual({n:0});
  }finally{db.close();}
 });
+test('published editions are preserved without replacement jobs',async()=>{
+ const db=await fixture();try {
+ db.exec("INSERT INTO generation_jobs(id,user_id,requested_by,week_key,status) VALUES('previous-publication','test-steipete','1345402','2026-W14','published')");
+ const before=db.query("SELECT * FROM generation_jobs WHERE id='previous-publication'").get();
+ db.exec(recovery);
+ expect(db.query("SELECT * FROM generation_jobs WHERE user_id='test-steipete' AND week_key='2026-W14'").all()).toEqual([before]);
+ expect(db.query('SELECT COUNT(*) n FROM generation_jobs').get()).toEqual({n:6});
+ }finally{db.close();}
+});
+test('owner suppression prevents all recovery jobs',async()=>{
+ const db=await fixture();try {
+ db.exec("INSERT INTO profile_suppressions(username,reason) VALUES('nikolays','owner suppression')");
+ db.exec(recovery);
+ expect(db.query('SELECT COUNT(*) n FROM generation_jobs').get()).toEqual({n:0});
+ }finally{db.close();}
+});
