@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { GitHubCollector, isoWeek } from "./github";
+import { GitHubCollector, isoWeek, selectEvidence } from "./github";
 import { MAX_STATISTICS_REPOSITORIES, validateActivityStatistics } from "../src/statistics";
 
 function emptyContributions(overrides: Record<string, unknown> = {}) {
@@ -21,6 +21,18 @@ describe("canonical GitHub collector", () => {
     expect(isoWeek("2026-W01")).toEqual({ from: "2025-12-29", toExclusive: "2026-01-05", toInclusive: "2026-01-04" });
     expect(isoWeek("2026-W32")).toEqual({ from: "2026-08-03", toExclusive: "2026-08-10", toInclusive: "2026-08-09" });
     expect(() => isoWeek("2027-W53")).toThrow("does not exist");
+  });
+
+  test("selects evidence fairly by category and repository while preserving bucket order", () => {
+    const item = (id: string, type: "commit" | "pull_request" | "release", repo: string) => ({
+      id, type, repo, title: id, url: `https://github.com/${repo}/commit/${id}`,
+    });
+    const selected = selectEvidence([
+      item("a1", "commit", "octocat/a"), item("a2", "commit", "octocat/a"),
+      item("b1", "commit", "octocat/b"), item("pr1", "pull_request", "octocat/a"),
+      item("rel1", "release", "octocat/a"),
+    ], 5);
+    expect(selected.map((entry) => entry.id)).toEqual(["a1", "pr1", "rel1", "b1", "a2"]);
   });
 
   test("uses only api.github.com and freezes returned evidence", async () => {
@@ -83,6 +95,54 @@ describe("canonical GitHub collector", () => {
     const evidence = await new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32");
     expect(commitPages).toEqual([1, 2]);
     expect(evidence.items).toHaveLength(101);
+  });
+
+  test("retains PR and release evidence beside 500 commits without changing statistics", async () => {
+    const request = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/graphql") {
+        const body = JSON.parse(String(init?.body));
+        if (body.query.includes("type:DISCUSSION")) return Response.json({ data: { search: emptyDiscussionSearch() } });
+        return Response.json({ data: { user: { contributionsCollection: emptyContributions({
+          commitContributionsByRepository: [{ repository: { nameWithOwner: "octocat/widget", visibility: "PUBLIC", stargazerCount: 10 } }],
+        }) } } });
+      }
+      if (url.pathname === "/search/commits") {
+        const page = Number(url.searchParams.get("page"));
+        return Response.json({
+          incomplete_results: false, total_count: 500,
+          items: Array.from({ length: 100 }, (_, offset) => {
+            const id = (page - 1) * 100 + offset;
+            return {
+              sha: `sha-${id}`, html_url: `https://github.com/octocat/widget/commit/sha-${id}`,
+              commit: { message: `Commit ${id}`, committer: { date: new Date(Date.UTC(2026, 7, 3, 0, id)).toISOString() } },
+              repository: { full_name: "octocat/widget", private: false },
+            };
+          }),
+        });
+      }
+      if (url.pathname === "/search/issues") {
+        const query = url.searchParams.get("q")!;
+        if (query.includes("is:pr") && query.includes("created:")) return Response.json({
+          incomplete_results: false, total_count: 1,
+          items: [{ id: 7, number: 7, title: "Important PR", html_url: "https://github.com/octocat/widget/pull/7" }],
+        });
+        return Response.json({ incomplete_results: false, total_count: 0, items: [] });
+      }
+      if (url.pathname === "/repos/octocat/widget/releases") return Response.json([{
+        id: 9, draft: false, published_at: "2026-08-06T00:00:00Z",
+        html_url: "https://github.com/octocat/widget/releases/tag/v9", name: "v9",
+      }]);
+      throw new Error(`unexpected URL ${url}`);
+    };
+    const result = await new GitHubCollector("token", request as typeof fetch).collect("octocat", "2026-W32") as any;
+    expect(result.items).toHaveLength(500);
+    expect(result.items.slice(0, 4).map((item: any) => item.type)).toEqual(["commit", "pull_request", "release", "repository"]);
+    expect(result.items.some((item: any) => item.id === "pull_request:octocat/widget#7")).toBe(true);
+    expect(result.items.some((item: any) => item.id === "release:octocat/widget:9")).toBe(true);
+    expect(result.stats.totals.publicCommits.value).toBe(500);
+    expect(result.stats.totals.openedPullRequests.value).toBe(1);
+    expect(result.stats.totals.releases.value).toBe(1);
   });
 
   test("deduplicates shifting commit search pages without changing the exact aggregate", async () => {

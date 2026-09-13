@@ -48,6 +48,33 @@ describe("sealed editor boundary", () => {
     expect(prompt).not.toContain(marker);
   });
 
+  test("balances oversized evidence across categories and repositories before byte truncation", () => {
+    const commits = Array.from({ length: 500 }, (_, index) => ({
+      id: `commit:${index}`,
+      type: "commit" as const,
+      title: `Commit ${index} ${"x".repeat(480)}`,
+      url: `https://github.com/octocat/${index % 2 ? "alpha" : "beta"}/commit/${index}`,
+      repo: `octocat/${index % 2 ? "alpha" : "beta"}`,
+    }));
+    const mixed: EvidenceBundle = {
+      ...evidence,
+      items: [
+        ...commits,
+        { id: "pr:meaningful", type: "pull_request", title: "Meaningful parser boundary", url: "https://github.com/octocat/gamma/pull/7", repo: "octocat/gamma" },
+        { id: "release:meaningful", type: "release", title: "Meaningful stable release", url: "https://github.com/octocat/delta/releases/tag/v2", repo: "octocat/delta" },
+        { id: "repository:delta", type: "repository", title: "Public contributions in octocat/delta", url: "https://github.com/octocat/delta", repo: "octocat/delta" },
+      ],
+    };
+
+    const bounded = boundedEditorEvidence(mixed);
+    expect(new TextEncoder().encode(JSON.stringify(bounded)).byteLength).toBeLessThanOrEqual(MAX_EDITOR_EVIDENCE_BYTES);
+    expect(bounded.items.map((item) => item.id)).toContain("pr:meaningful");
+    expect(bounded.items.map((item) => item.id)).toContain("release:meaningful");
+    expect(bounded.items.map((item) => item.id)).toContain("repository:delta");
+    expect(new Set(bounded.items.filter((item) => item.type === "commit").map((item) => item.repo))).toEqual(new Set(["octocat/alpha", "octocat/beta"]));
+    expect(editorPrompt(mixed)).toContain("category- and repository-balanced order");
+  });
+
   test("accepts exact evidence-bound JSON and rejects prompt-shaped output", () => {
     expect(parseEdition(JSON.stringify(valid), evidence).stories).toHaveLength(2);
     expect(() => parseEdition(JSON.stringify({ ...valid, prompt: "execute arbitrary command" }), evidence)).toThrow("unknown edition field");

@@ -55,7 +55,7 @@ export class GitHubCollector implements Collector {
       });
     }
 
-    const evidence = [...items.values()].slice(0, 500);
+    const evidence = selectEvidence([...items.values()], 500);
     const releaseItems = releases.flatMap((result) => result.items);
     const releaseCoverage = combineCoverage([discovered.coverage, ...releases.map((result) => result.coverage)], releaseItems.length);
     const repositoryRows = new Map(discovered.repositories.map((row) => [row.repo.toLowerCase(), row]));
@@ -392,6 +392,58 @@ export function mergeSearchResults(kind: "commits" | "issues", items: SearchItem
   const unique = new Map<string, SearchItem>();
   for (const item of ordered) if (!unique.has(key(item))) unique.set(key(item),item);
   return [...unique.values()].slice(0,500);
+}
+
+const EVIDENCE_TYPE_ORDER: EvidenceItem["type"][] = [
+  "commit", "pull_request", "issue", "discussion", "release", "repository",
+];
+
+/**
+ * Selects bounded editorial evidence without allowing one high-volume event
+ * type or repository to consume the entire budget. Provider ordering remains
+ * intact within each type/repository bucket.
+ */
+export function selectEvidence(items: readonly EvidenceItem[], limit: number): EvidenceItem[] {
+  if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("invalid evidence selection limit");
+  const streams = new Map<EvidenceItem["type"], EvidenceItem[]>();
+  for (const type of EVIDENCE_TYPE_ORDER) {
+    const byRepository = new Map<string, EvidenceItem[]>();
+    for (const item of items) {
+      if (item.type !== type) continue;
+      const key = item.repo.toLowerCase();
+      const bucket = byRepository.get(key) ?? [];
+      bucket.push(item);
+      byRepository.set(key, bucket);
+    }
+    const buckets = [...byRepository.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, bucket]) => bucket);
+    const positions = new Array(buckets.length).fill(0);
+    const stream: EvidenceItem[] = [];
+    let remaining = buckets.reduce((sum, bucket) => sum + bucket.length, 0);
+    while (remaining > 0) {
+      for (let index = 0; index < buckets.length; index++) {
+        const item = buckets[index][positions[index]++];
+        if (item) { stream.push(item); remaining--; }
+      }
+    }
+    streams.set(type, stream);
+  }
+  const positions = new Map(EVIDENCE_TYPE_ORDER.map((type) => [type, 0]));
+  const selected: EvidenceItem[] = [];
+  let progressed = true;
+  while (selected.length < limit && progressed) {
+    progressed = false;
+    for (const type of EVIDENCE_TYPE_ORDER) {
+      if (selected.length >= limit) break;
+      const stream = streams.get(type)!;
+      const position = positions.get(type)!;
+      if (position < stream.length) {
+        selected.push(stream[position]);
+        positions.set(type, position + 1);
+        progressed = true;
+      }
+    }
+  }
+  return selected;
 }
 
 function isPublicRepository(repo: any): boolean {
