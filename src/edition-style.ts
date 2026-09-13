@@ -163,5 +163,7 @@ export function upgradeStructuredEdition(html: string, stats?: ActivityStatistic
   });
   // Refresh a prior version of the serving stylesheet instead of accumulating it.
   result = result.replace(/<style id="gitzette-edition-style">[\s\S]*?<\/style>/g,'');
+  // Expand citations initially for both new and already-published editions.
+  result = result.replace(/<details class="sources">/g, '<details class="sources" open>');
   return result.replace('</head>', `<style id="gitzette-edition-style">${EDITION_STYLE}</style></head>`);
 }
