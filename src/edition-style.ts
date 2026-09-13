@@ -21,9 +21,9 @@ main.gitzette-edition{box-sizing:border-box;max-width:1180px;display:grid;grid-t
 @media(max-width:699px){main.gitzette-edition{display:block;margin:0;padding:20px}.gitzette-edition>article img{width:100%;max-height:230px}.gitzette-edition>header h1{font-size:32px}}
 `;
 
-// The April broadsheet: stacked stories, a narrow sidebar, and cutout text flow.
+// The April broadsheet: two story columns, a narrow statistics rail, and cutout text flow.
 export const EDITION_STYLE = `
-main.gitzette-edition{box-sizing:border-box;display:block;max-width:960px;margin:24px auto;padding:0;background:#f7f4ee;border:1px solid #c8c2b4;box-shadow:0 2px 12px #0002;color:#0f0f0f;font:15px/1.6 Georgia,serif}
+main.gitzette-edition{box-sizing:border-box;display:block;width:calc(100% - 32px);max-width:1248px;margin:24px auto;padding:0;background:#f7f4ee;border:1px solid #c8c2b4;box-shadow:0 2px 12px #0002;color:#0f0f0f;font:15px/1.6 Georgia,serif}
 .gitzette-edition *{box-sizing:border-box}
 .gitzette-edition>header{text-align:left;padding:20px 24px 14px;border-bottom:3px solid #0f0f0f}
 .gitzette-edition .dispatch-kicker{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #c8c2b4;padding-bottom:8px;margin-bottom:10px;font:600 11px/1.4 'IBM Plex Mono',monospace;letter-spacing:.12em;text-transform:uppercase}
@@ -34,17 +34,19 @@ main.gitzette-edition{box-sizing:border-box;display:block;max-width:960px;margin
 .gitzette-edition>header .deck{font:italic 14px/1.5 Georgia,serif;color:#666;margin:4px 0 0}
 .gitzette-edition>header .notice{font:10px/1.5 'IBM Plex Mono',monospace;color:#666;margin:8px 0 0}
 .gitzette-edition .dispatch-bar{display:flex;flex-wrap:wrap;gap:6px 20px;background:#0f0f0f;color:#f7f4ee;padding:8px 24px;font:11px/1.5 'IBM Plex Mono',monospace}
-.gitzette-edition .dispatch-body{display:grid;grid-template-columns:minmax(0,538px) minmax(0,340px);gap:34px;padding:24px 24px 32px}
+.gitzette-edition .dispatch-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(238px,260px);gap:28px;padding:24px 24px 32px}
 .gitzette-edition .dispatch-stories,.gitzette-edition .dispatch-sidebar{min-width:0}
-.gitzette-edition article{display:flow-root;padding:0 0 28px;margin:0 0 28px;border-bottom:1px solid #c8c2b4;overflow-wrap:anywhere}
-.gitzette-edition article:last-child{margin-bottom:0}
+.gitzette-edition .dispatch-stories{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:28px 30px}
+.gitzette-edition article{display:flow-root;min-width:0;padding:0 0 24px;margin:0;border-bottom:1px solid #c8c2b4;overflow-wrap:anywhere}
 .gitzette-edition article .tag{display:table;background:#0f0f0f;color:#f7f4ee;font:10px/1.4 'IBM Plex Mono',monospace;letter-spacing:.04em;padding:2px 5px;margin:0 0 8px}
 .gitzette-edition article h2{font:700 25px/1.12 Georgia,serif;margin:0 0 8px}
 .gitzette-edition article h2+p{font-style:italic;color:#666;font-size:14px;margin:0 0 12px}
 .gitzette-edition .dispatch-prose{display:flow-root}
 .gitzette-edition .dispatch-prose p{margin:0 0 12px}
-.gitzette-edition .dispatch-cutout{float:left;width:140px;height:140px;max-width:44%;margin:0 12px 6px 0;shape-outside:circle(50% at 50% 50%);shape-margin:6px}
-.gitzette-edition article .dispatch-cutout img{float:none;display:block;width:100%;height:100%;max-height:140px;object-fit:contain;margin:0}
+.gitzette-edition .dispatch-cutout{float:left;width:132px;height:auto;aspect-ratio:1;max-width:44%;margin:0 12px 6px 0;shape-outside:circle(50% at 50% 50%);shape-margin:6px}
+.gitzette-edition .dispatch-cutout-lead{width:190px;max-width:55%;margin-right:15px;shape-margin:8px}
+.gitzette-edition .dispatch-cutout-small{width:112px;max-width:40%}
+.gitzette-edition article .dispatch-cutout img{float:none;display:block;width:100%;height:100%;max-height:none;object-fit:contain;margin:0}
 .gitzette-edition .dispatch-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid #c8c2b4;margin:0 0 20px}
 .gitzette-edition .dispatch-metric{text-align:center;padding:8px 3px;border-right:1px solid #c8c2b4}
 .gitzette-edition .dispatch-metric:nth-child(odd){border-right:1px solid #c8c2b4}.gitzette-edition .dispatch-metric:nth-child(even){border-right:0}.gitzette-edition .dispatch-metric:nth-child(n+3){border-top:1px solid #c8c2b4}
@@ -63,11 +65,12 @@ main.gitzette-edition{box-sizing:border-box;display:block;max-width:960px;margin
 .gitzette-edition a,.gitzette-edition a:visited{color:#292720;text-decoration-color:#aaa393;text-underline-offset:3px}
 .gitzette-edition a:hover{color:#000;text-decoration-color:currentColor}
 .gitzette-edition a:focus-visible,.gitzette-edition summary:focus-visible{outline:2px solid #514b3f;outline-offset:3px}
-.gitzette-edition .sources{clear:both;font:11px/1.5 'IBM Plex Mono',monospace;color:#49453d;margin:14px 0 0}
+.gitzette-edition .sources{clear:both;font:10px/1.45 'IBM Plex Mono',monospace;color:#49453d;margin:10px 0 0}
 .gitzette-edition .sources summary{cursor:pointer}
-.gitzette-edition .sources ol{margin:12px 0 0;padding-left:20px}
-.gitzette-edition .sources li{margin:0 0 9px;padding-left:3px}
-@media(max-width:800px){main.gitzette-edition{margin:0}.gitzette-edition .dispatch-body{grid-template-columns:minmax(0,1fr);padding:20px;gap:24px}.gitzette-edition>header{padding:18px 20px 14px}.gitzette-edition .dispatch-kicker{font-size:9px;flex-direction:column;gap:4px}.gitzette-edition .dispatch-sidebar{border-top:3px solid #0f0f0f;padding-top:20px}.gitzette-edition article h2{font-size:24px}}
+.gitzette-edition .sources ol{margin:8px 0 0;padding-left:18px}
+.gitzette-edition .sources li{margin:0 0 5px;padding-left:2px;overflow-wrap:anywhere}
+@media(max-width:1040px){main.gitzette-edition{max-width:920px}.gitzette-edition .dispatch-body{grid-template-columns:minmax(0,1fr);gap:26px}.gitzette-edition .dispatch-sidebar{display:block;border-top:3px solid #0f0f0f;padding-top:20px}}
+@media(max-width:699px){main.gitzette-edition{width:100%;margin:0;border-left:0;border-right:0;box-shadow:none}.gitzette-edition .dispatch-body{grid-template-columns:minmax(0,1fr);padding:20px;gap:24px}.gitzette-edition .dispatch-stories{grid-template-columns:minmax(0,1fr);gap:24px}.gitzette-edition>header{padding:18px 20px 14px}.gitzette-edition .dispatch-kicker{font-size:9px;flex-direction:column;gap:4px}.gitzette-edition article h2{font-size:24px}.gitzette-edition .dispatch-cutout{width:116px;max-width:43%}.gitzette-edition .dispatch-cutout-lead{width:152px;max-width:52%}.gitzette-edition .dispatch-cutout-small{width:96px}.gitzette-edition .dispatch-stars-heading{margin-top:24px!important}}
 @media print{.gitzette-edition details.sources{display:block}.gitzette-edition details.sources>*{display:block}.gitzette-edition details.sources::details-content{display:block;content-visibility:visible;height:auto}}
 `;
 
@@ -141,6 +144,14 @@ export function upgradeStructuredEdition(html: string, stats?: ActivityStatistic
       return `<main class="gitzette-edition"><header>${header}</header><div class="dispatch-bar"><span>${stories.length} stories</span><span>${sources.size} cited sources</span><span>${repos.size} repositories</span></div><div class="dispatch-body"><section class="dispatch-stories" aria-label="Stories">${wrapped}</section>${sidebar}</div>${footer}</main>`;
     });
   }
+  // Illustration hierarchy follows image order, since the lead story can be text-only.
+  // This also upgrades already-stored structured editions and remains idempotent.
+  let illustrationIndex = 0;
+  result = result.replace(/class="dispatch-cutout"/g, () => {
+    illustrationIndex += 1;
+    const role = illustrationIndex === 1 ? 'dispatch-cutout-lead' : illustrationIndex % 3 === 0 ? 'dispatch-cutout-small' : 'dispatch-cutout-supporting';
+    return `class="dispatch-cutout ${role}"`;
+  });
   if (stats) {
     result = result.replace(/<aside class="dispatch-sidebar"[^>]*>[\s\S]*?<\/aside>/, () => renderStatisticsSidebar(stats));
     result = result.replace(/<div class="dispatch-bar">[\s\S]*?<\/div>/, () => `<div class="dispatch-bar">${renderStatisticsBar(stats)}</div>`);
