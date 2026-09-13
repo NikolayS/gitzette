@@ -197,6 +197,10 @@ describe("April broadsheet restoration", () => {
     expect(upgradeStructuredEdition(html).split("main.gitzette-edition{box-sizing").length-1).toBe(1);
     const raw = (week: string) => `<!DOCTYPE html><html><head></head><body><main class="gitzette-edition"><header><p>@octocat · ${week}</p></header><article><h2>Story</h2><p>Deck</p><p>Prose</p><details class="sources"><summary>Sources</summary></details></article><footer>End</footer></main></body></html>`;
     const previous = raw("2026-W32").replace('</head>', `<style>body{margin:0}${previousPresentationStyle}</style><style>${previousPresentationStyle}</style><style>.unrelated{color:red}</style></head>`);
+    const mixedCase = raw("2026-W32").replace('<summary>Sources</summary>', '<summary>Sources</summary><a href="https://github.com/OctoCat/Widget/pull/1">One</a><a href="https://github.com/octocat/widget/pull/2">Two</a>');
+    const grouped = upgradeStructuredEdition(mixedCase);
+    expect(grouped).toContain('<span>1 repositories</span>');
+    expect(grouped).toContain('<span>octocat/widget</span><strong>2</strong>');
     const migrated = upgradeStructuredEdition(previous);
     expect(migrated).not.toContain('max-width:1180px');
     expect(migrated).toContain('<style>body{margin:0}</style>');

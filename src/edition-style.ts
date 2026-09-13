@@ -27,7 +27,7 @@ main.gitzette-edition{box-sizing:border-box;display:block;max-width:960px;margin
 .gitzette-edition .dispatch-kicker{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #c8c2b4;padding-bottom:8px;margin-bottom:10px;font:600 11px/1.4 'IBM Plex Mono',monospace;letter-spacing:.12em;text-transform:uppercase}
 .gitzette-edition .dispatch-masthead{font:700 clamp(32px,7vw,64px)/1 'IBM Plex Mono',monospace;letter-spacing:-.03em}
 .gitzette-edition .dispatch-masthead span{font-weight:400;color:#666}
-.gitzette-edition .dispatch-identity{font:700 20px/1.4 'IBM Plex Mono',monospace;margin:4px 0 0}
+.gitzette-edition .dispatch-identity{overflow-wrap:anywhere;min-width:0;font:700 20px/1.4 'IBM Plex Mono',monospace;margin:4px 0 0}
 .gitzette-edition>header h1{font:italic 14px/1.5 Georgia,serif;color:#666;margin:6px 0 0}
 .gitzette-edition>header .deck{font:italic 14px/1.5 Georgia,serif;color:#666;margin:4px 0 0}
 .gitzette-edition>header .notice{font:10px/1.5 'IBM Plex Mono',monospace;color:#666;margin:8px 0 0}
@@ -93,7 +93,7 @@ export function upgradeStructuredEdition(html: string): string {
           const parts = u.pathname.split('/').filter(Boolean);
           if (u.hostname !== 'github.com' || parts.length < 2 || sources.has(u.href)) continue;
           sources.add(u.href);
-          const repo = `${parts[0]}/${parts[1]}`;
+          const repo = `${parts[0]}/${parts[1]}`.toLowerCase();
           repos.set(repo, (repos.get(repo) ?? 0) + 1);
         } catch { /* Only count recognizable source destinations. */ }
       }
